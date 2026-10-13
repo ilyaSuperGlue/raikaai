@@ -2,6 +2,9 @@ package com.localgpt.app.ui.characters
 import com.localgpt.app.data.ChatConstants
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -9,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -45,6 +49,7 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.SecondaryTabRow
@@ -61,6 +66,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -78,6 +84,7 @@ import androidx.compose.ui.unit.sp
 import com.localgpt.app.ui.chat.ChatViewModel
 import com.localgpt.app.ui.chat.PERSONA_PRESETS
 import com.localgpt.app.ui.chat.PersonaPreset
+import kotlinx.coroutines.launch
 import java.util.Locale
 
 /**
@@ -111,7 +118,20 @@ fun CharactersScreen(
     var newPrompt by remember { mutableStateOf("") }
     var newTemp by remember { mutableFloatStateOf(0.7f) }
     var newTopK by remember { mutableFloatStateOf(40f) }
+    var newAvatarPath by remember { mutableStateOf("") }
+    var isSavingNewAvatar by remember { mutableStateOf(false) }
     var importJsonText by remember { mutableStateOf("") }
+    val screenScope = rememberCoroutineScope()
+    val newAvatarPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) {
+                isSavingNewAvatar = true
+                screenScope.launch {
+                    newAvatarPath = viewModel.savePersonaAvatar(uri).orEmpty()
+                    isSavingNewAvatar = false
+                }
+            }
+        }
 
     val allPersonas = remember(customPersonas.toList()) {
         PERSONA_PRESETS + customPersonas.toList()
@@ -382,6 +402,59 @@ fun CharactersScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 )
 
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                ) {
+                                    Surface(
+                                        shape = CircleShape,
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        modifier = Modifier.size(52.dp),
+                                    ) {
+                                        Box(contentAlignment = Alignment.Center) {
+                                            if (newAvatarPath.isNotBlank()) {
+                                                com.localgpt.app.ui.chat.PersonaAvatar(
+                                                    avatarUri = newAvatarPath,
+                                                    size = 52.dp,
+                                                    contentDescription = "Profile photo preview",
+                                                )
+                                            } else {
+                                                Icon(
+                                                    imageVector = Icons.Default.Person,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(26.dp),
+                                                )
+                                            }
+                                        }
+                                    }
+                                    Column(
+                                        modifier = Modifier.weight(1f),
+                                        verticalArrangement = Arrangement.spacedBy(6.dp),
+                                    ) {
+                                        OutlinedButton(
+                                            onClick = { newAvatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                                            enabled = !isSavingNewAvatar,
+                                            shape = RoundedCornerShape(10.dp),
+                                            contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                        ) {
+                                            Text(
+                                                if (isSavingNewAvatar) "Saving…" else if (newAvatarPath.isBlank()) "Choose photo (optional)" else "Change photo",
+                                                style = MaterialTheme.typography.labelMedium,
+                                            )
+                                        }
+                                        if (newAvatarPath.isNotBlank()) {
+                                            TextButton(
+                                                onClick = { newAvatarPath = "" },
+                                                contentPadding = PaddingValues(horizontal = 4.dp),
+                                            ) {
+                                                Text("Remove photo", style = MaterialTheme.typography.labelSmall)
+                                            }
+                                        }
+                                    }
+                                }
+
                                 Button(
                                     onClick = {
                                         if (newName.isNotBlank()) {
@@ -390,6 +463,7 @@ fun CharactersScreen(
                                                 iconType = newIconType,
                                                 systemPrompt = newPrompt.trim(),
                                                 greeting = newGreeting.trim(),
+                                                avatarUri = newAvatarPath.trim(),
                                                 temperature = newTemp,
                                                 topK = newTopK.toInt(),
                                             )
@@ -397,10 +471,11 @@ fun CharactersScreen(
                                             newName = ""
                                             newGreeting = ""
                                             newPrompt = ""
+                                            newAvatarPath = ""
                                             selectedTab = 0
                                         }
                                     },
-                                    enabled = newName.isNotBlank(),
+                                    enabled = newName.isNotBlank() && !isSavingNewAvatar,
                                     shape = RoundedCornerShape(12.dp),
                                     modifier = Modifier.fillMaxWidth(),
                                 ) {
@@ -477,14 +552,16 @@ fun CharactersScreen(
     // ── Create Character Dialog ──
     if (showCreateDialog) {
         CharacterEditorDialog(
+            viewModel = viewModel,
             initialPersona = null,
             onDismiss = { showCreateDialog = false },
-            onSave = { name, iconType, prompt, greeting, temp, topK ->
+            onSave = { name, iconType, prompt, greeting, temp, topK, avatar ->
                 viewModel.addCustomPersona(
                     name = name,
                     iconType = iconType,
                     systemPrompt = prompt,
                     greeting = greeting,
+                    avatarUri = avatar,
                     temperature = temp,
                     topK = topK,
                 )
@@ -497,9 +574,10 @@ fun CharactersScreen(
     // ── Edit Character Dialog ──
     editingPersona?.let { persona ->
         CharacterEditorDialog(
+            viewModel = viewModel,
             initialPersona = persona,
             onDismiss = { editingPersona = null },
-            onSave = { name, iconType, prompt, greeting, temp, topK ->
+            onSave = { name, iconType, prompt, greeting, temp, topK, avatar ->
                 // Edit = update in place. Builtin presets (unknown id) are
                 // still saved as a new custom copy with a fresh id.
                 val isCustom = viewModel.customPersonas.any { it.id == persona.id }
@@ -511,7 +589,7 @@ fun CharactersScreen(
                         description = persona.description,
                         greeting = greeting,
                         systemPrompt = prompt,
-                        avatarUri = persona.avatarUri,
+                        avatarUri = avatar,
                         temperature = temp,
                         topK = topK,
                     ),
@@ -621,18 +699,26 @@ private fun CharacterCardItem(
                     modifier = Modifier.weight(1f),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Surface(
-                        shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                        modifier = Modifier.size(46.dp),
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            Icon(
-                                imageVector = vectorIcon,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp),
-                            )
+                    if (persona.avatarUri.isNotBlank()) {
+                        com.localgpt.app.ui.chat.PersonaAvatar(
+                            avatarUri = persona.avatarUri,
+                            size = 46.dp,
+                            contentDescription = "Character photo",
+                        )
+                    } else {
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                            modifier = Modifier.size(46.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = vectorIcon,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(24.dp),
+                                )
+                            }
                         }
                     }
 
@@ -800,9 +886,10 @@ private fun CharacterCardItem(
  */
 @Composable
 private fun CharacterEditorDialog(
+    viewModel: ChatViewModel,
     initialPersona: PersonaPreset?,
     onDismiss: () -> Unit,
-    onSave: (name: String, iconType: String, prompt: String, greeting: String, temp: Float?, topK: Int?) -> Unit,
+    onSave: (name: String, iconType: String, prompt: String, greeting: String, temp: Float?, topK: Int?, avatar: String) -> Unit,
 ) {
     var name by remember { mutableStateOf(initialPersona?.name ?: "") }
     var prompt by remember { mutableStateOf(initialPersona?.systemPrompt ?: "") }
@@ -810,6 +897,19 @@ private fun CharacterEditorDialog(
     var iconType by remember { mutableStateOf(initialPersona?.iconType ?: "custom") }
     var tempSlider by remember { mutableFloatStateOf(initialPersona?.temperature ?: 0.7f) }
     var useSpecificSampler by remember { mutableStateOf(initialPersona?.temperature != null) }
+    var avatarPath by remember { mutableStateOf(initialPersona?.avatarUri.orEmpty()) }
+    var isSavingAvatar by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    val avatarPicker =
+        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
+            if (uri != null) {
+                isSavingAvatar = true
+                scope.launch {
+                    avatarPath = viewModel.savePersonaAvatar(uri).orEmpty()
+                    isSavingAvatar = false
+                }
+            }
+        }
 
     val iconOptions = listOf(
         "custom" to Icons.Default.SmartToy,
@@ -838,6 +938,62 @@ private fun CharacterEditorDialog(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth(),
                     )
+                }
+
+                item {
+                    Text("Profile Photo (Optional)", style = MaterialTheme.typography.labelMedium)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                            modifier = Modifier.size(52.dp),
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                if (avatarPath.isNotBlank()) {
+                                    com.localgpt.app.ui.chat.PersonaAvatar(
+                                        avatarUri = avatarPath,
+                                        size = 52.dp,
+                                        contentDescription = "Profile photo preview",
+                                    )
+                                } else {
+                                    Icon(
+                                        imageVector = Icons.Default.Person,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(26.dp),
+                                    )
+                                }
+                            }
+                        }
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                        ) {
+                            OutlinedButton(
+                                onClick = { avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                                enabled = !isSavingAvatar,
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            ) {
+                                Text(
+                                    if (isSavingAvatar) "Saving…" else if (avatarPath.isBlank()) "Choose photo" else "Change photo",
+                                    style = MaterialTheme.typography.labelMedium,
+                                )
+                            }
+                            if (avatarPath.isNotBlank()) {
+                                TextButton(
+                                    onClick = { avatarPath = "" },
+                                    contentPadding = PaddingValues(horizontal = 4.dp),
+                                ) {
+                                    Text("Remove photo", style = MaterialTheme.typography.labelSmall)
+                                }
+                            }
+                        }
+                    }
                 }
 
                 item {
@@ -930,10 +1086,11 @@ private fun CharacterEditorDialog(
                             greeting.trim(),
                             if (useSpecificSampler) tempSlider else null,
                             if (useSpecificSampler) 40 else null,
+                            avatarPath.trim(),
                         )
                     }
                 },
-                enabled = name.isNotBlank() && prompt.isNotBlank(),
+                enabled = name.isNotBlank() && prompt.isNotBlank() && !isSavingAvatar,
             ) {
                 Text("Save Character")
             }

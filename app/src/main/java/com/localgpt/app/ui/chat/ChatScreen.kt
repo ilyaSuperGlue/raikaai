@@ -361,31 +361,42 @@ fun ChatScreen(
             ) {
                 TopAppBar(
                     title = {
-                        Column(
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
                             modifier =
                                 Modifier
                                     .clickable { onNavigateToModels() }
                                     .padding(vertical = 2.dp),
                         ) {
-                            Text(
-                                text = conversationTitle ?: activePersona.name,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                            Text(
-                                text =
-                                    when {
-                                        isLoadingModel -> "Loading model…"
-                                        settings.modelSource == ChatConstants.SOURCE_REMOTE -> "$modelDisplayName · Remote"
-                                        isModelLoaded -> "$modelDisplayName · ${activeBackend ?: "GPU"}"
-                                        else -> "No model loaded"
-                                    },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
+                            if (activePersona.avatarUri.isNotBlank()) {
+                                PersonaAvatar(
+                                    avatarUri = activePersona.avatarUri,
+                                    size = 36.dp,
+                                    contentDescription = "Character photo",
+                                )
+                                Spacer(Modifier.width(10.dp))
+                            }
+                            Column {
+                                Text(
+                                    text = conversationTitle ?: activePersona.name,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                                Text(
+                                    text =
+                                        when {
+                                            isLoadingModel -> "Loading model…"
+                                            settings.modelSource == ChatConstants.SOURCE_REMOTE -> "$modelDisplayName · Remote"
+                                            isModelLoaded -> "$modelDisplayName · ${activeBackend ?: "GPU"}"
+                                            else -> "No model loaded"
+                                        },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
                         }
                     },
                     navigationIcon = {

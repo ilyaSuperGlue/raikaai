@@ -775,3 +775,50 @@ fun AudioMessagePlayer(
         }
     }
 }
+
+/**
+ * Circular character profile photo. Returns false (renders nothing) when
+ * [avatarUri] is blank or unreadable, so callers show the photo only when set.
+ * Accepts an absolute file path (internal avatar copy) or a content URI.
+ */
+@Composable
+fun PersonaAvatar(
+    avatarUri: String,
+    size: androidx.compose.ui.unit.Dp,
+    modifier: Modifier = Modifier,
+    contentDescription: String? = null,
+): Boolean {
+    if (avatarUri.isBlank()) return false
+    val context = LocalContext.current
+    val bitmap = remember(avatarUri) {
+        try {
+            val file = File(avatarUri)
+            if (file.isAbsolute && file.exists()) {
+                val opts = BitmapFactory.Options().apply {
+                    inSampleSize = 2
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                }
+                BitmapFactory.decodeFile(file.absolutePath, opts)
+            } else {
+                context.contentResolver.openInputStream(android.net.Uri.parse(avatarUri))?.use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                }
+            }
+        } catch (_: Throwable) {
+            null
+        }
+    }
+    DisposableEffect(bitmap) {
+        onDispose { bitmap?.recycle() }
+    }
+    if (bitmap == null) return false
+    Image(
+        bitmap = bitmap.asImageBitmap(),
+        contentDescription = contentDescription,
+        modifier = modifier
+            .size(size)
+            .clip(CircleShape),
+        contentScale = ContentScale.Crop,
+    )
+    return true
+}

@@ -1821,30 +1821,62 @@ class ChatViewModel(
 
     /**
      * Inserts a new custom persona or replaces the existing one with the same
-     * id (edit = update, no duplicates). Blank avatarUri on update keeps the
-     * previously stored one (the editor dialog doesn't manage avatars).
+     * id (edit = update, no duplicates). avatarUri is authoritative: blank
+     * means "no photo" (the editor manages avatars explicitly).
      * Refreshes [activePersona] when the edited persona is currently active.
      * Never touches global [Settings].
      */
     fun upsertCustomPersona(persona: PersonaPreset) {
         val existing = customPersonas.firstOrNull { it.id == persona.id }
-        val merged =
-            if (existing != null && persona.avatarUri.isBlank()) {
-                persona.copy(avatarUri = existing.avatarUri)
-            } else {
-                persona
-            }
         val updated =
             if (existing != null) {
-                customPersonas.map { if (it.id == persona.id) merged else it }
+                customPersonas.map { if (it.id == persona.id) persona else it }
             } else {
-                customPersonas.toList() + merged
+                customPersonas.toList() + persona
             }
         saveCustomPersonas(updated)
         if (activePersona.value.id == persona.id) {
-            activePersona.value = merged
+            activePersona.value = persona
         }
     }
+
+    /**
+     * Copies a picked profile photo into internal storage (downscaled) and
+     * returns its absolute path for [PersonaPreset.avatarUri]. Null on failure.
+     * Internal copy keeps the photo readable across restarts without
+     * gallery URI permission issues.
+     */
+    suspend fun savePersonaAvatar(source: Uri): String? =
+        withContext(Dispatchers.IO) {
+            try {
+                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                app.contentResolver.openInputStream(source)?.use { input ->
+                    BitmapFactory.decodeStream(input, null, options)
+                }
+                var sampleSize = 1
+                val maxOriginal = maxOf(options.outWidth, options.outHeight)
+                while ((maxOriginal / (sampleSize * 2)) >= 512) {
+                    sampleSize *= 2
+                }
+                val decodeOptions = BitmapFactory.Options().apply {
+                    inSampleSize = sampleSize
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                }
+                val bitmap = app.contentResolver.openInputStream(source)?.use { input ->
+                    BitmapFactory.decodeStream(input, null, decodeOptions)
+                } ?: return@withContext null
+                val dir = File(app.filesDir, "avatars").apply { if (!exists()) mkdirs() }
+                val dest = File(dir, "avatar_${System.currentTimeMillis()}.jpg")
+                dest.outputStream().use { out ->
+                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
+                }
+                bitmap.recycle()
+                dest.absolutePath
+            } catch (t: Throwable) {
+                KLog.e("ChatVM", "Failed to save persona avatar", t)
+                null
+            }
+        }
 
     private fun saveCustomPersonas(list: List<PersonaPreset>) {
         val json = Gson().toJson(list)
