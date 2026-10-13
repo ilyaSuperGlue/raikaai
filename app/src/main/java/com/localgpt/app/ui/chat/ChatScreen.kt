@@ -36,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -47,6 +48,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.ui.graphics.SolidColor
+import com.localgpt.app.core.audio.AudioPlayerHelper
+import com.localgpt.app.core.audio.AudioRecorderHelper
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
@@ -59,8 +64,10 @@ import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.Article
 import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AudioFile
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.CheckCircle
@@ -214,9 +221,19 @@ fun ChatScreen(
         }
 
     val selectedImageUri by viewModel.selectedImageUri.collectAsState()
+    val selectedAudioFile by viewModel.selectedAudioFile.collectAsState()
+    val isAudioSupported by remember(settings.activeModelId, settings.customModelPath, settings.modelSource, loadedModelPath) {
+        derivedStateOf { viewModel.isAudioSupported }
+    }
+
     val photoPickerLauncher =
         rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
             viewModel.setSelectedImage(uri)
+        }
+
+    val audioPickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+            uri?.let(viewModel::attachAudioUri)
         }
 
     val speechIntentLauncher =
@@ -232,10 +249,67 @@ fun ChatScreen(
 
     val ttsHelper = remember { TtsHelper(context) }
     val speechHelper = remember { SpeechRecognizerHelper(context) }
+    val audioPlayerHelper = remember { AudioPlayerHelper(context) }
+    val audioRecorderHelper = remember { AudioRecorderHelper(context) }
+    val isRecordingAudio by audioRecorderHelper.isRecording.collectAsState()
+    val recordingDurationMs by audioRecorderHelper.durationMs.collectAsState()
+
     DisposableEffect(Unit) {
         onDispose {
             speechHelper.destroy()
             ttsHelper.destroy()
+            audioPlayerHelper.stop()
+            audioRecorderHelper.cancelRecording()
+        }
+    }
+
+    val audioPermissionLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
+            if (isGranted) {
+                val sttAvailable =
+                    try {
+                        android.speech.SpeechRecognizer.isRecognitionAvailable(context)
+                    } catch (_: Throwable) {
+                        false
+                    }
+                if (isAudioSupported || !sttAvailable) {
+                    val audioDir = File(context.filesDir, "chat_audio").apply { if (!exists()) mkdirs() }
+                    val targetWav = File(audioDir, "rec_${System.currentTimeMillis()}.wav")
+                    audioRecorderHelper.startRecording(targetWav)
+                } else {
+                    speechHelper.startListening(
+                        onResult = { transcribed ->
+                            input = if (input.isBlank()) transcribed else "$input $transcribed"
+                        },
+                        onFallbackToIntent = { intent ->
+                            try {
+                                speechIntentLauncher.launch(intent)
+                            } catch (e: Exception) {
+                                KLog.w("STT", "Speech intent failed, fallback to audio: ${e.message}")
+                                val audioDir = File(context.filesDir, "chat_audio").apply { if (!exists()) mkdirs() }
+                                val targetWav = File(audioDir, "rec_${System.currentTimeMillis()}.wav")
+                                audioRecorderHelper.startRecording(targetWav)
+                            }
+                        },
+                    )
+                }
+            } else {
+                Toast.makeText(context, "Microphone permission is required for voice input", Toast.LENGTH_SHORT).show()
+            }
+        }
+
+    val startVoiceRecordingSafely: () -> Unit = {
+        val hasPerm =
+            androidx.core.content.ContextCompat.checkSelfPermission(
+                context,
+                android.Manifest.permission.RECORD_AUDIO,
+            ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+        if (hasPerm) {
+            val audioDir = File(context.filesDir, "chat_audio").apply { if (!exists()) mkdirs() }
+            val targetWav = File(audioDir, "rec_${System.currentTimeMillis()}.wav")
+            audioRecorderHelper.startRecording(targetWav)
+        } else {
+            audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
         }
     }
 
@@ -243,24 +317,10 @@ fun ChatScreen(
         try {
             speechIntentLauncher.launch(intent)
         } catch (e: Exception) {
-            KLog.w("STT", "No speech recognition activity found: ${e.message}")
-            Toast.makeText(context, "Voice input service is not available on this device", Toast.LENGTH_SHORT).show()
+            KLog.w("STT", "No speech recognition activity found, falling back to on-device audio recording: ${e.message}")
+            startVoiceRecordingSafely()
         }
     }
-
-    val audioPermissionLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { isGranted ->
-            if (isGranted) {
-                speechHelper.startListening(
-                    onResult = { transcribed ->
-                        input = if (input.isBlank()) transcribed else "$input $transcribed"
-                    },
-                    onFallbackToIntent = launchSpeechIntentSafely,
-                )
-            } else {
-                Toast.makeText(context, "Microphone permission is required for voice input", Toast.LENGTH_SHORT).show()
-            }
-        }
 
     val isSlashActive = input.startsWith("/")
     val matchingSlashCommands =
@@ -305,6 +365,12 @@ fun ChatScreen(
         }
     }
 
+    val conversationTitle = remember(viewModel.conversations.value, viewModel.currentConversationId) {
+        viewModel.conversations.value
+            .find { it.id == viewModel.currentConversationId }
+            ?.title?.takeIf { it.isNotBlank() }
+    }
+
     Scaffold(
         topBar = {
             Surface(
@@ -314,57 +380,38 @@ fun ChatScreen(
             ) {
                 TopAppBar(
                     title = {
-                        // ChatterUI-style Center Header: Character Avatar + Name + Subtitle
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.clickable { onNavigateToModels() },
+                        Column(
+                            modifier =
+                                Modifier
+                                    .clickable { onNavigateToModels() }
+                                    .padding(vertical = 2.dp),
                         ) {
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-                                modifier = Modifier.size(34.dp),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        imageVector = getIconVector(activePersona.iconType),
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(18.dp),
-                                    )
-                                }
-                            }
-
-                            Spacer(Modifier.width(10.dp))
-
-                            Column {
-                                Text(
-                                    text = activePersona.name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Row(verticalAlignment = Alignment.CenterVertically) {
-                                    Surface(
-                                        color = if (isModelLoaded || settings.modelSource == ChatConstants.SOURCE_REMOTE) Color(0xFF43A047) else Color(0xFFE53935),
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(6.dp),
-                                    ) {}
-                                    Spacer(Modifier.width(5.dp))
-                                    Text(
-                                        text = if (isLoadingModel) "Loading Model…" else "$modelDisplayName (${activeBackend ?: if (settings.modelSource == ChatConstants.SOURCE_REMOTE) "Remote" else "GPU"})",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                    )
-                                }
-                            }
+                            Text(
+                                text = conversationTitle ?: activePersona.name,
+                                style = MaterialTheme.typography.titleMedium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
+                            Text(
+                                text =
+                                    when {
+                                        isLoadingModel -> "Memuat model…"
+                                        settings.modelSource == ChatConstants.SOURCE_REMOTE -> "$modelDisplayName · Remote"
+                                        isModelLoaded -> "$modelDisplayName · ${activeBackend ?: "GPU"}"
+                                        else -> "Model belum dimuat"
+                                    },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                            )
                         }
                     },
                     navigationIcon = {
-                        IconButton(onClick = onOpenDrawer) {
+                        IconButton(
+                            onClick = onOpenDrawer,
+                            modifier = Modifier.padding(start = 4.dp),
+                        ) {
                             Icon(
                                 Icons.Default.Menu,
                                 contentDescription = "Menu",
@@ -463,34 +510,68 @@ fun ChatScreen(
                         .navigationBarsPadding()
                         .padding(horizontal = 10.dp, vertical = 4.dp),
             ) {
-                // Token Context indicator (Subtle 1-line status when chatting)
+                // Token Context indicator (Subtle status with dynamic progress line)
                 if (viewModel.messages.isNotEmpty() || input.isNotBlank()) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 2.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically,
+                    val maxTokens = settings.contextWindowTokens
+                    val ratio = if (maxTokens > 0) (totalContextTokens.toFloat() / maxTokens.toFloat()) * 100f else 0f
+                    val progressFraction = (ratio / 100f).coerceIn(0.01f, 1f)
+
+                    val progressColor = when {
+                        ratio >= 80f -> MaterialTheme.colorScheme.error
+                        ratio >= 60f -> Color(0xFFF59E0B) // Warm Amber Warning
+                        else -> MaterialTheme.colorScheme.primary
+                    }
+
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 8.dp, vertical = 3.dp),
                     ) {
-                        val inputTokens = viewModel.estimateTokens(input)
-                        Text(
-                            text =
-                                when {
-                                    isCompressing -> "Compressing memory…"
-                                    input.isNotBlank() -> "+$inputTokens tokens"
-                                    else -> activePersona.name
-                                },
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (isCompressing) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.SemiBold,
-                        )
-                        val maxTokens = settings.contextWindowTokens
-                        val ratio = if (maxTokens > 0) (totalContextTokens.toFloat() / maxTokens.toFloat()) * 100 else 0f
-                        Text(
-                            text = "Context: $totalContextTokens / $maxTokens tok (${ratio.toInt()}%)",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = if (ratio > 80f) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 10.sp,
-                        )
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically,
+                        ) {
+                            val inputTokens = viewModel.estimateTokens(input)
+                            Text(
+                                text =
+                                    when {
+                                        isCompressing -> "Compressing memory…"
+                                        input.isNotBlank() -> "+$inputTokens tokens"
+                                        else -> activePersona.name
+                                    },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (isCompressing) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = "Context: $totalContextTokens / $maxTokens tok (${ratio.toInt()}%)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (ratio >= 60f) progressColor else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 10.sp,
+                                fontWeight = if (ratio >= 80f) FontWeight.Bold else FontWeight.Normal,
+                            )
+                        }
+
+                        Spacer(Modifier.height(3.dp))
+
+                        // Dynamic thin progress line (2.dp)
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(2.dp)
+                                .clip(RoundedCornerShape(1.dp))
+                                .background(MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)),
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth(progressFraction)
+                                    .height(2.dp)
+                                    .clip(RoundedCornerShape(1.dp))
+                                    .background(progressColor),
+                            )
+                        }
                     }
                 }
 
@@ -672,33 +753,150 @@ fun ChatScreen(
                             }
                         }
 
-                        // ── Top Row: Text Input Field ──
+                        // Audio Attachment Preview (WAV / Audio file)
+                        if (selectedAudioFile != null) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 10.dp, top = 6.dp, end = 10.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    modifier = Modifier.height(34.dp),
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.GraphicEq,
+                                            contentDescription = null,
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(16.dp),
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Text(
+                                            "Audio clip attached",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            fontWeight = FontWeight.SemiBold,
+                                        )
+                                        Spacer(Modifier.width(6.dp))
+                                        Surface(
+                                            shape = CircleShape,
+                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f),
+                                            modifier = Modifier
+                                                .size(16.dp)
+                                                .clickable { viewModel.clearSelectedAudio() },
+                                        ) {
+                                            Icon(
+                                                Icons.Default.Close,
+                                                contentDescription = "Remove attached audio",
+                                                modifier = Modifier.padding(2.dp),
+                                                tint = MaterialTheme.colorScheme.onSurface,
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+
+                        // Live Native Audio Recording Banner
+                        if (isRecordingAudio) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                                    .background(
+                                        MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.35f),
+                                        shape = RoundedCornerShape(10.dp),
+                                    )
+                                    .padding(horizontal = 10.dp, vertical = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.GraphicEq,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.error,
+                                        modifier = Modifier.size(18.dp),
+                                    )
+                                    val sec = (recordingDurationMs / 1000) % 60
+                                    val min = (recordingDurationMs / 1000) / 60
+                                    Text(
+                                        text = "Recording 16kHz PCM… %02d:%02d".format(Locale.US, min, sec),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                }
+                                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    TextButton(
+                                        onClick = { audioRecorderHelper.cancelRecording() },
+                                        contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
+                                    ) {
+                                        Text("Cancel", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                                    }
+                                    Button(
+                                        onClick = {
+                                            audioRecorderHelper.stopRecordingAsync { wavFile ->
+                                                wavFile?.let { viewModel.setSelectedAudio(it) }
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 2.dp),
+                                        colors = androidx.compose.material3.ButtonDefaults.buttonColors(
+                                            containerColor = MaterialTheme.colorScheme.error,
+                                        ),
+                                    ) {
+                                        Text("Done", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                    }
+                                }
+                            }
+                        }
+
+                        // ── Top Row: Compact Text Input Field ──
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 0.dp),
+                                .padding(start = 14.dp, end = 14.dp, top = 10.dp, bottom = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            OutlinedTextField(
+                            BasicTextField(
                                 value = input,
                                 onValueChange = { input = it },
-                                placeholder = {
-                                    Text(
-                                        if (selectedImageUri != null) "Ask about this image…" else "Message ${activePersona.name}…",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                                    )
-                                },
+                                modifier = Modifier.fillMaxWidth(),
+                                textStyle = MaterialTheme.typography.bodyMedium.copy(
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                ),
+                                cursorBrush = SolidColor(MaterialTheme.colorScheme.primary),
                                 minLines = 1,
                                 maxLines = 5,
-                                colors = TextFieldDefaults.colors(
-                                    focusedContainerColor = Color.Transparent,
-                                    unfocusedContainerColor = Color.Transparent,
-                                    disabledContainerColor = Color.Transparent,
-                                    focusedIndicatorColor = Color.Transparent,
-                                    unfocusedIndicatorColor = Color.Transparent,
-                                ),
-                                modifier = Modifier.fillMaxWidth(),
+                                decorationBox = { innerTextField ->
+                                    Box(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        contentAlignment = Alignment.CenterStart,
+                                    ) {
+                                        if (input.isEmpty()) {
+                                            Text(
+                                                text =
+                                                    when {
+                                                        selectedImageUri != null -> "Ask about this image…"
+                                                        selectedAudioFile != null -> "Ask about this audio clip…"
+                                                        else -> "Message ${activePersona.name}…"
+                                                    },
+                                                style = MaterialTheme.typography.bodyMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                            )
+                                        }
+                                        innerTextField()
+                                    }
+                                },
                             )
                         }
 
@@ -751,6 +949,26 @@ fun ChatScreen(
                                                 photoPickerLauncher.launch(
                                                     PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
                                                 )
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Attach Audio (Multimodal)", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.AudioFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                audioPickerLauncher.launch("audio/*")
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Record Voice Note (WAV)", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                startVoiceRecordingSafely()
                                             },
                                         )
                                         DropdownMenuItem(
@@ -1046,8 +1264,7 @@ fun ChatScreen(
                                                 tint = MaterialTheme.colorScheme.primary,
                                                 modifier = Modifier.size(11.dp),
                                             )
-                                            Spacer(Modifier.width(2.dp))
-                                            Text(
+                                                                    Text(
                                                 "Docs (${ragDocuments.size})",
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontSize = 10.sp,
@@ -1060,16 +1277,17 @@ fun ChatScreen(
                             }
 
                             // Right Group: Voice Input & Send / Stop Action Button
-                            val canSend = input.isNotBlank() || selectedImageUri != null
+                            val canSend = input.isNotBlank() || selectedImageUri != null || selectedAudioFile != null
+                            val isListening = speechHelper.isListening.value || isRecordingAudio
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                             ) {
-                                // Voice Input Mic Button
+                                // Voice Input Mic Button (Native Audio recording for audio-capable models, STT for text models)
                                 Surface(
                                     shape = CircleShape,
                                     color =
-                                        if (speechHelper.isListening.value) {
+                                        if (isListening) {
                                             MaterialTheme.colorScheme.error
                                         } else {
                                             MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f)
@@ -1078,32 +1296,46 @@ fun ChatScreen(
                                 ) {
                                     IconButton(
                                         onClick = {
-                                            if (speechHelper.isListening.value) {
+                                            if (isRecordingAudio) {
+                                                audioRecorderHelper.stopRecordingAsync { wavFile ->
+                                                    wavFile?.let { viewModel.setSelectedAudio(it) }
+                                                }
+                                            } else if (speechHelper.isListening.value) {
                                                 speechHelper.stopListening()
                                             } else {
-                                                val hasPerm =
-                                                    androidx.core.content.ContextCompat.checkSelfPermission(
-                                                        context,
-                                                        android.Manifest.permission.RECORD_AUDIO,
-                                                    ) == android.content.pm.PackageManager.PERMISSION_GRANTED
-                                                if (hasPerm) {
-                                                    speechHelper.startListening(
-                                                        onResult = { transcribed ->
-                                                            input = if (input.isBlank()) transcribed else "$input $transcribed"
-                                                        },
-                                                        onFallbackToIntent = launchSpeechIntentSafely,
-                                                    )
+                                                val sttAvailable =
+                                                    try {
+                                                        android.speech.SpeechRecognizer.isRecognitionAvailable(context)
+                                                    } catch (_: Throwable) {
+                                                        false
+                                                    }
+                                                if (isAudioSupported || !sttAvailable) {
+                                                    startVoiceRecordingSafely()
                                                 } else {
-                                                    audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                                    val hasPerm =
+                                                        androidx.core.content.ContextCompat.checkSelfPermission(
+                                                            context,
+                                                            android.Manifest.permission.RECORD_AUDIO,
+                                                        ) == android.content.pm.PackageManager.PERMISSION_GRANTED
+                                                    if (hasPerm) {
+                                                        speechHelper.startListening(
+                                                            onResult = { transcribed ->
+                                                                input = if (input.isBlank()) transcribed else "$input $transcribed"
+                                                            },
+                                                            onFallbackToIntent = launchSpeechIntentSafely,
+                                                        )
+                                                    } else {
+                                                        audioPermissionLauncher.launch(android.Manifest.permission.RECORD_AUDIO)
+                                                    }
                                                 }
                                             }
                                         },
                                         modifier = Modifier.size(34.dp),
                                     ) {
                                         Icon(
-                                            imageVector = if (speechHelper.isListening.value) Icons.Default.MicOff else Icons.Default.Mic,
-                                            contentDescription = if (speechHelper.isListening.value) "Stop recording" else "Voice input",
-                                            tint = if (speechHelper.isListening.value) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                                            contentDescription = if (isListening) "Stop recording" else "Voice input",
+                                            tint = if (isListening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(17.dp),
                                         )
                                     }
@@ -1174,6 +1406,7 @@ fun ChatScreen(
                     isGenerating = isGenerating,
                     enableThinking = settings.enableThinking,
                     ttsHelper = ttsHelper,
+                    audioPlayerHelper = audioPlayerHelper,
                     onPreviewHtml = { code ->
                         val resolvedName = com.localgpt.app.util.CodeArtifacts.deriveFileName("html", code)
                         previewData = Triple(resolvedName, code, mapOf(resolvedName to code))
