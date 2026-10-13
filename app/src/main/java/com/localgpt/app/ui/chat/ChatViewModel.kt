@@ -102,6 +102,31 @@ val PERSONA_PRESETS =
         ),
     )
 
+/**
+ * Gson bypasses Kotlin constructors and default values: fields missing from
+ * old JSON stay JVM-null even when declared as non-null `String`, which later
+ * crashes string operations. Always pass Gson-parsed personas through here
+ * (load from settings, import) before storing or using them.
+ *
+ * NOTE for future PersonaPreset fields: declare them nullable, or give a
+ * safe default AND normalize them in this function.
+ */
+@Suppress("SENSELESS_COMPARISON")
+internal fun PersonaPreset.normalize(): PersonaPreset {
+    fun str(v: String?, fallback: String): String = if (v.isNullOrBlank()) fallback else v
+    return PersonaPreset(
+        id = str(id as String?, "custom_" + System.currentTimeMillis()),
+        name = str(name as String?, "Custom Persona"),
+        iconType = str(iconType as String?, "custom"),
+        description = (description as String?).orEmpty(),
+        greeting = (greeting as String?).orEmpty(),
+        systemPrompt = (systemPrompt as String?).orEmpty(),
+        avatarUri = (avatarUri as String?).orEmpty(),
+        temperature = (temperature as Float?)?.coerceIn(0f, 2f),
+        topK = (topK as Int?)?.takeIf { it > 0 },
+    )
+}
+
 data class BenchmarkResult(
     val prompt: String,
     val modelName: String,
@@ -1759,7 +1784,7 @@ class ChatViewModel(
             val listType = object : TypeToken<List<PersonaPreset>>() {}.type
             val list = Gson().fromJson<List<PersonaPreset>>(json, listType) ?: emptyList()
             customPersonas.clear()
-            customPersonas.addAll(list)
+            customPersonas.addAll(list.map { it.normalize() })
         } catch (_: Exception) {
         }
     }
@@ -1833,7 +1858,7 @@ class ChatViewModel(
 
     fun importPersonaJson(jsonString: String): Boolean {
         return try {
-            val persona = Gson().fromJson(jsonString, PersonaPreset::class.java)
+            val persona = Gson().fromJson(jsonString, PersonaPreset::class.java)?.normalize()
             if (persona != null && persona.name.isNotBlank()) {
                 val newP = persona.copy(id = "imported_" + System.currentTimeMillis())
                 saveCustomPersonas(customPersonas.toList() + newP)
