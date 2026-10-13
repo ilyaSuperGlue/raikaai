@@ -166,6 +166,44 @@ class ChatViewModel(
     // Multimodal image attachment state
     val selectedImageUri = MutableStateFlow<Uri?>(null)
 
+    // Multimodal native audio attachment state
+    val selectedAudioFile = MutableStateFlow<File?>(null)
+
+    val isAudioSupported: Boolean
+        get() {
+            if (engine.isAudioSupported) return true
+            val s = settings.value
+            if (s.modelSource == ChatConstants.SOURCE_REMOTE) return false
+            val activeId = s.activeModelId.lowercase()
+            val custom = s.customModelPath.lowercase()
+            if (activeId.contains("e2b") || activeId.contains("e4b") ||
+                activeId.contains("gemma-4") || activeId.contains("gemma4") ||
+                activeId.contains("gemma-3n") || activeId.contains("gemma3n") ||
+                activeId.contains("audio") || custom.contains("e2b") ||
+                custom.contains("e4b") || custom.contains("gemma-4") ||
+                custom.contains("gemma-3n") || custom.contains("audio")
+            ) return true
+            val modelPath = ChatServerService.resolveModelPath(app, s) ?: return false
+            return engine.isAudioCandidate(modelPath)
+        }
+
+    val isVisionSupported: Boolean
+        get() {
+            if (engine.isVisionSupported) return true
+            val s = settings.value
+            if (s.modelSource == ChatConstants.SOURCE_REMOTE) return false
+            val activeId = s.activeModelId.lowercase()
+            val custom = s.customModelPath.lowercase()
+            if (activeId.contains("e2b") || activeId.contains("e4b") ||
+                activeId.contains("vision") || activeId.contains("vl-") ||
+                activeId.contains("paligemma") || custom.contains("e2b") ||
+                custom.contains("e4b") || custom.contains("vision") ||
+                custom.contains("vl-") || custom.contains("paligemma")
+            ) return true
+            val modelPath = ChatServerService.resolveModelPath(app, s) ?: return false
+            return engine.isVisionCandidate(modelPath)
+        }
+
     val freeDiskSpaceBytes = mutableStateOf(modelManager.getFreeDiskSpace())
 
     // Delegated model state from engine
@@ -185,6 +223,31 @@ class ChatViewModel(
 
     fun clearSelectedImage() {
         selectedImageUri.value = null
+    }
+
+    fun setSelectedAudio(file: File?) {
+        selectedAudioFile.value = file
+    }
+
+    fun attachAudioUri(uri: Uri) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val audioDir = File(app.filesDir, "chat_audio").apply { if (!exists()) mkdirs() }
+            val dest = File(audioDir, "audio_${System.currentTimeMillis()}.wav")
+            try {
+                app.contentResolver.openInputStream(uri)?.use { input ->
+                    dest.outputStream().use { output ->
+                        input.copyTo(output)
+                    }
+                }
+                selectedAudioFile.value = dest
+            } catch (t: Throwable) {
+                KLog.e("ChatVM", "Failed to copy audio URI", t)
+            }
+        }
+    }
+
+    fun clearSelectedAudio() {
+        selectedAudioFile.value = null
     }
 
     private fun persistImageFromUri(uri: Uri): File? {
@@ -233,6 +296,11 @@ class ChatViewModel(
 
     var currentConversationId: String? = null
         private set
+    /**
+     * Conversation id whose persona still needs resolving because custom
+     * personas hadn't loaded when it was opened. Retried after customs load.
+     */
+    private var pendingPersonaRestoreId: String? = null
     private var conversation: Conversation? = null
     private var nodes = mutableListOf<ChatMessageEntry>() // flat tree storage for branching
     private var genJob: Job? = null
@@ -581,9 +649,23 @@ class ChatViewModel(
 
     init {
         viewModelScope.launch {
+            settingsRepo.checkAndApplyDefaults()
+        }
+        viewModelScope.launch {
             settingsRepo.settingsFlow.collect { s ->
                 settings.value = s
                 loadCustomPersonasFromJson(s.customPersonasJson)
+                // Retry a persona restore that previously fell back to General
+                // only because the custom list wasn't loaded yet.
+                val pendingId = pendingPersonaRestoreId
+                val conv = conversation
+                if (pendingId != null && conv != null && conv.id == pendingId && conv.id == currentConversationId) {
+                    val resolved = resolvePersona(conv.personaId)
+                    if (resolved.id == conv.personaId) {
+                        activePersona.value = resolved
+                        pendingPersonaRestoreId = null
+                    }
+                }
             }
         }
         viewModelScope.launch {
@@ -664,8 +746,24 @@ class ChatViewModel(
                 conversation = conv
                 currentConversationId = conv.id
                 rebuildFromTree()
+                // Restore the chat's own character without touching global settings.
+                // If custom personas haven't finished loading yet, retry once they're ready.
+                val resolved = resolvePersona(conv.personaId)
+                activePersona.value = resolved
+                pendingPersonaRestoreId =
+                    if (conv.personaId != null && resolved.id != conv.personaId) conv.id else null
             }
         }
+    }
+
+    /**
+     * Looks up a persona by id across builtins and customs.
+     * Returns General for null ids (legacy chats) or deleted personas.
+     */
+    private fun resolvePersona(personaId: String?): PersonaPreset {
+        if (personaId == null) return PERSONA_PRESETS.first()
+        return (PERSONA_PRESETS + customPersonas).firstOrNull { it.id == personaId }
+            ?: PERSONA_PRESETS.first()
     }
 
     fun newChat(withPersona: PersonaPreset? = null) {
@@ -675,6 +773,8 @@ class ChatViewModel(
         stopGeneration()
         val p = withPersona ?: activePersona.value
         val newConv = Conversation().also { currentConversationId = it.id }
+        newConv.personaId = p.id
+        pendingPersonaRestoreId = null
         conversation = newConv
         nodes.clear()
         messages.clear()
@@ -916,7 +1016,8 @@ class ChatViewModel(
     fun sendMessage(userText: String) {
         val body = userText.trim()
         val currentImageUri = selectedImageUri.value
-        if ((body.isBlank() && currentImageUri == null) || isGenerating.value) return
+        val currentAudioFile = selectedAudioFile.value
+        if ((body.isBlank() && currentImageUri == null && currentAudioFile == null) || isGenerating.value) return
         // Set flag immediately to prevent double-send race condition
         isGenerating.value = true
         errorMessage.value = null
@@ -930,7 +1031,18 @@ class ChatViewModel(
             clearSelectedImage()
         }
 
-        val promptText = if (body.isNotBlank()) body else "Describe this image."
+        var savedAudioFile: File? = currentAudioFile
+        var audioBytes: ByteArray? = null
+        if (savedAudioFile != null) {
+            audioBytes = try { savedAudioFile.readBytes() } catch (_: Exception) { null }
+            clearSelectedAudio()
+        }
+
+        val promptText = when {
+            body.isNotBlank() -> body
+            savedAudioFile != null -> "Please listen to this audio clip and respond."
+            else -> "Describe this image."
+        }
 
         if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
             sendRemoteMessage(promptText, s)
@@ -950,6 +1062,7 @@ class ChatViewModel(
                 role = ChatConstants.ROLE_USER,
                 content = promptText,
                 imagePath = savedImageFile?.absolutePath,
+                audioPath = savedAudioFile?.absolutePath,
                 parentId = messages.lastOrNull()?.id,
             )
         messages.add(userEntry)
@@ -1005,6 +1118,8 @@ class ChatViewModel(
                                     ),
                                 imagePath = savedImageFile?.absolutePath,
                                 imageBytes = imageBytes,
+                                audioPath = savedAudioFile?.absolutePath,
+                                audioBytes = audioBytes,
                                 onMetrics = { metrics ->
                                     lastMetrics = metrics
                                 },
@@ -1207,6 +1322,10 @@ class ChatViewModel(
             oldMsg.imagePath?.let { path ->
                 try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
             }
+        val audioBytes =
+            oldMsg.audioPath?.let { path ->
+                try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
+            }
 
         var lastMetrics: LiteRtEngineManager.InferenceMetrics? = null
         var ragSources: List<String>? = null
@@ -1252,6 +1371,8 @@ class ChatViewModel(
                                     ),
                                 imagePath = oldMsg.imagePath,
                                 imageBytes = imageBytes,
+                                audioPath = oldMsg.audioPath,
+                                audioBytes = audioBytes,
                                 onMetrics = { lastMetrics = it },
                             ).collect { delta ->
                                 if (currentConversationId != targetChatId) return@collect
@@ -1340,6 +1461,10 @@ class ChatViewModel(
             lastUser.imagePath?.let { path ->
                 try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
             }
+        val audioBytes =
+            lastUser.audioPath?.let { path ->
+                try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
+            }
 
         val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = lastUser.id)
         messages.add(assistant)
@@ -1390,6 +1515,8 @@ class ChatViewModel(
                                     ),
                                 imagePath = lastUser.imagePath,
                                 imageBytes = imageBytes,
+                                audioPath = lastUser.audioPath,
+                                audioBytes = audioBytes,
                                 onMetrics = { lastMetrics = it },
                             ).collect { delta ->
                                 if (currentConversationId != targetRegenChatId) return@collect

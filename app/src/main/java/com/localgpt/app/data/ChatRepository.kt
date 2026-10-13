@@ -19,6 +19,7 @@ data class ChatMessageEntry(
     val variants: List<String> = emptyList(),
     val selectedVariant: Int = 0,
     val imagePath: String? = null,
+    val audioPath: String? = null,
     val id: String? = UUID.randomUUID().toString(), // stable node id for conversation branching
     val parentId: String? = null, // previous node in the tree; null = root child
     val sources: List<String>? = null, // RAG citation labels e.g. ["notes.txt #2"]
@@ -33,6 +34,7 @@ data class Conversation(
     var branchActive: MutableMap<String, String>? = null, // parentKey ("root"|nodeId) -> active childId
     var summary: String? = null, // rolling compressed-memory summary (context compression)
     var summarizedUntilId: String? = null, // id of the last message folded into the summary
+    var personaId: String? = null, // id of the PersonaPreset this chat belongs to (null = legacy / General)
 )
 
 /**
