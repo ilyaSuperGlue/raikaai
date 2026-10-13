@@ -11,7 +11,6 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -20,7 +19,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -40,12 +38,14 @@ import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Translate
@@ -58,6 +58,7 @@ import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.localgpt.app.core.audio.AudioPlayerHelper
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -145,7 +146,8 @@ internal fun BranchNavRow(
 }
 
 /**
- * Empty Chat Welcome Hero matching ChatterUI aesthetic.
+ * Minimal empty-state hero: plain centered greeting only.
+ * Signature kept so the caller in ChatScreen.kt is unaffected.
  */
 @Composable
 internal fun EmptyChatHero(
@@ -162,102 +164,12 @@ internal fun EmptyChatHero(
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
-        Surface(
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
-            modifier = Modifier.size(72.dp).clickable { onOpenCharacters() },
-        ) {
-            Box(contentAlignment = Alignment.Center) {
-                Icon(
-                    imageVector = getIconVector(persona.iconType),
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(38.dp),
-                )
-            }
-        }
-
-        Spacer(Modifier.height(14.dp))
-
         Text(
-            text = persona.name,
-            style = MaterialTheme.typography.headlineSmall,
-            fontWeight = FontWeight.Bold,
-        )
-
-        Spacer(Modifier.height(4.dp))
-
-        Text(
-            text = persona.systemPrompt,
+            text = "What can I help you with today?",
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
-            maxLines = 3,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.padding(horizontal = 16.dp),
         )
-
-        Spacer(Modifier.height(24.dp))
-
-        // Quick Starter Prompt Chips
-        val suggestions = remember(persona.name) {
-            when {
-                persona.name.contains("Coder", ignoreCase = true) -> listOf(
-                    "Write a Kotlin coroutine flow example",
-                    "Explain Jetpack Compose state hoisting",
-                    "Debug Android memory leak",
-                )
-                persona.name.contains("Writer", ignoreCase = true) -> listOf(
-                    "Write a short futuristic sci-fi story",
-                    "Help me polish this professional email",
-                    "Create an outline for a technical article",
-                )
-                else -> listOf(
-                    "Explain quantum computing in simple terms",
-                    "Give me 5 productivity tips for developers",
-                    "How does on-device LLM GPU acceleration work?",
-                )
-            }
-        }
-
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth(0.92f),
-        ) {
-            suggestions.forEach { prompt ->
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                    border = BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    ),
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(14.dp))
-                            .clickable { onPromptSelected(prompt) },
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                    ) {
-                        Icon(
-                            Icons.Default.AutoAwesome,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(16.dp),
-                        )
-                        Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = prompt,
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                }
-            }
-        }
     }
 }
 
@@ -273,6 +185,7 @@ internal fun MessageList(
     isGenerating: Boolean,
     enableThinking: Boolean,
     ttsHelper: TtsHelper,
+    audioPlayerHelper: AudioPlayerHelper? = null,
     onPreviewHtml: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
@@ -319,6 +232,7 @@ internal fun MessageList(
                     isGenerating = isGenerating,
                     enableThinking = enableThinking,
                     ttsHelper = ttsHelper,
+                    audioPlayerHelper = audioPlayerHelper,
                     branchInfo = viewModel.branchInfoFor(reversedIndex),
                     onEditUserMessage = { newText -> viewModel.editUserMessageAndRegenerate(reversedIndex, newText) },
                     onSelectVariant = { varIndex -> viewModel.selectMessageVariant(reversedIndex, varIndex) },
@@ -373,6 +287,7 @@ internal fun MessageBubble(
     isGenerating: Boolean,
     enableThinking: Boolean,
     ttsHelper: TtsHelper,
+    audioPlayerHelper: AudioPlayerHelper? = null,
     branchInfo: Pair<Int, Int>?,
     onEditUserMessage: (String) -> Unit,
     onSelectVariant: (Int) -> Unit,
@@ -427,50 +342,61 @@ internal fun MessageBubble(
                     modifier =
                         Modifier
                             .fillMaxWidth()
-                            .padding(start = 12.dp, end = 8.dp, top = 8.dp),
+                            .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween,
                 ) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Surface(
-                            shape = CircleShape,
-                            color = if (isUser) MaterialTheme.colorScheme.primary.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
-                            modifier = Modifier.size(20.dp),
+                            shape = RoundedCornerShape(6.dp),
+                            color =
+                                if (isUser) {
+                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                                } else {
+                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
+                                },
+                            modifier = Modifier.size(22.dp),
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = if (isUser) Icons.Default.Person else getIconVector(activePersona.iconType),
                                     contentDescription = null,
-                                    modifier = Modifier.size(12.dp),
-                                    tint = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.primary,
+                                    tint = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(13.dp),
                                 )
                             }
                         }
-                        Spacer(Modifier.width(6.dp))
+                        Spacer(Modifier.width(7.dp))
                         Text(
-                            if (isUser) "You" else activePersona.name,
-                            style = MaterialTheme.typography.labelSmall,
+                            text = if (isUser) "You" else activePersona.name,
+                            style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.Bold,
                             color =
                                 if (isUser) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                    MaterialTheme.colorScheme.onPrimaryContainer
                                 } else {
-                                    MaterialTheme.colorScheme.primary
+                                    MaterialTheme.colorScheme.onSurface
                                 },
                         )
                     }
 
                     if (isUser && !isGenerating) {
-                        IconButton(
-                            onClick = { showEditDialog = true },
-                            modifier = Modifier.size(22.dp),
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.08f),
+                            modifier = Modifier.size(26.dp),
                         ) {
-                            Icon(
-                                Icons.Default.Edit,
-                                contentDescription = "Edit message",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.6f),
-                                modifier = Modifier.size(13.dp),
-                            )
+                            IconButton(
+                                onClick = { showEditDialog = true },
+                                modifier = Modifier.size(26.dp),
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Edit,
+                                    contentDescription = "Edit message",
+                                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
+                                    modifier = Modifier.size(13.dp),
+                                )
+                            }
                         }
                     }
                 }
@@ -500,11 +426,23 @@ internal fun MessageBubble(
                             contentDescription = "Attached Image",
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
                                 .clip(RoundedCornerShape(12.dp)),
                             contentScale = ContentScale.FillWidth,
                         )
                     }
+                }
+
+                // Attached Audio if present (Native multimodal voice note)
+                if (!message.audioPath.isNullOrBlank()) {
+                    AudioMessagePlayer(
+                        audioPath = message.audioPath,
+                        audioPlayerHelper = audioPlayerHelper,
+                        isUser = isUser,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 6.dp),
+                    )
                 }
 
                 // Message Text Content
@@ -789,7 +727,8 @@ internal fun getIconVector(iconType: String): ImageVector =
         "reasoning" -> Icons.Default.Psychology
         "speed" -> Icons.Default.Speed
         "shell" -> Icons.Default.Terminal
-        else -> Icons.Default.SmartToy
+        "general" -> Icons.Default.AutoAwesome
+        else -> Icons.Default.AutoAwesome
     }
 
 /**
@@ -799,4 +738,99 @@ internal fun formatFileSize(bytes: Long): String {
     val gb = bytes / (1024.0 * 1024.0 * 1024.0)
     return if (gb >= 1.0) String.format(Locale.US, "%.1f GB", gb)
     else String.format(Locale.US, "%.0f MB", bytes / (1024.0 * 1024.0))
+}
+
+/**
+ * Clean Material 3 Audio Player Card for native audio multimodal voice notes.
+ */
+@Composable
+fun AudioMessagePlayer(
+    audioPath: String,
+    audioPlayerHelper: AudioPlayerHelper?,
+    isUser: Boolean = true,
+    modifier: Modifier = Modifier,
+) {
+    val currentlyPlaying by audioPlayerHelper?.currentlyPlayingPath?.collectAsState() ?: remember { mutableStateOf(null) }
+    val isPlaying = currentlyPlaying == audioPath
+
+    val durationText = remember(audioPath) {
+        try {
+            val mmr = android.media.MediaMetadataRetriever()
+            mmr.setDataSource(audioPath)
+            val durMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+            mmr.release()
+            val totalSec = durMs / 1000
+            val min = totalSec / 60
+            val sec = totalSec % 60
+            "%d:%02d".format(Locale.US, min, sec)
+        } catch (_: Throwable) {
+            "Audio"
+        }
+    }
+
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = if (isUser) {
+            MaterialTheme.colorScheme.surface.copy(alpha = 0.25f)
+        } else {
+            MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.6f)
+        },
+        modifier = modifier,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                modifier = Modifier.size(36.dp),
+            ) {
+                IconButton(
+                    onClick = {
+                        if (isPlaying) {
+                            audioPlayerHelper?.stop()
+                        } else {
+                            audioPlayerHelper?.play(audioPath)
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = if (isPlaying) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(20.dp),
+                    )
+                }
+            }
+
+            Column(modifier = Modifier.weight(1f)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp),
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.GraphicEq,
+                        contentDescription = null,
+                        tint = if (isPlaying) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(15.dp),
+                    )
+                    Text(
+                        text = if (isPlaying) "Playing voice note…" else "Voice Prompt",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+                        color = if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+                Text(
+                    text = "$durationText · 16kHz PCM WAV",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = (if (isUser) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant).copy(alpha = 0.7f),
+                    fontSize = 11.sp,
+                )
+            }
+        }
+    }
 }
