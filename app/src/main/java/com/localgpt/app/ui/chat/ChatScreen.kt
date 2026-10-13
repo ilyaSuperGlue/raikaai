@@ -395,10 +395,10 @@ fun ChatScreen(
                             Text(
                                 text =
                                     when {
-                                        isLoadingModel -> "Memuat model…"
+                                        isLoadingModel -> "Loading model…"
                                         settings.modelSource == ChatConstants.SOURCE_REMOTE -> "$modelDisplayName · Remote"
                                         isModelLoaded -> "$modelDisplayName · ${activeBackend ?: "GPU"}"
-                                        else -> "Model belum dimuat"
+                                        else -> "No model loaded"
                                     },
                                 style = MaterialTheme.typography.labelSmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
