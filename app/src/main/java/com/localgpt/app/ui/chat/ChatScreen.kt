@@ -53,10 +53,8 @@ import androidx.compose.ui.graphics.SolidColor
 import com.localgpt.app.core.audio.AudioPlayerHelper
 import com.localgpt.app.core.audio.AudioRecorderHelper
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.FileDownload
@@ -82,7 +80,6 @@ import androidx.compose.material.icons.outlined.Mic
 import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
-import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -182,7 +179,6 @@ fun ChatScreen(
 
     var input by remember { mutableStateOf("") }
     var showOptionsMenu by remember { mutableStateOf(false) }
-    var showChatsDrawer by remember { mutableStateOf(false) }
     var showRagSheet by remember { mutableStateOf(false) }
     var showSkillsSheet by remember { mutableStateOf(false) }
     var showModelDropdown by remember { mutableStateOf(false) }
@@ -405,15 +401,6 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        // Right Chat Drawer Button (Quick Switch Conversation)
-                        IconButton(onClick = { showChatsDrawer = true }) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Chat,
-                                contentDescription = "Chats Drawer",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-
                         // Options Overflow Menu
                         Box {
                             IconButton(onClick = { showOptionsMenu = true }) {
@@ -1432,139 +1419,6 @@ fun ChatScreen(
                             Icon(Icons.Default.Check, contentDescription = "Dismiss", modifier = Modifier.size(16.dp))
                         }
                     }
-                }
-            }
-        }
-    }
-
-    // ── ChatterUI Quick Chats Drawer Sheet ──
-    if (showChatsDrawer) {
-        val conversations = viewModel.conversations.value
-        var chatSearchQuery by remember { mutableStateOf("") }
-        val filteredConversations = remember(chatSearchQuery, conversations) {
-            if (chatSearchQuery.isBlank()) {
-                conversations
-            } else {
-                val q = chatSearchQuery.trim().lowercase(Locale.ROOT)
-                conversations.filter { it.title.lowercase(Locale.ROOT).contains(q) }
-            }
-        }
-
-        ModalBottomSheet(
-            onDismissRequest = { showChatsDrawer = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 24.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Chats",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    IconButton(
-                        onClick = { showChatsDrawer = false },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(20.dp))
-                    }
-                }
-
-                OutlinedTextField(
-                    value = chatSearchQuery,
-                    onValueChange = { chatSearchQuery = it },
-                    placeholder = { Text("Search conversations…") },
-                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                )
-
-                if (filteredConversations.isEmpty()) {
-                    Box(
-                        modifier = Modifier.fillMaxWidth().height(140.dp),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text("No conversations found", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    }
-                } else {
-                    LazyColumn(
-                        modifier = Modifier.fillMaxWidth().height(260.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        items(filteredConversations, key = { it.id }) { conv ->
-                            val isCurrent = conv.id == viewModel.currentConversationId
-                            val dateStr = SimpleDateFormat("MMM d · HH:mm", Locale.getDefault()).format(Date(conv.updatedAt))
-                            Surface(
-                                onClick = {
-                                    viewModel.loadConversation(conv.id)
-                                    showChatsDrawer = false
-                                },
-                                shape = RoundedCornerShape(12.dp),
-                                color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceContainerLow,
-                                modifier = Modifier.fillMaxWidth(),
-                            ) {
-                                Row(
-                                    modifier = Modifier.padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.weight(1f),
-                                    ) {
-                                        Icon(
-                                            Icons.Default.ChatBubbleOutline,
-                                            contentDescription = null,
-                                            tint = if (isCurrent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                        Column {
-                                            Text(
-                                                text = conv.title.ifBlank { "Untitled Chat" },
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                fontWeight = if (isCurrent) FontWeight.Bold else FontWeight.Normal,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                text = "$dateStr · ${conv.messages.size} messages",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontSize = 11.sp,
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(12.dp))
-
-                Button(
-                    onClick = {
-                        viewModel.newChat()
-                        showChatsDrawer = false
-                    },
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.width(6.dp))
-                    Text("Start New Chat", fontWeight = FontWeight.SemiBold)
                 }
             }
         }

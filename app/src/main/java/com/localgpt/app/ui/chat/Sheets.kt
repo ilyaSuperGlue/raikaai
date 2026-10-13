@@ -25,12 +25,8 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
@@ -455,115 +451,6 @@ fun ServerSheet(
                 }
             }
         }
-    }
-}
-
-/** List of saved conversations: Search, Edit/Rename, Delete, and Clear All. */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun HistorySheet(
-    viewModel: ChatViewModel,
-    onDismiss: () -> Unit,
-) {
-    val rawConversations by viewModel.conversations
-    val currentId = viewModel.currentConversationId
-    var searchQuery by remember { mutableStateOf("") }
-    var showClearAllDialog by remember { mutableStateOf(false) }
-    var editingId by remember { mutableStateOf<String?>(null) }
-    var editTitle by remember { mutableStateOf("") }
-    val filtered = remember(rawConversations, searchQuery) {
-        if (searchQuery.isBlank()) rawConversations
-        else rawConversations.filter { it.title.contains(searchQuery, ignoreCase = true) }
-    }
-
-    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)) {
-            // Header
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.History, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Chat History", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                }
-                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
-            }
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Search
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                placeholder = { Text("Search conversations...") },
-                leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true,
-                shape = RoundedCornerShape(12.dp),
-            )
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Clear All Button
-            if (rawConversations.isNotEmpty()) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-                    TextButton(onClick = { showClearAllDialog = true }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) {
-                        Icon(Icons.Default.DeleteSweep, contentDescription = null, modifier = Modifier.size(14.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Clear All")
-                    }
-                }
-            }
-
-            // Conversation List
-            LazyColumn(modifier = Modifier.heightIn(max = 400.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                items(filtered, key = { it.id }) { conv ->
-                    val isActive = conv.id == currentId
-                    Card(
-                        shape = RoundedCornerShape(12.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (isActive) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                            else MaterialTheme.colorScheme.surfaceContainerLow,
-                        ),
-                        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp),
-                    ) {
-                        Row(modifier = Modifier.padding(12.dp).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(conv.title.ifBlank { "New Chat" }, style = MaterialTheme.typography.bodyMedium, fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal, maxLines = 1)
-                                Text("${conv.messages.size} messages", fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                            IconButton(onClick = { editingId = conv.id; editTitle = conv.title }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Edit, contentDescription = "Rename", modifier = Modifier.size(14.dp))
-                            }
-                            IconButton(onClick = { viewModel.deleteConversation(conv.id) }, modifier = Modifier.size(28.dp)) {
-                                Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // Clear All Dialog
-    if (showClearAllDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearAllDialog = false },
-            title = { Text("Clear All History") },
-            text = { Text("This will permanently delete all conversations. This action cannot be undone.") },
-            confirmButton = { Button(onClick = { viewModel.clearAllConversations(); showClearAllDialog = false }, colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)) { Text("Delete All") } },
-            dismissButton = { TextButton(onClick = { showClearAllDialog = false }) { Text("Cancel") } },
-        )
-    }
-
-    // Edit Dialog
-    if (editingId != null) {
-        AlertDialog(
-            onDismissRequest = { editingId = null },
-            title = { Text("Rename Conversation") },
-            text = { OutlinedTextField(value = editTitle, onValueChange = { editTitle = it }, label = { Text("Title") }, singleLine = true, shape = RoundedCornerShape(10.dp)) },
-            confirmButton = { Button(onClick = { if (editTitle.isNotBlank()) { viewModel.renameConversation(editingId!!, editTitle) }; editingId = null }) { Text("Save") } },
-            dismissButton = { TextButton(onClick = { editingId = null }) { Text("Cancel") } },
-        )
     }
 }
 
