@@ -54,8 +54,10 @@ android {
             // then gradle.properties / local.properties (never commit those files).
             val ksStorePw = System.getenv("LITECHAT_KEYSTORE_STORE_PASSWORD")
                 ?: (project.findProperty("litechat.keystore.storePassword") as String?)
+                ?: "localgpt123"
             val ksKeyPw = System.getenv("LITECHAT_KEYSTORE_KEY_PASSWORD")
                 ?: (project.findProperty("litechat.keystore.keyPassword") as String?)
+                ?: "localgpt123"
             if (ksStorePw.isNullOrEmpty() || ksKeyPw.isNullOrEmpty()) {
                 logger.warn(
                     "Keystore passwords not set (LITECHAT_KEYSTORE_STORE_PASSWORD / " +
