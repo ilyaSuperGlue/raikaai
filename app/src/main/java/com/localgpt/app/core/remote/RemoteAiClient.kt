@@ -440,6 +440,7 @@ object RemoteAiClient {
                 }
 
                 val reader = response.body?.byteStream()?.bufferedReader() ?: return@flow
+                var inThinking = false
                 try {
                     while (true) {
                         val line = reader.readBoundedLine() ?: break
@@ -456,7 +457,26 @@ object RemoteAiClient {
                                 if (choices != null && choices.length() > 0) {
                                     val delta = choices.getJSONObject(0).optJSONObject("delta")
                                     val content = delta?.optString("content", "") ?: ""
+                                    val reasoning =
+                                        delta?.optString("reasoning_content", "")
+                                            ?.takeIf { it.isNotBlank() }
+                                            ?: delta?.optString("reasoning", "")
+                                                ?.takeIf { it.isNotBlank() }
+                                            ?: ""
+
+                                    if (reasoning.isNotEmpty()) {
+                                        if (!inThinking) {
+                                            emit("<think>")
+                                            inThinking = true
+                                        }
+                                        emit(reasoning)
+                                    }
+
                                     if (content.isNotEmpty()) {
+                                        if (inThinking) {
+                                            emit("</think>\n\n")
+                                            inThinking = false
+                                        }
                                         emit(content)
                                     }
                                 }
@@ -471,6 +491,9 @@ object RemoteAiClient {
                                 KLog.d("RemoteAiClient", "Skipping malformed SSE chunk: ${e.message}")
                             }
                         }
+                    }
+                    if (inThinking) {
+                        emit("</think>\n\n")
                     }
                 } finally {
                     reader.close()

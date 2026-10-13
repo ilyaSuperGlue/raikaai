@@ -558,6 +558,13 @@ class ChatViewModel(
             system = "$system$activeSkills"
         }
         s?.let { system += mcpToolsPromptBlock(it) }
+        if (s != null && s.modelSource == ChatConstants.SOURCE_REMOTE && (s.remoteImageModelId.isNotBlank() || s.remoteModelId.isNotBlank())) {
+            system += "\n\n[IMAGE GENERATION TOOL]\n" +
+                "You have access to an image generator tool. When the user asks to draw, generate, visualize, or modify an image " +
+                "(e.g. 'buat gambar...', 'jadikan kucing biru', 'ubah warna...', 'draw a...', 'create an image of...'), " +
+                "output EXACTLY one tool call in this format and NO OTHER text:\n" +
+                "<tool_call>{\"name\": \"generate_image\", \"arguments\": {\"prompt\": \"<detailed English prompt describing the complete visual scene>\"}}</tool_call>\n"
+        }
         ctx?.first?.let { system = "$system\n\n$it" }
 
         val allSources = (ctx?.second ?: emptyList()).toMutableList()
@@ -1256,19 +1263,29 @@ class ChatViewModel(
         val lastContent = messages.lastOrNull { it.role == ChatConstants.ROLE_ASSISTANT }?.content.orEmpty()
         val toolCall = com.localgpt.app.skills.ToolCallParser.parse(lastContent)
         if (toolCall == null) {
-            // Not a web_search call — maybe an MCP tool call.
-            val mcpCall = com.localgpt.app.skills.ToolCallParser.parseGenericCall(lastContent)
-            if (mcpCall != null && s.mcpEnabled && s.modelSource == ChatConstants.SOURCE_LOCAL) {
-                return handleMcpToolCall(
-                    call = mcpCall,
-                    modelPath = modelPath,
-                    s = s,
-                    targetChatId = targetChatId,
-                    history = history,
-                    effectiveSystem = effectiveSystem,
-                    currentSources = currentSources,
-                    onMetricsUpdate = onMetricsUpdate,
-                )
+            val genericCall = com.localgpt.app.skills.ToolCallParser.parseGenericCall(lastContent)
+            if (genericCall != null) {
+                if (genericCall.name.equals("generate_image", ignoreCase = true)) {
+                    val imgPrompt = genericCall.arguments.get("prompt")?.asString?.ifBlank { null }
+                        ?: genericCall.arguments.get("description")?.asString?.ifBlank { null }
+                        ?: ""
+                    if (imgPrompt.isNotBlank()) {
+                        executeImageToolCall(messages.lastIndex, imgPrompt)
+                    }
+                    return currentSources
+                }
+                if (s.mcpEnabled && s.modelSource == ChatConstants.SOURCE_LOCAL) {
+                    return handleMcpToolCall(
+                        call = genericCall,
+                        modelPath = modelPath,
+                        s = s,
+                        targetChatId = targetChatId,
+                        history = history,
+                        effectiveSystem = effectiveSystem,
+                        currentSources = currentSources,
+                        onMetricsUpdate = onMetricsUpdate,
+                    )
+                }
             }
             return currentSources
         }
@@ -1545,37 +1562,74 @@ class ChatViewModel(
     }
 
     /**
-     * Automatically handles image generation commands (e.g. "/image ...",
-     * "buat gambar ...", "generate image ...", or follow-up edits like
-     * "ubah jadi ..." when the previous message was a generated image).
+     * Handles explicit slash commands "/image <prompt>" or "/img <prompt>".
+     * Natural language image requests (e.g. "buat gambar...", "jadikan kucing biru")
+     * are handled organically by the model calling the `generate_image` tool.
      */
     private fun tryHandleImageCommand(body: String): Boolean {
         val trimmed = body.trim()
-        val regex = Regex("^(?:/image\\s+|/img\\s+|generate\\s+image[:\\s]+|buat(?:kan)?\\s+gambar[:\\s]+)(.+)", RegexOption.IGNORE_CASE)
-        val match = regex.find(trimmed)
-        if (match != null) {
-            val imagePrompt = match.groupValues[1].trim()
-            if (imagePrompt.isNotBlank()) {
-                generateImage(imagePrompt)
-                return true
+        val regex = Regex("^(?:/image\\s+|/img\\s+)(.+)", RegexOption.IGNORE_CASE)
+        val match = regex.find(trimmed) ?: return false
+        val imagePrompt = match.groupValues[1].trim()
+        if (imagePrompt.isBlank()) return false
+        generateImage(imagePrompt)
+        return true
+    }
+
+    /**
+     * Executes autonomous image generation when the LLM emits a `generate_image` tool call.
+     * Updates the assistant message in place with the resulting image.
+     */
+    private fun executeImageToolCall(messageIndex: Int, prompt: String) {
+        val s = effectiveSettings()
+        val imageModel = s.remoteImageModelId.ifBlank { s.remoteModelId }
+        if (s.remoteBaseUrl.isBlank() || imageModel.isBlank()) {
+            if (messageIndex in messages.indices) {
+                messages[messageIndex] = messages[messageIndex].copy(
+                    content = "[Image generation requires Remote Provider with an image model configured in Models tab.]"
+                )
+                persist()
+            }
+            return
+        }
+        viewModelScope.launch {
+            imageGenState.value = "Generating image…"
+            if (messageIndex in messages.indices) {
+                messages[messageIndex] = messages[messageIndex].copy(
+                    content = "Generating image: \"$prompt\"…"
+                )
+            }
+            try {
+                val bytes =
+                    RemoteAiClient.generateImage(
+                        s.remoteBaseUrl,
+                        s.remoteApiKey,
+                        imageModel,
+                        prompt,
+                        "1024x1024",
+                    ).getOrThrow()
+                val dir = File(app.filesDir, "chat_images").apply { if (!exists()) mkdirs() }
+                val file = File(dir, "gen_${System.currentTimeMillis()}.png")
+                withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+                if (messageIndex in messages.indices) {
+                    messages[messageIndex] = messages[messageIndex].copy(
+                        content = "Generated with `$imageModel`:\n$prompt",
+                        imagePath = file.absolutePath,
+                    )
+                    persist()
+                }
+            } catch (t: Throwable) {
+                KLog.e("ChatVM", "Image tool call failed", t)
+                if (messageIndex in messages.indices) {
+                    messages[messageIndex] = messages[messageIndex].copy(
+                        content = "Failed to generate image: ${t.message ?: t.javaClass.simpleName}"
+                    )
+                    persist()
+                }
+            } finally {
+                imageGenState.value = null
             }
         }
-        // Follow-up edit on a previously generated image:
-        val lastAssistant = messages.lastOrNull { it.role == ChatConstants.ROLE_ASSISTANT }
-        val wasImage = lastAssistant != null && !lastAssistant.imagePath.isNullOrBlank()
-        val isEditTrigger = trimmed.startsWith("ubah", ignoreCase = true) ||
-            trimmed.startsWith("ganti", ignoreCase = true) ||
-            trimmed.startsWith("edit", ignoreCase = true) ||
-            trimmed.startsWith("change", ignoreCase = true) ||
-            trimmed.startsWith("make it", ignoreCase = true)
-        if (wasImage && isEditTrigger) {
-            val prevUserPrompt = messages.findLast { it.role == ChatConstants.ROLE_USER && it.content.contains("Generate image", ignoreCase = true) }
-                ?.content?.substringAfter("):", "")?.trim() ?: ""
-            val fullPrompt = if (prevUserPrompt.isNotBlank()) "$prevUserPrompt, $trimmed" else trimmed
-            generateImage(fullPrompt)
-            return true
-        }
-        return false
     }
 
     /** Appends a user/assistant pair for locally-handled commands (no model call). */
@@ -1778,8 +1832,22 @@ class ChatViewModel(
                                 val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
                                 messages[idx] = current.copy(stats = lastMetrics.displayBadge, variants = variants, sources = ragSources)
                             }
-                            persist()
-                            captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
+                        persist()
+                        captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
+
+                        // Check if model called generate_image tool
+                        if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
+                            val lastIdx = messages.lastIndex
+                            val genericCall = com.localgpt.app.skills.ToolCallParser.parseGenericCall(messages[lastIdx].content)
+                            if (genericCall != null && genericCall.name.equals("generate_image", ignoreCase = true)) {
+                                val imgPrompt = genericCall.arguments.get("prompt")?.asString?.ifBlank { null }
+                                    ?: genericCall.arguments.get("description")?.asString?.ifBlank { null }
+                                    ?: ""
+                                if (imgPrompt.isNotBlank()) {
+                                    executeImageToolCall(lastIdx, imgPrompt)
+                                }
+                            }
+                        }
                             when {
                                 // Compare pass 1 done: stay in generating state, run the challenger.
                                 pass2 != null -> {
