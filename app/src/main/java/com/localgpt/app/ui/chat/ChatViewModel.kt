@@ -974,8 +974,8 @@ class ChatViewModel(
             prompt = followUpPrompt,
             params = LiteRtEngineManager.EngineParams(
                 modelPath = modelPath,
-                temperature = s.temperature,
-                topK = s.topK,
+                temperature = effectiveTemperature(s),
+                topK = effectiveTopK(s),
                 topP = s.topP,
                 maxTokens = s.maxTokens,
                 contextWindow = s.contextWindowTokens,
@@ -1056,7 +1056,10 @@ class ChatViewModel(
             return
         }
 
-        if (conversation == null) conversation = Conversation().also { currentConversationId = it.id }
+        if (conversation == null) {
+            conversation = Conversation().also { currentConversationId = it.id }
+            conversation?.personaId = activePersona.value.id
+        }
         val userEntry =
             ChatMessageEntry(
                 role = ChatConstants.ROLE_USER,
@@ -1082,7 +1085,7 @@ class ChatViewModel(
                     val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
                     val appliedWindow = activeSummary != null
                     val windowed = promptWindowMessages()
-                    val (ragSystem, sources1) = withRagSystem(s.systemPrompt, promptText)
+                    val (ragSystem, sources1) = withRagSystem(resolveSystemPrompt(s), promptText)
                     ragSources = sources1
                     val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
                     val history =
@@ -1107,8 +1110,8 @@ class ChatViewModel(
                                 params =
                                     LiteRtEngineManager.EngineParams(
                                         modelPath = modelPath,
-                                        temperature = s.temperature,
-                                        topK = s.topK,
+                                        temperature = effectiveTemperature(s),
+                                        topK = effectiveTopK(s),
                                         topP = s.topP,
                                         maxTokens = s.maxTokens,
                                         contextWindow = s.contextWindowTokens,
@@ -1184,7 +1187,10 @@ class ChatViewModel(
             errorMessage.value = "Please configure Remote Base URL and select a model in Models tab."
             return
         }
-        if (conversation == null) conversation = Conversation().also { currentConversationId = it.id }
+        if (conversation == null) {
+            conversation = Conversation().also { currentConversationId = it.id }
+            conversation?.personaId = activePersona.value.id
+        }
 
         val branchQuery = body.ifBlank { messages.lastOrNull { it.role == ChatConstants.ROLE_USER }?.content ?: "" }
         val userEntry =
@@ -1209,7 +1215,7 @@ class ChatViewModel(
         genJob =
             viewModelScope.launch {
                 try {
-                    var systemContent = s.systemPrompt
+                    var systemContent = resolveSystemPrompt(s)
                     if (!s.enableThinking) {
                         val noThinkDirective = "Do NOT think or reason inside <think>...</think> tags. Provide the final response directly."
                         systemContent = if (systemContent.isNotBlank()) "$systemContent\n$noThinkDirective" else noThinkDirective
@@ -1237,7 +1243,7 @@ class ChatViewModel(
                             apiKey = s.remoteApiKey,
                             model = s.remoteModelId,
                             messages = historyMap,
-                            temperature = s.temperature,
+                            temperature = effectiveTemperature(s),
                             topP = s.topP,
                             maxTokens = s.maxTokens,
                         ).collect { delta ->
@@ -1337,7 +1343,7 @@ class ChatViewModel(
                     val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
                     val appliedWindow = activeSummary != null
                     val windowed = promptWindowMessages()
-                    val (ragSystem, sources2) = withRagSystem(s.systemPrompt, newText.trim())
+                    val (ragSystem, sources2) = withRagSystem(resolveSystemPrompt(s), newText.trim())
                     ragSources = sources2
                     val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
                     val history =
@@ -1360,8 +1366,8 @@ class ChatViewModel(
                                 params =
                                     LiteRtEngineManager.EngineParams(
                                         modelPath = modelPath,
-                                        temperature = s.temperature,
-                                        topK = s.topK,
+                                        temperature = effectiveTemperature(s),
+                                        topK = effectiveTopK(s),
                                         topP = s.topP,
                                         maxTokens = s.maxTokens,
                                         contextWindow = s.contextWindowTokens,
@@ -1481,7 +1487,7 @@ class ChatViewModel(
                     val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
                     val appliedWindow = activeSummary != null
                     val windowed = promptWindowMessages()
-                    val (ragSystem, sources3) = withRagSystem(s.systemPrompt, lastUser.content)
+                    val (ragSystem, sources3) = withRagSystem(resolveSystemPrompt(s), lastUser.content)
                     ragSources = sources3
                     val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
                     val history =
@@ -1504,8 +1510,8 @@ class ChatViewModel(
                                 params =
                                     LiteRtEngineManager.EngineParams(
                                         modelPath = modelPath,
-                                        temperature = s.temperature,
-                                        topK = s.topK,
+                                        temperature = effectiveTemperature(s),
+                                        topK = effectiveTopK(s),
                                         topP = s.topP,
                                         maxTokens = s.maxTokens,
                                         contextWindow = s.contextWindowTokens,
@@ -1815,12 +1821,31 @@ class ChatViewModel(
 
     fun importPersonaFromJson(jsonString: String): Boolean = importPersonaJson(jsonString)
 
+    /**
+     * Selects the active character for the current chat. Deliberately does NOT
+     * touch global [Settings] (systemPrompt, temperature, topK): per-character
+     * values are resolved at generation time via [resolveSystemPrompt],
+     * [effectiveTemperature] and [effectiveTopK].
+     */
     fun applyPersona(persona: PersonaPreset) {
         activePersona.value = persona
-        setSystemPrompt(persona.systemPrompt)
-        persona.temperature?.let { setTemperature(it) }
-        persona.topK?.let { setTopK(it) }
     }
+
+    /**
+     * Effective system prompt for chat generation. The "general" character
+     * keeps the legacy behavior: the global prompt editable in Chat Settings.
+     * Any other character uses its own prompt via [CharacterPrompt].
+     */
+    private fun resolveSystemPrompt(s: Settings): String {
+        val persona = activePersona.value
+        if (persona.id == "general" || persona.id.isBlank()) return s.systemPrompt
+        return CharacterPrompt.build(persona)
+    }
+
+    /** Effective sampler values: persona override wins, settings is the fallback. */
+    private fun effectiveTemperature(s: Settings): Float = activePersona.value.temperature ?: s.temperature
+
+    private fun effectiveTopK(s: Settings): Int = activePersona.value.topK ?: s.topK
 
     // ── LM Studio Benchmark Tool ────────────────────────────────────────
 
