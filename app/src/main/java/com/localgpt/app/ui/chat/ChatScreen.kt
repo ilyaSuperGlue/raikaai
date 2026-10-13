@@ -54,52 +54,36 @@ import com.localgpt.app.core.audio.AudioPlayerHelper
 import com.localgpt.app.core.audio.AudioRecorderHelper
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
-import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
-import androidx.compose.material.icons.automirrored.filled.NavigateBefore
-import androidx.compose.material.icons.automirrored.filled.NavigateNext
-import androidx.compose.material.icons.automirrored.filled.VolumeOff
-import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.AddPhotoAlternate
 import androidx.compose.material.icons.filled.ArrowUpward
-import androidx.compose.material.icons.filled.Article
-import androidx.compose.material.icons.filled.AttachFile
-import androidx.compose.material.icons.filled.AudioFile
-import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Code
-import androidx.compose.material.icons.filled.ContentCopy
-import androidx.compose.material.icons.filled.Delete
-import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
-import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Mic
-import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Terminal
-import androidx.compose.material.icons.filled.Translate
-import androidx.compose.material.icons.filled.UploadFile
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.outlined.AddPhotoAlternate
+import androidx.compose.material.icons.outlined.AttachFile
+import androidx.compose.material.icons.outlined.AudioFile
+import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CheckCircle
+import androidx.compose.material.icons.outlined.CloudDownload
+import androidx.compose.material.icons.outlined.Code
+import androidx.compose.material.icons.outlined.Delete
+import androidx.compose.material.icons.outlined.Description
+import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.Folder
+import androidx.compose.material.icons.outlined.GraphicEq
+import androidx.compose.material.icons.outlined.Memory
+import androidx.compose.material.icons.outlined.Mic
+import androidx.compose.material.icons.outlined.MicOff
+import androidx.compose.material.icons.outlined.Person
+import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Search
+import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -140,6 +124,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
@@ -453,7 +438,7 @@ fun ChatScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Change Character") },
-                                    leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
+                                    leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
                                     onClick = {
                                         showOptionsMenu = false
                                         onNavigateToCharacters()
@@ -461,7 +446,7 @@ fun ChatScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Switch Model") },
-                                    leadingIcon = { Icon(Icons.Default.Memory, contentDescription = null) },
+                                    leadingIcon = { Icon(Icons.Outlined.Memory, contentDescription = null) },
                                     onClick = {
                                         showOptionsMenu = false
                                         onNavigateToModels()
@@ -469,7 +454,7 @@ fun ChatScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("AI Skills Hub") },
-                                    leadingIcon = { Icon(Icons.Default.AutoAwesome, contentDescription = null) },
+                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
                                     onClick = {
                                         showOptionsMenu = false
                                         showSkillsSheet = true
@@ -477,7 +462,7 @@ fun ChatScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Regenerate Response") },
-                                    leadingIcon = { Icon(Icons.Default.Refresh, contentDescription = null) },
+                                    leadingIcon = { Icon(Icons.Outlined.Refresh, contentDescription = null) },
                                     enabled = viewModel.messages.isNotEmpty() && !isGenerating,
                                     onClick = {
                                         showOptionsMenu = false
@@ -486,7 +471,7 @@ fun ChatScreen(
                                 )
                                 DropdownMenuItem(
                                     text = { Text("Clear All Messages") },
-                                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
+                                    leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
                                     enabled = viewModel.messages.isNotEmpty(),
                                     onClick = {
                                         showOptionsMenu = false
@@ -541,7 +526,7 @@ fun ChatScreen(
                                         else -> activePersona.name
                                     },
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (isCompressing) MaterialTheme.colorScheme.tertiary else MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.primary,
                                 fontSize = 10.sp,
                                 fontWeight = FontWeight.SemiBold,
                             )
@@ -610,7 +595,7 @@ fun ChatScreen(
                                         Icon(
                                             cmd.icon,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(14.dp),
                                         )
                                         Spacer(Modifier.width(6.dp))
@@ -661,7 +646,7 @@ fun ChatScreen(
                                 ) {
                                     Row(verticalAlignment = Alignment.CenterVertically) {
                                         Icon(
-                                            Icons.Default.Mic,
+                                            Icons.Outlined.Mic,
                                             contentDescription = null,
                                             tint = MaterialTheme.colorScheme.error,
                                             modifier = Modifier.size(16.dp),
@@ -746,7 +731,7 @@ fun ChatScreen(
                                     Text(
                                         "Image attached",
                                         style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.primary,
+                                        color = MaterialTheme.colorScheme.onSurface,
                                         fontWeight = FontWeight.SemiBold,
                                     )
                                 }
@@ -763,7 +748,7 @@ fun ChatScreen(
                             ) {
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.6f),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     modifier = Modifier.height(34.dp),
                                 ) {
                                     Row(
@@ -771,16 +756,16 @@ fun ChatScreen(
                                         modifier = Modifier.padding(horizontal = 10.dp),
                                     ) {
                                         Icon(
-                                            imageVector = Icons.Default.GraphicEq,
+                                            imageVector = Icons.Outlined.GraphicEq,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(16.dp),
                                         )
                                         Spacer(Modifier.width(6.dp))
                                         Text(
                                             "Audio clip attached",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            color = MaterialTheme.colorScheme.onSurface,
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                         Spacer(Modifier.width(6.dp))
@@ -822,7 +807,7 @@ fun ChatScreen(
                                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Default.GraphicEq,
+                                        imageVector = Icons.Outlined.GraphicEq,
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.error,
                                         modifier = Modifier.size(18.dp),
@@ -942,7 +927,7 @@ fun ChatScreen(
                                         DropdownMenuItem(
                                             text = { Text("Attach Image (Vision)", style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
-                                                Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
                                                 showAttachmentMenu = false
@@ -954,7 +939,7 @@ fun ChatScreen(
                                         DropdownMenuItem(
                                             text = { Text("Attach Audio (Multimodal)", style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
-                                                Icon(Icons.Default.AudioFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                Icon(Icons.Outlined.AudioFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
                                                 showAttachmentMenu = false
@@ -964,7 +949,7 @@ fun ChatScreen(
                                         DropdownMenuItem(
                                             text = { Text("Record Voice Note (WAV)", style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
-                                                Icon(Icons.Default.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                Icon(Icons.Outlined.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
                                                 showAttachmentMenu = false
@@ -974,20 +959,20 @@ fun ChatScreen(
                                         DropdownMenuItem(
                                             text = { Text("Knowledge Base (RAG Docs)", style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
-                                                Icon(Icons.Default.AttachFile, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                Icon(Icons.Outlined.AttachFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
                                             trailingIcon = {
                                                 if (ragDocuments.isNotEmpty()) {
                                                     Surface(
                                                         shape = RoundedCornerShape(50),
-                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                                     ) {
                                                         Text(
                                                             "${ragDocuments.size}",
                                                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             fontSize = 10.sp,
-                                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         )
                                                     }
                                                 }
@@ -1000,20 +985,20 @@ fun ChatScreen(
                                         DropdownMenuItem(
                                             text = { Text("AI Skills Hub", style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
-                                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                                Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
                                             trailingIcon = {
                                                 if (activeSkillsCount > 0) {
                                                     Surface(
                                                         shape = RoundedCornerShape(50),
-                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                                     ) {
                                                         Text(
                                                             "$activeSkillsCount ON",
                                                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             fontSize = 10.sp,
-                                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         )
                                                     }
                                                 }
@@ -1078,9 +1063,9 @@ fun ChatScreen(
                                         ) {
                                             Row(verticalAlignment = Alignment.CenterVertically) {
                                                 Icon(
-                                                    Icons.Default.Memory,
+                                                    Icons.Outlined.Memory,
                                                     contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     modifier = Modifier.size(15.dp),
                                                 )
                                                 Spacer(Modifier.width(5.dp))
@@ -1088,19 +1073,19 @@ fun ChatScreen(
                                                     text = "Model",
                                                     style = MaterialTheme.typography.labelMedium,
                                                     fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.primary,
+                                                    color = MaterialTheme.colorScheme.onSurface,
                                                 )
                                             }
                                             Surface(
                                                 shape = RoundedCornerShape(50),
-                                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
+                                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                             ) {
                                                 Text(
                                                     text = if (settings.modelSource == ChatConstants.SOURCE_REMOTE) "Remote" else (activeBackend ?: "GPU"),
                                                     style = MaterialTheme.typography.labelSmall,
                                                     fontSize = 10.sp,
                                                     fontWeight = FontWeight.SemiBold,
-                                                    color = MaterialTheme.colorScheme.primary,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                                                 )
                                             }
@@ -1147,7 +1132,7 @@ fun ChatScreen(
                                                     },
                                                     leadingIcon = {
                                                         Icon(
-                                                            imageVector = if (isActive) Icons.Default.CheckCircle else Icons.Default.Memory,
+                                                            imageVector = if (isActive) Icons.Outlined.CheckCircle else Icons.Outlined.Memory,
                                                             contentDescription = null,
                                                             tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                                             modifier = Modifier.size(16.dp),
@@ -1183,7 +1168,7 @@ fun ChatScreen(
                                                         },
                                                         leadingIcon = {
                                                             Icon(
-                                                                Icons.Default.Dns,
+                                                                Icons.Outlined.Dns,
                                                                 contentDescription = null,
                                                                 tint = if (isRemoteActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                                                                 modifier = Modifier.size(16.dp),
@@ -1204,7 +1189,7 @@ fun ChatScreen(
                                         DropdownMenuItem(
                                             text = { Text("Browse Models Hub…", style = MaterialTheme.typography.labelSmall) },
                                             leadingIcon = {
-                                                Icon(Icons.Default.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
+                                                Icon(Icons.Outlined.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                                             },
                                             onClick = {
                                                 showModelDropdown = false
@@ -1218,7 +1203,7 @@ fun ChatScreen(
                                 if (activeSkillsCount > 0) {
                                     Surface(
                                         shape = RoundedCornerShape(50),
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(50))
                                             .clickable { showSkillsSheet = true },
@@ -1228,9 +1213,9 @@ fun ChatScreen(
                                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                                         ) {
                                             Icon(
-                                                Icons.Default.AutoAwesome,
+                                                Icons.Outlined.AutoAwesome,
                                                 contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.size(11.dp),
                                             )
                                             Spacer(Modifier.width(2.dp))
@@ -1239,7 +1224,7 @@ fun ChatScreen(
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
                                     }
@@ -1249,7 +1234,7 @@ fun ChatScreen(
                                 if (settings.ragEnabled && ragDocuments.isNotEmpty()) {
                                     Surface(
                                         shape = RoundedCornerShape(50),
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(50))
                                             .clickable { showRagSheet = true },
@@ -1259,9 +1244,9 @@ fun ChatScreen(
                                             modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
                                         ) {
                                             Icon(
-                                                Icons.Default.AttachFile,
+                                                Icons.Outlined.AttachFile,
                                                 contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.size(11.dp),
                                             )
                                                                     Text(
@@ -1269,7 +1254,7 @@ fun ChatScreen(
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontSize = 10.sp,
                                                 fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }
                                     }
@@ -1333,7 +1318,7 @@ fun ChatScreen(
                                         modifier = Modifier.size(34.dp),
                                     ) {
                                         Icon(
-                                            imageVector = if (isListening) Icons.Default.MicOff else Icons.Default.Mic,
+                                            imageVector = if (isListening) Icons.Outlined.MicOff else Icons.Outlined.Mic,
                                             contentDescription = if (isListening) "Stop recording" else "Voice input",
                                             tint = if (isListening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(17.dp),
@@ -1495,7 +1480,7 @@ fun ChatScreen(
                     value = chatSearchQuery,
                     onValueChange = { chatSearchQuery = it },
                     placeholder = { Text("Search conversations…") },
-                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp)) },
                     singleLine = true,
                     shape = RoundedCornerShape(12.dp),
                     modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
@@ -1631,7 +1616,7 @@ fun ChatScreen(
                         onClick = { libraryTab = 0 },
                         label = { Text("Knowledge") },
                         leadingIcon = {
-                            Icon(Icons.Default.Description, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Outlined.Description, contentDescription = null, modifier = Modifier.size(15.dp))
                         },
                     )
                     FilterChip(
@@ -1639,7 +1624,7 @@ fun ChatScreen(
                         onClick = { libraryTab = 1 },
                         label = { Text("Artifacts") },
                         leadingIcon = {
-                            Icon(Icons.Default.Code, contentDescription = null, modifier = Modifier.size(15.dp))
+                            Icon(Icons.Outlined.Code, contentDescription = null, modifier = Modifier.size(15.dp))
                         },
                     )
                 }
@@ -1689,7 +1674,7 @@ fun ChatScreen(
                         shape = RoundedCornerShape(12.dp),
                         modifier = Modifier.fillMaxWidth(),
                     ) {
-                        Icon(Icons.Default.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(Icons.Outlined.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
                         Text("Import Document (txt, md, csv, json, code)")
                     }
@@ -1725,9 +1710,9 @@ fun ChatScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(
-                                            Icons.Default.Description,
+                                            Icons.Outlined.Description,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp),
                                         )
                                         Spacer(Modifier.width(10.dp))
@@ -1750,7 +1735,7 @@ fun ChatScreen(
                                             modifier = Modifier.size(28.dp),
                                         ) {
                                             Icon(
-                                                Icons.Default.Delete,
+                                                Icons.Outlined.Delete,
                                                 contentDescription = "Delete document",
                                                 tint = MaterialTheme.colorScheme.error,
                                                 modifier = Modifier.size(16.dp),
@@ -1798,9 +1783,9 @@ fun ChatScreen(
                                     Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Icon(
-                                                Icons.Default.Folder,
+                                                Icons.Outlined.Folder,
                                                 contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
+                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.size(18.dp),
                                             )
                                             Spacer(Modifier.width(10.dp))
@@ -1842,9 +1827,9 @@ fun ChatScreen(
                                                         modifier = Modifier.size(28.dp),
                                                     ) {
                                                         Icon(
-                                                            Icons.Default.Visibility,
+                                                            Icons.Outlined.Visibility,
                                                             contentDescription = "Preview project",
-                                                            tint = MaterialTheme.colorScheme.primary,
+                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                             modifier = Modifier.size(17.dp),
                                                         )
                                                     }
@@ -1873,7 +1858,7 @@ fun ChatScreen(
                                                     modifier = Modifier.size(28.dp),
                                                 ) {
                                                     Icon(
-                                                        Icons.Default.Delete,
+                                                        Icons.Outlined.Delete,
                                                         contentDescription = "Delete project",
                                                         tint = MaterialTheme.colorScheme.error,
                                                         modifier = Modifier.size(16.dp),

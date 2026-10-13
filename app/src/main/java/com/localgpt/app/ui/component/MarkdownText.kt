@@ -26,9 +26,9 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
-import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.outlined.Psychology
 import androidx.compose.material.icons.filled.SaveAlt
-import androidx.compose.material.icons.filled.Visibility
+import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.HorizontalDivider
@@ -209,9 +209,9 @@ private fun ThinkingCard(
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Icon(
-                        Icons.Default.Psychology,
+                        Icons.Outlined.Psychology,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(16.dp),
                     )
                     Spacer(Modifier.width(8.dp))
@@ -219,7 +219,7 @@ private fun ThinkingCard(
                         text = if (isComplete) "Thought Process" else "Thinking…",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.primary,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
 
@@ -333,7 +333,7 @@ private fun CodeBlockCard(
                 Text(
                     text = language.ifBlank { "code" }.lowercase(),
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.primary,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                     fontWeight = FontWeight.Bold,
                     fontFamily = FontFamily.Monospace,
                 )
@@ -344,10 +344,10 @@ private fun CodeBlockCard(
                             modifier = Modifier.size(24.dp),
                         ) {
                             Icon(
-                                Icons.Filled.Visibility,
+                                Icons.Outlined.Visibility,
                                 contentDescription = "Preview HTML",
                                 modifier = Modifier.size(14.dp),
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
                         Spacer(Modifier.width(4.dp))
@@ -502,7 +502,7 @@ private fun TableCard(
                                 text = annotate(headerText, scheme),
                                 style = MaterialTheme.typography.labelMedium,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
+                                color = MaterialTheme.colorScheme.onSurface,
                                 textAlign = align,
                                 modifier = Modifier.fillMaxWidth(),
                             )

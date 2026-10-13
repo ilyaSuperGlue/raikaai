@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Psychology
-import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
@@ -67,6 +66,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
@@ -164,11 +164,11 @@ fun CharactersScreen(
                         )
                     }
                     Spacer(Modifier.width(10.dp))
-                    com.localgpt.app.ui.component.SquircleIconBox(
-                        icon = Icons.Default.SmartToy,
-                        boxSize = 40.dp,
-                        iconSize = 22.dp,
-                        shapeRadius = 12.dp,
+                    Icon(
+                        imageVector = Icons.Default.SmartToy,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp),
                     )
                     Spacer(Modifier.width(12.dp))
                     Column {
@@ -180,7 +180,7 @@ fun CharactersScreen(
                         Text(
                             text = "${allPersonas.size} Personas & System Prompts",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -240,7 +240,7 @@ fun CharactersScreen(
                                     value = searchQuery,
                                     onValueChange = { searchQuery = it },
                                     placeholder = { Text("Search personas or system prompts…") },
-                                    leadingIcon = { Icon(Icons.Default.Search, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.primary) },
+                                    leadingIcon = { Icon(Icons.Outlined.Search, contentDescription = null, modifier = Modifier.size(18.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
                                     shape = RoundedCornerShape(12.dp),
                                     singleLine = true,
                                     colors = OutlinedTextFieldDefaults.colors(
@@ -261,13 +261,13 @@ fun CharactersScreen(
                                         Surface(
                                             onClick = { selectedFilter = filter },
                                             shape = RoundedCornerShape(8.dp),
-                                            color = if (isSel) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            color = if (isSel) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                         ) {
                                             Text(
                                                 text = filter,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (isSel) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                                color = if (isSel) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                             )
                                         }
@@ -338,12 +338,12 @@ fun CharactersScreen(
                                     }
                                     Surface(
                                         shape = RoundedCornerShape(50),
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                     ) {
                                         Text(
                                             "New",
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontWeight = FontWeight.Bold,
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                         )
@@ -592,7 +592,7 @@ private fun CharacterCardItem(
             CardDefaults.cardColors(
                 containerColor =
                     if (isActive) {
-                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f)
+                        MaterialTheme.colorScheme.surfaceContainerHigh
                     } else {
                         MaterialTheme.colorScheme.surfaceContainerLow
                     },
@@ -623,14 +623,14 @@ private fun CharacterCardItem(
                 ) {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
                         modifier = Modifier.size(46.dp),
                     ) {
                         Box(contentAlignment = Alignment.Center) {
                             Icon(
                                 imageVector = vectorIcon,
                                 contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(24.dp),
                             )
                         }
@@ -731,7 +731,7 @@ private fun CharacterCardItem(
                             "Greeting: ",
                             style = MaterialTheme.typography.labelSmall,
                             fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                         Text(
                             persona.greeting,
@@ -850,7 +850,7 @@ private fun CharacterEditorDialog(
                             val isSelected = iconType == type
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerLow,
+                                color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                 modifier =
                                     Modifier
                                         .size(36.dp)
@@ -861,7 +861,7 @@ private fun CharacterEditorDialog(
                                     Icon(
                                         imageVector = icon,
                                         contentDescription = null,
-                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(18.dp),
                                     )
                                 }

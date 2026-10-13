@@ -22,7 +22,6 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
@@ -31,9 +30,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Memory
-import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Terminal
@@ -86,12 +83,7 @@ import com.localgpt.app.localai.LocalModelDownloader.DownloadState
 import com.localgpt.app.ui.component.ChipsRow
 import com.localgpt.app.ui.component.Material3SettingsGroup
 import com.localgpt.app.ui.component.Material3SettingsItem
-import com.localgpt.app.ui.component.SettingsIcon
 import com.localgpt.app.ui.component.createM3Item
-import androidx.compose.material.icons.outlined.Brightness4
-import androidx.compose.material.icons.outlined.DarkMode
-import androidx.compose.material.icons.outlined.Palette
-import androidx.compose.material.icons.outlined.Psychology
 import com.localgpt.app.ui.models.ActiveDownloadItemCard
 import com.localgpt.app.ui.models.CustomUrlDownloadCard
 import com.localgpt.app.ui.models.InstalledModelCard
@@ -137,11 +129,11 @@ fun ModelsSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    com.localgpt.app.ui.component.SquircleIconBox(
-                        icon = Icons.Default.Memory,
-                        boxSize = 40.dp,
-                        iconSize = 22.dp,
-                        shapeRadius = 12.dp,
+                    Icon(
+                        imageVector = Icons.Default.Memory,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp),
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -393,11 +385,11 @@ fun ServerSheet(
             // Header
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    com.localgpt.app.ui.component.SquircleIconBox(
-                        icon = Icons.Default.Dns,
-                        boxSize = 40.dp,
-                        iconSize = 22.dp,
-                        shapeRadius = 12.dp,
+                    Icon(
+                        imageVector = Icons.Default.Dns,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp),
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -592,11 +584,11 @@ fun LogsSheet(
             // Header
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    com.localgpt.app.ui.component.SquircleIconBox(
-                        icon = Icons.Default.Terminal,
-                        boxSize = 40.dp,
-                        iconSize = 22.dp,
-                        shapeRadius = 12.dp,
+                    Icon(
+                        imageVector = Icons.Default.Terminal,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp),
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {
@@ -685,11 +677,11 @@ fun BenchmarkSheet(
             // Header
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    com.localgpt.app.ui.component.SquircleIconBox(
-                        icon = Icons.Default.Speed,
-                        boxSize = 40.dp,
-                        iconSize = 22.dp,
-                        shapeRadius = 12.dp,
+                    Icon(
+                        imageVector = Icons.Default.Speed,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(24.dp),
                     )
                     Spacer(modifier = Modifier.width(12.dp))
                     Column {

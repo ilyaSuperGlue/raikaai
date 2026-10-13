@@ -23,11 +23,9 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bolt
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.outlined.ContentCopy
 import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
@@ -111,30 +109,34 @@ fun ServerScreen(
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                IconButton(
-                    onClick = onOpenDrawer,
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Menu,
-                        contentDescription = "Open Menu",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onOpenDrawer,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Menu,
+                            contentDescription = "Open Menu",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Server & Benchmark",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "Local OpenAI API Bridge & Speed Profiler",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = "Server & Benchmark",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "Local OpenAI API Bridge & Speed Profiler",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
+                com.localgpt.app.ui.component.ServerStatusBadge(serverStatus = serverStatus)
             }
 
             Spacer(Modifier.height(8.dp))
@@ -246,7 +248,7 @@ fun ServerScreen(
                             // Clickable LAN Endpoint Badge
                             Surface(
                                 shape = RoundedCornerShape(10.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 modifier =
                                     Modifier
                                         .fillMaxWidth()
@@ -261,7 +263,7 @@ fun ServerScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                 ) {
                                     Column {
-                                        Text("API Base URL (Tap to copy)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                                        Text("API Base URL (Tap to copy)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         Text(
                                             serverEndpoint,
                                             style = MaterialTheme.typography.bodyMedium,
@@ -269,7 +271,7 @@ fun ServerScreen(
                                             fontFamily = FontFamily.Monospace,
                                         )
                                     }
-                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy URL", tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                    Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy URL", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                 }
                             }
                         }
@@ -354,14 +356,14 @@ fun ServerScreen(
                                     Surface(
                                         onClick = { selectedSnippetTab = tab },
                                         shape = RoundedCornerShape(10.dp),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                         modifier = Modifier.weight(1f),
                                     ) {
                                         Text(
                                             text = label,
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(vertical = 8.dp, horizontal = 4.dp),
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                             maxLines = 1,
@@ -432,7 +434,7 @@ curl -N $serverEndpoint/chat/completions \
                                         Text(
                                             selectedSnippetTab.uppercase(Locale.ROOT),
                                             style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.primary,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             fontWeight = FontWeight.Bold,
                                         )
                                         IconButton(
@@ -442,7 +444,7 @@ curl -N $serverEndpoint/chat/completions \
                                             },
                                             modifier = Modifier.size(24.dp),
                                         ) {
-                                            Icon(Icons.Default.ContentCopy, contentDescription = "Copy code", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
+                                            Icon(Icons.Outlined.ContentCopy, contentDescription = "Copy code", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
                                         }
                                     }
                                     Spacer(Modifier.height(4.dp))
@@ -565,14 +567,14 @@ curl -N $serverEndpoint/chat/completions \
                                     Surface(
                                         onClick = { viewModel.setBackend(be) },
                                         shape = RoundedCornerShape(10.dp),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                         modifier = Modifier.weight(1f),
                                     ) {
                                         Text(
                                             text = label,
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                         )

@@ -21,11 +21,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Dns
-import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
@@ -54,6 +53,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
@@ -119,30 +119,39 @@ fun ModelsScreen(
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                IconButton(
-                    onClick = onOpenDrawer,
-                    modifier = Modifier.size(36.dp),
-                ) {
-                    Icon(
-                        Icons.Default.Menu,
-                        contentDescription = "Open Menu",
-                        tint = MaterialTheme.colorScheme.onSurface,
-                    )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(
+                        onClick = onOpenDrawer,
+                        modifier = Modifier.size(36.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Menu,
+                            contentDescription = "Open Menu",
+                            tint = MaterialTheme.colorScheme.onSurface,
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column {
+                        Text(
+                            text = "Models Hub",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "On-Device LiteRT & Remote Endpoints",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
                 }
-                Spacer(Modifier.width(10.dp))
-                Column {
-                    Text(
-                        text = "Models Hub",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "On-Device LiteRT & Remote Endpoints",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.primary,
-                    )
-                }
+                com.localgpt.app.ui.component.EngineStatusBadge(
+                    isLoaded = isModelLoaded,
+                    modelPath = loadedModelPath,
+                    backend = activeBackend ?: "GPU",
+                    isLoading = isLoadingModel,
+                )
             }
 
             Spacer(Modifier.height(8.dp))
@@ -209,13 +218,13 @@ fun ModelsScreen(
                                 }
                                 Surface(
                                     shape = RoundedCornerShape(8.dp),
-                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                 ) {
                                     Text(
                                         text = String.format(Locale.ROOT, "%.1f GB Free", freeDiskGb),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
-                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                     )
                                 }
@@ -233,14 +242,14 @@ fun ModelsScreen(
                                     Surface(
                                         onClick = { viewModel.setBackend(be) },
                                         shape = RoundedCornerShape(10.dp),
-                                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                         modifier = Modifier.weight(1f),
                                     ) {
                                         Text(
                                             text = label,
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                         )
@@ -259,7 +268,7 @@ fun ModelsScreen(
                     item(key = "active_downloads_card") {
                         Card(
                             shape = RoundedCornerShape(16.dp),
-                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)),
+                            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Column(
@@ -392,7 +401,7 @@ fun ModelsScreen(
 
                                         Surface(
                                             shape = RoundedCornerShape(12.dp),
-                                            color = if (isCurrent) MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f) else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            color = if (isCurrent) MaterialTheme.colorScheme.surfaceContainerHigh else MaterialTheme.colorScheme.surfaceContainerLow,
                                             border = if (isCurrent) androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary) else null,
                                             modifier = Modifier.fillMaxWidth(),
                                         ) {
@@ -413,7 +422,7 @@ fun ModelsScreen(
                                                         if (isCurrent) {
                                                             Spacer(Modifier.width(6.dp))
                                                             Icon(
-                                                                Icons.Default.Check,
+                                                                Icons.Outlined.Check,
                                                                 contentDescription = "Active",
                                                                 tint = MaterialTheme.colorScheme.primary,
                                                                 modifier = Modifier.size(16.dp),
@@ -554,15 +563,15 @@ fun ModelsScreen(
                                                 ) {
                                                     Surface(
                                                         shape = RoundedCornerShape(8.dp),
-                                                        color = MaterialTheme.colorScheme.primaryContainer,
+                                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                                     ) {
                                                         Row(
                                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                                             verticalAlignment = Alignment.CenterVertically,
                                                         ) {
-                                                            Icon(Icons.Default.Check, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(14.dp))
+                                                            Icon(Icons.Outlined.Check, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(14.dp))
                                                             Spacer(Modifier.width(4.dp))
-                                                            Text("Installed", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onPrimaryContainer)
+                                                            Text("Installed", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                                         }
                                                     }
                                                     Row(verticalAlignment = Alignment.CenterVertically) {
@@ -694,7 +703,7 @@ fun ModelsScreen(
                                         Surface(
                                             onClick = { viewModel.setRemoteModelId(item.id) },
                                             shape = RoundedCornerShape(10.dp),
-                                            color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                            color = if (isSelected) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                             modifier = Modifier.fillMaxWidth(),
                                         ) {
                                             Row(
@@ -707,7 +716,7 @@ fun ModelsScreen(
                                                         text = item.name.ifBlank { item.id },
                                                         style = MaterialTheme.typography.bodyMedium,
                                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                                        color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                                        color = if (isSelected) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                                     )
                                                     Text(
                                                         text = item.id,

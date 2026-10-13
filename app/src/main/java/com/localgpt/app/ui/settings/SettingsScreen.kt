@@ -57,7 +57,6 @@ import com.localgpt.app.ui.chat.ChatViewModel
 import com.localgpt.app.ui.component.ChipsRow
 import com.localgpt.app.ui.component.Material3SettingsGroup
 import com.localgpt.app.ui.component.Material3SettingsItem
-import com.localgpt.app.ui.component.SettingsIcon
 import com.localgpt.app.ui.component.createM3Item
 
 /**
@@ -113,7 +112,7 @@ fun SettingsScreen(
                         Text(
                             text = "Theme, Preferences & Storage",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -126,7 +125,7 @@ fun SettingsScreen(
                     items =
                         listOf(
                             Material3SettingsItem(
-                                leadingContent = { com.localgpt.app.ui.component.SquircleIconBox(Icons.Outlined.Brightness4) },
+                                leadingContent = { Icon(Icons.Outlined.Brightness4, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(24.dp)) },
                                 title = { Text("Theme Mode") },
                                 description = {
                                     Column(
@@ -282,7 +281,7 @@ fun SettingsScreen(
                                 Icon(
                                     Icons.Default.Info,
                                     contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.size(20.dp),
                                 )
                                 Spacer(Modifier.width(10.dp))
@@ -294,13 +293,13 @@ fun SettingsScreen(
                             }
                             Surface(
                                 shape = RoundedCornerShape(50),
-                                color = MaterialTheme.colorScheme.primaryContainer,
+                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
                             ) {
                                 Text(
                                     "v1.0.0",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontWeight = FontWeight.Bold,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                 )
                             }
@@ -319,7 +318,7 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Text("Runtime Engine", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("LiteRT-LM (OpenCL / NEON)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.primary)
+                            Text("LiteRT-LM (OpenCL / NEON)", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.SemiBold)
                         }
                         Row(
                             modifier = Modifier.fillMaxWidth(),

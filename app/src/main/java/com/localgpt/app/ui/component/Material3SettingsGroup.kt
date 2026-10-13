@@ -1,9 +1,7 @@
 package com.localgpt.app.ui.component
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -24,10 +22,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.painter.Painter
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.graphics.vector.rememberVectorPainter
 import androidx.compose.ui.unit.dp
 
 /**
@@ -50,7 +46,7 @@ fun Material3SettingsGroup(
             Text(
                 text = it,
                 style = MaterialTheme.typography.labelLarge,
-                color = MaterialTheme.colorScheme.primary,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(bottom = 8.dp, top = 8.dp, start = 4.dp),
             )
         }
@@ -106,46 +102,19 @@ private fun Material3SettingsItemRow(item: Material3SettingsItem) {
                 ).padding(horizontal = 16.dp, vertical = 14.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        // Custom leading content or Icon with background
+        // Custom leading content or plain outline-style icon (no tinted box)
         if (item.leadingContent != null) {
             item.leadingContent.invoke()
             Spacer(modifier = Modifier.width(14.dp))
         } else if (item.icon != null) {
-            Box(
-                modifier =
-                    Modifier
-                        .size(40.dp)
-                        .clip(RoundedCornerShape(12.dp))
-                        .background(
-                            MaterialTheme.colorScheme.primary.copy(
-                                alpha = if (item.isHighlighted) 0.15f else 0.1f,
-                            ),
-                        ),
-                contentAlignment = Alignment.Center,
-            ) {
-                if (item.showBadge) {
-                    BadgedBox(
-                        badge = {
-                            Badge(
-                                containerColor = MaterialTheme.colorScheme.error,
-                            )
-                        },
-                    ) {
-                        Icon(
-                            painter = item.icon,
-                            contentDescription = null,
-                            tint =
-                                if (!item.enabled) {
-                                    MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
-                                } else if (item.isHighlighted) {
-                                    MaterialTheme.colorScheme.primary
-                                } else {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
-                                },
-                            modifier = Modifier.size(22.dp),
+            if (item.showBadge) {
+                BadgedBox(
+                    badge = {
+                        Badge(
+                            containerColor = MaterialTheme.colorScheme.error,
                         )
-                    }
-                } else {
+                    },
+                ) {
                     Icon(
                         painter = item.icon,
                         contentDescription = null,
@@ -155,11 +124,25 @@ private fun Material3SettingsItemRow(item: Material3SettingsItem) {
                             } else if (item.isHighlighted) {
                                 MaterialTheme.colorScheme.primary
                             } else {
-                                MaterialTheme.colorScheme.primary.copy(alpha = 0.9f)
+                                MaterialTheme.colorScheme.onSurfaceVariant
                             },
-                        modifier = Modifier.size(22.dp),
+                        modifier = Modifier.size(24.dp),
                     )
                 }
+            } else {
+                Icon(
+                    painter = item.icon,
+                    contentDescription = null,
+                    tint =
+                        if (!item.enabled) {
+                            MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                        } else if (item.isHighlighted) {
+                            MaterialTheme.colorScheme.primary
+                        } else {
+                            MaterialTheme.colorScheme.onSurfaceVariant
+                        },
+                    modifier = Modifier.size(24.dp),
+                )
             }
 
             Spacer(modifier = Modifier.width(14.dp))
@@ -238,21 +221,12 @@ fun createM3Item(
         leadingContent =
             if (icon != null) {
                 {
-                    Box(
-                        modifier =
-                            Modifier
-                                .size(40.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Icon(
-                            imageVector = icon,
-                            contentDescription = null,
-                            tint = if (enabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
-                            modifier = Modifier.size(22.dp),
-                        )
-                    }
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f),
+                        modifier = Modifier.size(24.dp),
+                    )
                 }
             } else {
                 null

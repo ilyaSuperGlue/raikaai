@@ -17,20 +17,18 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Backup
-import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Clear
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Edit
-import androidx.compose.material.icons.filled.FileUpload
-import androidx.compose.material.icons.filled.History
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.outlined.ChatBubbleOutline
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.filled.Share
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -169,7 +167,7 @@ fun HistoryScreen(
                         Text(
                             text = "${conversations.size} Saved Conversations",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -196,7 +194,7 @@ fun HistoryScreen(
                     onClick = { selectedTab = 0 },
                     text = {
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.History, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(Icons.Outlined.History, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(Modifier.width(6.dp))
                             Text("Conversations (${conversations.size})", fontWeight = FontWeight.SemiBold)
                         }
@@ -239,9 +237,9 @@ fun HistoryScreen(
                                     placeholder = { Text("Search conversations…") },
                                     leadingIcon = {
                                         Icon(
-                                            Icons.Default.Search,
+                                            Icons.Outlined.Search,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(18.dp),
                                         )
                                     },
@@ -280,13 +278,13 @@ fun HistoryScreen(
                                             }
                                         },
                                         shape = RoundedCornerShape(8.dp),
-                                        color = if (isTime) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        color = if (isTime) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                     ) {
                                         Text(
                                             text = if (isTime && !sortDescending) "By Time (Oldest)" else "By Time (Newest)",
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = if (isTime) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isTime) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = if (isTime) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         )
                                     }
@@ -302,13 +300,13 @@ fun HistoryScreen(
                                             }
                                         },
                                         shape = RoundedCornerShape(8.dp),
-                                        color = if (isName) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        color = if (isName) MaterialTheme.colorScheme.surfaceContainerHigh else Color.Transparent,
                                     ) {
                                         Text(
                                             text = if (isName && sortDescending) "By Name (Z-A)" else "By Name (A-Z)",
                                             style = MaterialTheme.typography.labelSmall,
                                             fontWeight = if (isName) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (isName) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            color = if (isName) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
                                         )
                                     }
@@ -329,20 +327,12 @@ fun HistoryScreen(
                                     horizontalAlignment = Alignment.CenterHorizontally,
                                     verticalArrangement = Arrangement.spacedBy(10.dp),
                                 ) {
-                                    Surface(
-                                        shape = CircleShape,
-                                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
-                                        modifier = Modifier.size(56.dp),
-                                    ) {
-                                        Box(contentAlignment = Alignment.Center) {
-                                            Icon(
-                                                Icons.Default.History,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.primary,
-                                                modifier = Modifier.size(28.dp),
-                                            )
-                                        }
-                                    }
+                                    Icon(
+                                        Icons.Outlined.History,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(28.dp),
+                                    )
                                     Text(
                                         text = if (query.isBlank()) "No conversation history" else "No matching chats found",
                                         style = MaterialTheme.typography.bodyMedium,
@@ -361,15 +351,15 @@ fun HistoryScreen(
 
                     Card(
                         shape = RoundedCornerShape(16.dp),
-                        colors =
-                            CardDefaults.cardColors(
-                                containerColor =
-                                    if (isActive) {
-                                        MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                                    } else {
-                                        MaterialTheme.colorScheme.surfaceContainerLow
-                                    },
-                            ),
+                            colors =
+                                CardDefaults.cardColors(
+                                    containerColor =
+                                        if (isActive) {
+                                            MaterialTheme.colorScheme.surfaceContainerHigh
+                                        } else {
+                                            MaterialTheme.colorScheme.surfaceContainerLow
+                                        },
+                                ),
                         border =
                             if (isActive) {
                                 androidx.compose.foundation.BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f))
@@ -390,20 +380,12 @@ fun HistoryScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             // Left Icon container
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceContainerHighest,
-                                modifier = Modifier.size(44.dp),
-                            ) {
-                                Box(contentAlignment = Alignment.Center) {
-                                    Icon(
-                                        Icons.Default.ChatBubbleOutline,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(22.dp),
-                                    )
-                                }
-                            }
+                            Icon(
+                                Icons.Outlined.ChatBubbleOutline,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(24.dp),
+                            )
 
                             Spacer(Modifier.width(12.dp))
 
@@ -428,7 +410,7 @@ fun HistoryScreen(
                                 Text(
                                     text = "$dateFormatted · ${conv.messages.size} msgs",
                                     style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.primary,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     fontSize = 11.sp,
                                 )
                             }
@@ -605,7 +587,7 @@ fun HistoryScreen(
     if (renameTarget != null) {
         AlertDialog(
             onDismissRequest = { renameTarget = null },
-            icon = { Icon(Icons.Default.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
+            icon = { Icon(Icons.Outlined.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
             title = { Text("Rename Chat") },
             text = {
                 OutlinedTextField(
