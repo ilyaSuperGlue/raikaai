@@ -275,6 +275,7 @@ fun ChatScreen(
 
     // Preview state: (entryFileName, entryHtml, allFiles)
     var previewData by remember { mutableStateOf<Triple<String, String, Map<String, String>>?>(null) }
+    var previewImagePath by remember { mutableStateOf<String?>(null) }
 
     val ragDocuments by viewModel.ragDocuments.collectAsState()
     val ragDocumentPicker =
@@ -1381,6 +1382,9 @@ fun ChatScreen(
                         val resolvedName = com.localgpt.app.util.CodeArtifacts.deriveFileName("html", code)
                         previewData = Triple(resolvedName, code, mapOf(resolvedName to code))
                     },
+                    onPreviewImage = { path ->
+                        previewImagePath = path
+                    },
                 )
             }
 
@@ -2088,6 +2092,14 @@ fun ChatScreen(
                 )
             }
         }
+    }
+
+    // ── Fullscreen Image Preview Lightbox ──
+    previewImagePath?.let { path ->
+        ImageViewerDialog(
+            imagePath = path,
+            onDismiss = { previewImagePath = null },
+        )
     }
 }
 

@@ -1544,6 +1544,40 @@ class ChatViewModel(
         return true
     }
 
+    /**
+     * Automatically handles image generation commands (e.g. "/image ...",
+     * "buat gambar ...", "generate image ...", or follow-up edits like
+     * "ubah jadi ..." when the previous message was a generated image).
+     */
+    private fun tryHandleImageCommand(body: String): Boolean {
+        val trimmed = body.trim()
+        val regex = Regex("^(?:/image\\s+|/img\\s+|generate\\s+image[:\\s]+|buat(?:kan)?\\s+gambar[:\\s]+)(.+)", RegexOption.IGNORE_CASE)
+        val match = regex.find(trimmed)
+        if (match != null) {
+            val imagePrompt = match.groupValues[1].trim()
+            if (imagePrompt.isNotBlank()) {
+                generateImage(imagePrompt)
+                return true
+            }
+        }
+        // Follow-up edit on a previously generated image:
+        val lastAssistant = messages.lastOrNull { it.role == ChatConstants.ROLE_ASSISTANT }
+        val wasImage = lastAssistant != null && !lastAssistant.imagePath.isNullOrBlank()
+        val isEditTrigger = trimmed.startsWith("ubah", ignoreCase = true) ||
+            trimmed.startsWith("ganti", ignoreCase = true) ||
+            trimmed.startsWith("edit", ignoreCase = true) ||
+            trimmed.startsWith("change", ignoreCase = true) ||
+            trimmed.startsWith("make it", ignoreCase = true)
+        if (wasImage && isEditTrigger) {
+            val prevUserPrompt = messages.findLast { it.role == ChatConstants.ROLE_USER && it.content.contains("Generate image", ignoreCase = true) }
+                ?.content?.substringAfter("):", "")?.trim() ?: ""
+            val fullPrompt = if (prevUserPrompt.isNotBlank()) "$prevUserPrompt, $trimmed" else trimmed
+            generateImage(fullPrompt)
+            return true
+        }
+        return false
+    }
+
     /** Appends a user/assistant pair for locally-handled commands (no model call). */
     private fun appendLocalExchange(userText: String, assistantText: String) {
         if (conversation == null) {
@@ -1573,6 +1607,7 @@ class ChatViewModel(
         // Local command: reminder scheduling/cancellation is handled on-device
         // without a model call.
         if (pending.isEmpty() && currentAudioFile == null && tryHandleReminderCommand(body)) return
+        if (pending.isEmpty() && currentAudioFile == null && tryHandleImageCommand(body)) return
         // Set flag immediately to prevent double-send race condition
         isGenerating.value = true
         errorMessage.value = null

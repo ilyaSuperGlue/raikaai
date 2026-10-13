@@ -202,4 +202,59 @@ object FileSaver {
             .ifBlank { "litechat_file.txt" }
 
     private fun extensionOf(fileName: String): String = fileName.substringAfterLast('.', "").lowercase(Locale.ROOT)
+
+    /**
+     * Saves an image file into the public Pictures/LiteChat folder via MediaStore.
+     * Returns the saved file name or null on failure.
+     */
+    suspend fun saveImageToPictures(
+        context: Context,
+        sourceFile: File,
+    ): String? =
+        withContext(Dispatchers.IO) {
+            try {
+                if (!sourceFile.exists()) return@withContext null
+                val ext = sourceFile.extension.ifBlank { "png" }
+                val fileName = "litechat_${System.currentTimeMillis()}.$ext"
+                val mime = if (ext.equals("jpg", true) || ext.equals("jpeg", true)) "image/jpeg" else "image/png"
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val resolver = context.contentResolver
+                    val values =
+                        ContentValues().apply {
+                            put(MediaStore.MediaColumns.DISPLAY_NAME, fileName)
+                            put(MediaStore.MediaColumns.MIME_TYPE, mime)
+                            put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/" + SUBDIR)
+                            put(MediaStore.MediaColumns.IS_PENDING, 1)
+                        }
+                    val uri = resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values) ?: return@withContext null
+                    try {
+                        resolver.openOutputStream(uri)?.use { out ->
+                            sourceFile.inputStream().use { input -> input.copyTo(out) }
+                            out.flush()
+                        } ?: run {
+                            resolver.delete(uri, null, null)
+                            return@withContext null
+                        }
+                    } catch (t: Throwable) {
+                        resolver.delete(uri, null, null)
+                        throw t
+                    }
+                    values.clear()
+                    values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(uri, values, null, null)
+                    fileName
+                } else {
+                    @Suppress("DEPRECATION")
+                    val base = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES)
+                    val dir = File(base, SUBDIR)
+                    if (!dir.exists() && !dir.mkdirs()) return@withContext null
+                    val target = File(dir, fileName)
+                    sourceFile.copyTo(target, overwrite = true)
+                    fileName
+                }
+            } catch (t: Throwable) {
+                KLog.w("FileSaver", "Save image to Pictures failed: ${t.message}")
+                null
+            }
+        }
 }

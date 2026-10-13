@@ -182,13 +182,6 @@ fun CharactersScreen(
                         )
                     }
                     Spacer(Modifier.width(10.dp))
-                    Icon(
-                        imageVector = Icons.Default.SmartToy,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(24.dp),
-                    )
-                    Spacer(Modifier.width(12.dp))
                     Column {
                         Text(
                             text = "Characters",

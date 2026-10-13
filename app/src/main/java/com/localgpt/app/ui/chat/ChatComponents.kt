@@ -3,6 +3,16 @@ package com.localgpt.app.ui.chat
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.widget.Toast
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Download
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import androidx.core.content.FileProvider
+import com.localgpt.app.util.FileSaver
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
@@ -192,6 +202,7 @@ internal fun MessageList(
     ttsHelper: TtsHelper,
     audioPlayerHelper: AudioPlayerHelper? = null,
     onPreviewHtml: (String) -> Unit = {},
+    onPreviewImage: (String) -> Unit = {},
 ) {
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
@@ -246,6 +257,7 @@ internal fun MessageList(
                     onSwitchBranch = { delta -> viewModel.switchBranch(reversedIndex, delta) },
                     onRegenerate = { viewModel.regenerateLastResponse() },
                     onPreviewHtml = onPreviewHtml,
+                    onPreviewImage = onPreviewImage,
                 )
             }
         }
@@ -304,6 +316,7 @@ internal fun MessageBubble(
     onSwitchBranch: (Int) -> Unit,
     onRegenerate: () -> Unit,
     onPreviewHtml: (String) -> Unit = {},
+    onPreviewImage: (String) -> Unit = {},
 ) {
     val isUser = message.role == ChatConstants.ROLE_USER
     val clipboard = LocalClipboardManager.current
@@ -342,7 +355,8 @@ internal fun MessageBubble(
                     modifier = Modifier
                         .fillMaxWidth(if (isUser) 0.85f else 1f)
                         .padding(bottom = 6.dp)
-                        .clip(RoundedCornerShape(12.dp)),
+                        .clip(RoundedCornerShape(12.dp))
+                        .clickable { onPreviewImage(message.imagePath ?: "") },
                     contentScale = ContentScale.FillWidth,
                 )
             }
@@ -406,7 +420,8 @@ internal fun MessageBubble(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
-                                .clip(RoundedCornerShape(12.dp)),
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onPreviewImage(imagePath) },
                             contentScale = ContentScale.FillWidth,
                         )
                     }
@@ -911,4 +926,143 @@ fun PersonaAvatar(
         contentScale = ContentScale.Crop,
     )
     return true
+}
+
+/**
+ * Fullscreen Image Viewer with Save to Pictures (Gallery) and Share via FileProvider.
+ */
+@Composable
+fun ImageViewerDialog(
+    imagePath: String,
+    onDismiss: () -> Unit,
+) {
+    if (imagePath.isBlank()) return
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isSaving by remember { mutableStateOf(false) }
+
+    val file = remember(imagePath) { File(imagePath) }
+    val bitmap = remember(imagePath) {
+        try {
+            if (file.exists()) {
+                val opts = BitmapFactory.Options().apply {
+                    inPreferredConfig = Bitmap.Config.RGB_565
+                }
+                BitmapFactory.decodeFile(file.absolutePath, opts)
+            } else null
+        } catch (_: Throwable) {
+            null
+        }
+    }
+    DisposableEffect(bitmap) {
+        onDispose { bitmap?.recycle() }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+        ),
+    ) {
+        Surface(
+            modifier = Modifier.fillMaxSize(),
+            color = Color.Black.copy(alpha = 0.95f),
+        ) {
+            Box(modifier = Modifier.fillMaxSize()) {
+                // Image Container centered
+                if (bitmap != null) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .padding(horizontal = 16.dp, vertical = 72.dp),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Image(
+                            bitmap = bitmap.asImageBitmap(),
+                            contentDescription = "Full image preview",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp)),
+                            contentScale = ContentScale.Fit,
+                        )
+                    }
+                } else {
+                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("Image cannot be loaded", color = Color.White)
+                    }
+                }
+
+                // Top Bar with Actions
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .statusBarsPadding()
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    IconButton(onClick = onDismiss) {
+                        Icon(
+                            Icons.Default.Close,
+                            contentDescription = "Close",
+                            tint = Color.White,
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        // Share Button
+                        IconButton(
+                            onClick = {
+                                try {
+                                    val uri = FileProvider.getUriForFile(
+                                        context,
+                                        "${context.packageName}.fileprovider",
+                                        file,
+                                    )
+                                    val shareIntent = Intent(Intent.ACTION_SEND).apply {
+                                        val ext = file.extension.lowercase(Locale.ROOT)
+                                        type = if (ext == "jpg" || ext == "jpeg") "image/jpeg" else "image/png"
+                                        putExtra(Intent.EXTRA_STREAM, uri)
+                                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    }
+                                    context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
+                                } catch (e: Exception) {
+                                    Toast.makeText(context, "Failed to share: ${e.message}", Toast.LENGTH_SHORT).show()
+                                }
+                            },
+                        ) {
+                            Icon(
+                                Icons.Outlined.Share,
+                                contentDescription = "Share",
+                                tint = Color.White,
+                            )
+                        }
+
+                        // Save to Pictures Gallery Button
+                        IconButton(
+                            onClick = {
+                                if (isSaving) return@IconButton
+                                isSaving = true
+                                scope.launch {
+                                    val saved = FileSaver.saveImageToPictures(context, file)
+                                    isSaving = false
+                                    if (saved != null) {
+                                        Toast.makeText(context, "Saved to Pictures/LiteChat ($saved)", Toast.LENGTH_LONG).show()
+                                    } else {
+                                        Toast.makeText(context, "Failed to save image", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            },
+                        ) {
+                            Icon(
+                                Icons.Outlined.Download,
+                                contentDescription = "Save to Pictures",
+                                tint = Color.White,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+    }
 }
