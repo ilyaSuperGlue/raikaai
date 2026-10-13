@@ -23,6 +23,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Description
@@ -163,6 +164,13 @@ fun CharactersScreen(
                         )
                     }
                     Spacer(Modifier.width(10.dp))
+                    com.localgpt.app.ui.component.SquircleIconBox(
+                        icon = Icons.Default.SmartToy,
+                        boxSize = 40.dp,
+                        iconSize = 22.dp,
+                        shapeRadius = 12.dp,
+                    )
+                    Spacer(Modifier.width(12.dp))
                     Column {
                         Text(
                             text = "Characters",
@@ -492,13 +500,21 @@ fun CharactersScreen(
             initialPersona = persona,
             onDismiss = { editingPersona = null },
             onSave = { name, iconType, prompt, greeting, temp, topK ->
-                viewModel.addCustomPersona(
-                    name = name,
-                    iconType = iconType,
-                    systemPrompt = prompt,
-                    greeting = greeting,
-                    temperature = temp,
-                    topK = topK,
+                // Edit = update in place. Builtin presets (unknown id) are
+                // still saved as a new custom copy with a fresh id.
+                val isCustom = viewModel.customPersonas.any { it.id == persona.id }
+                viewModel.upsertCustomPersona(
+                    PersonaPreset(
+                        id = if (isCustom) persona.id else "custom_" + System.currentTimeMillis(),
+                        name = name,
+                        iconType = iconType,
+                        description = persona.description,
+                        greeting = greeting,
+                        systemPrompt = prompt,
+                        avatarUri = persona.avatarUri,
+                        temperature = temp,
+                        topK = topK,
+                    ),
                 )
                 editingPersona = null
                 Toast.makeText(context, "Character '$name' updated!", Toast.LENGTH_SHORT).show()
@@ -939,5 +955,6 @@ private fun getIconVector(iconType: String): ImageVector =
         "reasoning" -> Icons.Default.Psychology
         "speed" -> Icons.Default.Speed
         "shell" -> Icons.Default.Terminal
-        else -> Icons.Default.SmartToy
+        "general" -> Icons.Default.AutoAwesome
+        else -> Icons.Default.AutoAwesome
     }

@@ -1795,6 +1795,33 @@ class ChatViewModel(
         saveCustomPersonas(updated)
     }
 
+    /**
+     * Inserts a new custom persona or replaces the existing one with the same
+     * id (edit = update, no duplicates). Blank avatarUri on update keeps the
+     * previously stored one (the editor dialog doesn't manage avatars).
+     * Refreshes [activePersona] when the edited persona is currently active.
+     * Never touches global [Settings].
+     */
+    fun upsertCustomPersona(persona: PersonaPreset) {
+        val existing = customPersonas.firstOrNull { it.id == persona.id }
+        val merged =
+            if (existing != null && persona.avatarUri.isBlank()) {
+                persona.copy(avatarUri = existing.avatarUri)
+            } else {
+                persona
+            }
+        val updated =
+            if (existing != null) {
+                customPersonas.map { if (it.id == persona.id) merged else it }
+            } else {
+                customPersonas.toList() + merged
+            }
+        saveCustomPersonas(updated)
+        if (activePersona.value.id == persona.id) {
+            activePersona.value = merged
+        }
+    }
+
     private fun saveCustomPersonas(list: List<PersonaPreset>) {
         val json = Gson().toJson(list)
         launchSetting { settingsRepo.setCustomPersonasJson(json) }
