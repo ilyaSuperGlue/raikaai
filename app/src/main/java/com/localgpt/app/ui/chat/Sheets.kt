@@ -27,6 +27,7 @@ import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.DeleteSweep
+import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Memory
@@ -82,7 +83,6 @@ import com.localgpt.app.core.server.OpenAiServer
 import com.localgpt.app.data.Conversation
 import com.localgpt.app.localai.LocalAiCatalog
 import com.localgpt.app.localai.LocalModelDownloader.DownloadState
-import com.localgpt.app.ui.component.AccentColorRow
 import com.localgpt.app.ui.component.ChipsRow
 import com.localgpt.app.ui.component.Material3SettingsGroup
 import com.localgpt.app.ui.component.Material3SettingsItem
@@ -137,18 +137,26 @@ fun ModelsSheet(
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        Icons.Default.Terminal,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp),
+                    com.localgpt.app.ui.component.SquircleIconBox(
+                        icon = Icons.Default.Memory,
+                        boxSize = 40.dp,
+                        iconSize = 22.dp,
+                        shapeRadius = 12.dp,
                     )
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text(
-                        text = "Offline Models & Tuning",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text(
+                            text = "Offline Models & Tuning",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                        )
+                        Text(
+                            text = "LiteRT On-Device LLM Management",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontSize = 11.sp,
+                        )
+                    }
                 }
                 IconButton(onClick = onDismiss) {
                     Icon(Icons.Default.Close, contentDescription = "Close")
@@ -385,9 +393,17 @@ fun ServerSheet(
             // Header
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Server Control", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    com.localgpt.app.ui.component.SquircleIconBox(
+                        icon = Icons.Default.Dns,
+                        boxSize = 40.dp,
+                        iconSize = 22.dp,
+                        shapeRadius = 12.dp,
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Server Control", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("OpenAI-Compatible HTTP API", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
                 }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
             }
@@ -395,28 +411,37 @@ fun ServerSheet(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Status Card
-            Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                 Column(modifier = Modifier.padding(16.dp)) {
-                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                        Surface(shape = CircleShape, color = if (isRunning) Color(0xFF43A047) else MaterialTheme.colorScheme.outlineVariant, modifier = Modifier.size(10.dp)) {}
-                        Spacer(Modifier.width(8.dp))
-                        Text(if (isRunning) "Server Running" else "Server Stopped", fontWeight = FontWeight.Bold)
+                    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        com.localgpt.app.ui.component.ServerStatusBadge(serverStatus = serverStatus)
+                        Text("Requests: $requestCount", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, fontWeight = FontWeight.Medium)
                     }
 
-                    Spacer(Modifier.height(8.dp))
+                    Spacer(Modifier.height(10.dp))
                     Text("Endpoint: $baseUrl", fontSize = 11.sp, fontFamily = FontFamily.Monospace, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Spacer(Modifier.height(4.dp))
-                    Text("Requests: $requestCount", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = { viewModel.toggleServer(context) }, modifier = Modifier.weight(1f)) {
-                            Text(if (isRunning) "Stop Server" else "Start Server")
+                        Button(
+                            onClick = { viewModel.toggleServer(context) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(50),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isRunning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primary,
+                                contentColor = if (isRunning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimary,
+                            ),
+                        ) {
+                            Text(if (isRunning) "Stop Server" else "Start Server", fontWeight = FontWeight.SemiBold)
                         }
-                        OutlinedButton(onClick = { clipboard.setText(AnnotatedString(baseUrl)) }, modifier = Modifier.weight(1f)) {
+                        OutlinedButton(
+                            onClick = { clipboard.setText(AnnotatedString(baseUrl)) },
+                            modifier = Modifier.weight(1f),
+                            shape = RoundedCornerShape(50),
+                        ) {
                             Icon(Icons.Default.ContentCopy, contentDescription = null, modifier = Modifier.size(14.dp))
                             Spacer(Modifier.width(4.dp))
-                            Text("Copy URL")
+                            Text("Copy URL", fontWeight = FontWeight.SemiBold)
                         }
                     }
                 }
@@ -550,61 +575,6 @@ fun HistorySheet(
     }
 }
 
-/**
- * Settings & Appearance Sheet: Dynamic Theme seed color, Pure Black OLED, and general preferences.
- */
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun SettingsSheet(
-    viewModel: ChatViewModel,
-    onDismiss: () -> Unit,
-) {
-    val settings by viewModel.settings.collectAsState()
-
-    ModalBottomSheet(onDismissRequest = onDismiss, dragHandle = { BottomSheetDefaults.DragHandle() }) {
-        Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 20.dp).navigationBarsPadding().padding(bottom = 20.dp)) {
-            // Header
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Settings, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Settings", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
-                }
-                IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
-            }
-
-            Spacer(modifier = Modifier.height(12.dp))
-
-            // Appearance Group
-            Material3SettingsGroup(title = "Appearance", items = listOf(
-                createM3Item(title = "Theme Color", trailingContent = { AccentColorRow(selectedColor = Color(settings.themeColor), onSelectColor = { viewModel.setThemeColor(it.toArgb().toLong()) }) }),
-                createM3Item(title = "Pure Black OLED", trailingContent = { Switch(checked = settings.pureBlack, onCheckedChange = { viewModel.setPureBlack(it) }) }),
-                createM3Item(title = "Auto-scroll", trailingContent = { Switch(checked = settings.autoScroll, onCheckedChange = { viewModel.setAutoScroll(it) }) }),
-                createM3Item(title = "Show Tokens/sec", trailingContent = { Switch(checked = settings.showTokensPerSec, onCheckedChange = { viewModel.setShowTokensPerSec(it) }) }),
-            ))
-
-            Spacer(Modifier.height(8.dp))
-
-            // Advanced Group
-            Material3SettingsGroup(title = "Advanced", items = listOf(
-                createM3Item(title = "Enable Thinking", trailingContent = { Switch(checked = settings.enableThinking, onCheckedChange = { viewModel.setEnableThinking(it) }) }),
-                createM3Item(title = "Enable Vision", trailingContent = { Switch(checked = settings.enableVision, onCheckedChange = { viewModel.setEnableVision(it) }) }),
-                createM3Item(title = "Web Search", trailingContent = { Switch(checked = settings.enableWebSearch, onCheckedChange = { viewModel.setEnableWebSearch(it) }) }),
-                createM3Item(title = "Capture Artifacts", trailingContent = { Switch(checked = settings.captureArtifacts, onCheckedChange = { viewModel.setCaptureArtifacts(it) }) }),
-            ))
-
-            Spacer(Modifier.height(8.dp))
-
-            // Chat Group
-            Material3SettingsGroup(title = "Chat", items = listOf(
-                createM3Item(title = "RAG Documents", trailingContent = { Switch(checked = settings.ragEnabled, onCheckedChange = { viewModel.setRagEnabled(it) }) }),
-                createM3Item(title = "Use Chat Memory", trailingContent = { Switch(checked = settings.useChatMemory, onCheckedChange = { viewModel.setUseChatMemory(it) }) }),
-                createM3Item(title = "Auto-compress", trailingContent = { Switch(checked = settings.autoCompress, onCheckedChange = { viewModel.setAutoCompress(it) }) }),
-            ))
-        }
-    }
-}
-
 /** Monospace engine telemetry log viewer with Device Specs card and clear/share actions. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -622,20 +592,28 @@ fun LogsSheet(
             // Header
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Terminal, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Telemetry Logs", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    com.localgpt.app.ui.component.SquircleIconBox(
+                        icon = Icons.Default.Terminal,
+                        boxSize = 40.dp,
+                        iconSize = 22.dp,
+                        shapeRadius = 12.dp,
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Telemetry Logs", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("${logs.size} entries · LiteRT Engine & System", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
                 }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(12.dp))
 
             // Device Specs Card
-            Card(shape = RoundedCornerShape(12.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
-                Column(modifier = Modifier.padding(12.dp)) {
-                    Text("Device Specs", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
-                    Spacer(Modifier.height(4.dp))
+            Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    Text("Device Specs", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.height(6.dp))
                     Text("Device: ${specs.deviceModel}", fontSize = 11.sp)
                     Text("Chipset: ${specs.chipset} (${specs.cores} cores, ${specs.abi})", fontSize = 11.sp)
                     Text("RAM: ${String.format(Locale.US, "%.1f", specs.totalRamGb)} GB total, ${String.format(Locale.US, "%.1f", specs.availRamGb)} GB free", fontSize = 11.sp)
@@ -646,27 +624,35 @@ fun LogsSheet(
 
             // Action Buttons
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                OutlinedButton(onClick = { onClear() }, modifier = Modifier.weight(1f)) {
+                OutlinedButton(
+                    onClick = { onClear() },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50),
+                ) {
                     Icon(Icons.Default.Delete, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Clear")
                 }
-                OutlinedButton(onClick = { clipboard.setText(AnnotatedString(logs.joinToString("\n"))) }, modifier = Modifier.weight(1f)) {
+                Button(
+                    onClick = { clipboard.setText(AnnotatedString(logs.joinToString("\n"))) },
+                    modifier = Modifier.weight(1f),
+                    shape = RoundedCornerShape(50),
+                ) {
                     Icon(Icons.Default.Share, contentDescription = null, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.width(4.dp))
                     Text("Copy All")
                 }
             }
 
-            Spacer(modifier = Modifier.height(8.dp))
+            Spacer(modifier = Modifier.height(10.dp))
 
             // Log Viewer
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
                     .heightIn(max = 300.dp)
-                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(10.dp))
-                    .padding(10.dp),
+                    .background(MaterialTheme.colorScheme.surfaceContainerHigh, RoundedCornerShape(12.dp))
+                    .padding(12.dp),
             ) {
                 Text(
                     text = logs.joinToString("\n").ifBlank { "No logs yet." },
@@ -699,26 +685,34 @@ fun BenchmarkSheet(
             // Header
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Default.Speed, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(24.dp))
-                    Spacer(modifier = Modifier.width(10.dp))
-                    Text("Benchmark", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
+                    com.localgpt.app.ui.component.SquircleIconBox(
+                        icon = Icons.Default.Speed,
+                        boxSize = 40.dp,
+                        iconSize = 22.dp,
+                        shapeRadius = 12.dp,
+                    )
+                    Spacer(modifier = Modifier.width(12.dp))
+                    Column {
+                        Text("Speed Benchmark", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                        Text("Measure TTFT & Decode Speed (tok/s)", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, fontSize = 11.sp)
+                    }
                 }
                 IconButton(onClick = onDismiss) { Icon(Icons.Default.Close, contentDescription = "Close") }
             }
 
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(14.dp))
 
             // Run Button
             Button(
                 onClick = { viewModel.runBenchmark() },
                 enabled = !isBenchmarking,
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
+                shape = RoundedCornerShape(50),
             ) {
                 if (isBenchmarking) {
-                    Text("Running Benchmark...")
+                    Text("Running Benchmark...", fontWeight = FontWeight.SemiBold)
                 } else {
-                    Text("Run Benchmark")
+                    Text("Run Benchmark", fontWeight = FontWeight.SemiBold)
                 }
             }
 
@@ -726,9 +720,9 @@ fun BenchmarkSheet(
 
             // Results
             benchmarkResult?.let { result ->
-                Card(shape = RoundedCornerShape(14.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
+                Card(shape = RoundedCornerShape(16.dp), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow)) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        Text("Results", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall)
+                        Text("Results", fontWeight = FontWeight.Bold, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
                         Spacer(Modifier.height(8.dp))
                         Text("Model: ${result.modelName}", fontSize = 12.sp)
                         Text("Backend: ${result.backend}", fontSize = 12.sp)

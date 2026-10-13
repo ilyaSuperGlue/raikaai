@@ -22,10 +22,8 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.outlined.Brightness4
-import androidx.compose.material.icons.outlined.DarkMode
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.Keyboard
-import androidx.compose.material.icons.outlined.Palette
 import androidx.compose.material.icons.outlined.Share
 import androidx.compose.material.icons.outlined.Speed
 import androidx.compose.material.icons.outlined.StayCurrentPortrait
@@ -52,13 +50,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.localgpt.app.ui.chat.ChatViewModel
-import com.localgpt.app.ui.component.AccentColorRow
 import com.localgpt.app.ui.component.ChipsRow
 import com.localgpt.app.ui.component.Material3SettingsGroup
 import com.localgpt.app.ui.component.Material3SettingsItem
@@ -131,7 +126,7 @@ fun SettingsScreen(
                     items =
                         listOf(
                             Material3SettingsItem(
-                                leadingContent = { SettingsIcon(Icons.Outlined.Brightness4) },
+                                leadingContent = { com.localgpt.app.ui.component.SquircleIconBox(Icons.Outlined.Brightness4) },
                                 title = { Text("Theme Mode") },
                                 description = {
                                     Column(
@@ -141,15 +136,13 @@ fun SettingsScreen(
                                         Text(
                                             when (settings.themeMode) {
                                                 "dark" -> "Dark theme enabled"
-                                                "light" -> "Light theme enabled"
-                                                else -> "Follow system default"
+                                                else -> "Light theme enabled"
                                             },
                                             style = MaterialTheme.typography.bodySmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                             listOf(
-                                                ChatConstants.THEME_SYSTEM to "System",
                                                 ChatConstants.THEME_LIGHT to "Light",
                                                 ChatConstants.THEME_DARK to "Dark",
                                             ).forEach { (mode, label) ->
@@ -161,37 +154,6 @@ fun SettingsScreen(
                                                 )
                                             }
                                         }
-                                    }
-                                },
-                            ),
-                            Material3SettingsItem(
-                                leadingContent = { SettingsIcon(Icons.Outlined.DarkMode) },
-                                title = { Text("Pure Black OLED Mode") },
-                                description = { Text("Uses pitch-black background #000000 on dark theme") },
-                                trailingContent = {
-                                    Switch(
-                                        checked = settings.pureBlack,
-                                        onCheckedChange = { viewModel.setPureBlack(it) },
-                                    )
-                                },
-                            ),
-                            Material3SettingsItem(
-                                leadingContent = { SettingsIcon(Icons.Outlined.Palette) },
-                                title = { Text("Accent Color Palette") },
-                                description = {
-                                    Column(
-                                        verticalArrangement = Arrangement.spacedBy(8.dp),
-                                        modifier = Modifier.padding(top = 2.dp),
-                                    ) {
-                                        Text(
-                                            "Generates dynamic Material You tonal color scheme",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        )
-                                        AccentColorRow(
-                                            selectedColor = Color(settings.themeColor.toInt()),
-                                            onSelectColor = { color -> viewModel.setThemeColor(color.toArgb().toLong() and 0xFFFFFFFFL) },
-                                        )
                                     }
                                 },
                             ),
