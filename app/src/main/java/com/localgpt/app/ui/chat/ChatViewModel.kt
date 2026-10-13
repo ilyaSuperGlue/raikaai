@@ -1840,9 +1840,12 @@ class ChatViewModel(
                             val lastIdx = messages.lastIndex
                             val genericCall = com.localgpt.app.skills.ToolCallParser.parseGenericCall(messages[lastIdx].content)
                             if (genericCall != null && genericCall.name.equals("generate_image", ignoreCase = true)) {
-                                val imgPrompt = genericCall.arguments.get("prompt")?.asString?.ifBlank { null }
-                                    ?: genericCall.arguments.get("description")?.asString?.ifBlank { null }
-                                    ?: ""
+                                val imgPrompt = when {
+                                    genericCall.arguments.has("prompt") -> genericCall.arguments.get("prompt").asString
+                                    genericCall.arguments.has("description") -> genericCall.arguments.get("description").asString
+                                    genericCall.arguments.has("query") -> genericCall.arguments.get("query").asString
+                                    else -> ""
+                                }
                                 if (imgPrompt.isNotBlank()) {
                                     executeImageToolCall(lastIdx, imgPrompt)
                                 }
@@ -2043,6 +2046,23 @@ class ChatViewModel(
                         }
                         persist()
                         captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
+
+                        // Check if model called generate_image tool
+                        if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
+                            val lastIdx = messages.lastIndex
+                            val genericCall = com.localgpt.app.skills.ToolCallParser.parseGenericCall(messages[lastIdx].content)
+                            if (genericCall != null && genericCall.name.equals("generate_image", ignoreCase = true)) {
+                                val imgPrompt = when {
+                                    genericCall.arguments.has("prompt") -> genericCall.arguments.get("prompt").asString
+                                    genericCall.arguments.has("description") -> genericCall.arguments.get("description").asString
+                                    genericCall.arguments.has("query") -> genericCall.arguments.get("query").asString
+                                    else -> ""
+                                }
+                                if (imgPrompt.isNotBlank()) {
+                                    executeImageToolCall(lastIdx, imgPrompt)
+                                }
+                            }
+                        }
                         when {
                             pass2 != null -> {
                                 pendingCompareMerge = pass2

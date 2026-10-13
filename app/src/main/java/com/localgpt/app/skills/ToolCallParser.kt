@@ -195,28 +195,43 @@ object ToolCallParser {
      */
     fun parseGenericCall(text: String): GenericToolCall? {
         if (text.isBlank()) return null
+        val clean = text
+            .replace(Regex("<think>[\\s\\S]*?</think>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<thought>[\\s\\S]*?</thought>", RegexOption.IGNORE_CASE), "")
+            .trim()
+        val targetText = if (clean.isNotBlank()) clean else text
         val bodies = mutableListOf<Pair<String, String>>()
 
         val xmlMatcher = Pattern.compile(
             "<tool_call>([\\s\\S]*?)(?:<\\/tool_call>|$)",
             Pattern.CASE_INSENSITIVE,
-        ).matcher(text)
-        if (xmlMatcher.find()) bodies.add(xmlMatcher.group(1).orEmpty().trim() to xmlMatcher.group(0).orEmpty())
+        ).matcher(targetText)
+        while (xmlMatcher.find()) {
+            val content = xmlMatcher.group(1).orEmpty().trim()
+            if (content.isNotBlank()) {
+                bodies.add(content to xmlMatcher.group(0).orEmpty())
+            }
+        }
 
         val mdMatcher = Pattern.compile(
             "```(?:tool_call|tool)(?:\\s+([\\s\\S]*?))?(?:```|$)",
             Pattern.CASE_INSENSITIVE,
-        ).matcher(text)
-        if (mdMatcher.find()) bodies.add(mdMatcher.group(1).orEmpty().trim() to mdMatcher.group(0).orEmpty())
+        ).matcher(targetText)
+        while (mdMatcher.find()) {
+            val content = mdMatcher.group(1).orEmpty().trim()
+            if (content.isNotBlank()) {
+                bodies.add(content to mdMatcher.group(0).orEmpty())
+            }
+        }
 
         for ((body, raw) in bodies) {
             parseGenericJson(body, raw)?.let { return it }
         }
 
         // Bare JSON object containing a "name" key.
-        val nameMatcher = MCP_NAME_PATTERN.matcher(text)
-        if (nameMatcher.find()) {
-            extractBalancedJson(text, nameMatcher.start())?.let { jsonStr ->
+        val nameMatcher = MCP_NAME_PATTERN.matcher(targetText)
+        while (nameMatcher.find()) {
+            extractBalancedJson(targetText, nameMatcher.start())?.let { jsonStr ->
                 parseGenericJson(jsonStr, jsonStr)?.let { return it }
             }
         }

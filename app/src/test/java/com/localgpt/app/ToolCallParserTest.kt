@@ -62,5 +62,20 @@ class ToolCallParserTest {
         assertEquals("en", parsedEn?.lang)
         assertEquals("latest Premier League results", parsedEn?.query)
     }
+
+    @Test
+    fun testGenerateImageGenericCallWithThinking() {
+        val text = """
+            <think>
+            The user wants to change the cat to white. Directly generating a modified image is appropriate.
+            <tool_call>{"name": "generate_image", "arguments": {"prompt": "white cat"}}
+            </think>
+            <tool_call>{"name": "generate_image", "arguments": {"prompt": "A beautiful fluffy pure white cat with bright expressive eyes"}}</tool_call>
+        """.trimIndent()
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("generate_image", parsed?.name)
+        assertEquals("A beautiful fluffy pure white cat with bright expressive eyes", parsed?.arguments?.get("prompt")?.asString)
+    }
 }
 
