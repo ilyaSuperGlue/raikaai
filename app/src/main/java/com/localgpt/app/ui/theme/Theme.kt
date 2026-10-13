@@ -29,7 +29,7 @@ fun LiteChatTheme(
             seedColor = seed,
             isDark = darkTheme,
             isAmoled = (darkTheme && pureBlack),
-            style = PaletteStyle.TonalSpot,
+            style = PaletteStyle.Neutral,
         )
 
     MaterialTheme(
