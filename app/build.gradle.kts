@@ -5,6 +5,12 @@ plugins {
 
 android {
     namespace = "com.localgpt.app"
+    // compileSdk 37: required by the Compose 1.12.0-beta01 / material3
+    // 1.5.0-alpha25 / material-kolor 5.0.0 artifacts' AAR metadata (AGP 9
+    // enforces it). Google has not published the android-37 platform
+    // publicly, so CI provides android-37 as android-36's APIs (see the
+    // android-37 shim in .github/workflows/build-apk.yml). The app itself
+    // uses no API 37+ calls; targetSdk stays 36.
     compileSdk = 37
 
     // -PabiFilter=arm64-v8a -> single-ABI APK; without flag -> all ABIs + universal
@@ -44,9 +50,24 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("release.keystore")
-            storePassword = "localgpt123"
-            keyAlias = "localgpt"
-            keyPassword = "localgpt123"
+            // Passwords are intentionally NOT hardcoded: read from environment first,
+            // then gradle.properties / local.properties (never commit those files).
+            val ksStorePw = System.getenv("LITECHAT_KEYSTORE_STORE_PASSWORD")
+                ?: (project.findProperty("litechat.keystore.storePassword") as String?)
+            val ksKeyPw = System.getenv("LITECHAT_KEYSTORE_KEY_PASSWORD")
+                ?: (project.findProperty("litechat.keystore.keyPassword") as String?)
+            if (ksStorePw.isNullOrEmpty() || ksKeyPw.isNullOrEmpty()) {
+                logger.warn(
+                    "Keystore passwords not set (LITECHAT_KEYSTORE_STORE_PASSWORD / " +
+                        "LITECHAT_KEYSTORE_KEY_PASSWORD env or litechat.keystore.* gradle properties). " +
+                        "Release signing will fail until they are provided."
+                )
+            }
+            storePassword = ksStorePw
+            keyAlias = System.getenv("LITECHAT_KEYSTORE_KEY_ALIAS")
+                ?: (project.findProperty("litechat.keystore.keyAlias") as String?)
+                ?: "localgpt"
+            keyPassword = ksKeyPw
         }
     }
 
@@ -122,6 +143,12 @@ dependencies {
 
     // DataStore (settings)
     implementation("androidx.datastore:datastore-preferences:1.1.2")
+
+    // WorkManager (pengingat terjadwal)
+    implementation("androidx.work:work-runtime-ktx:2.10.1")
+
+    // EncryptedSharedPreferences (sensitive tokens: API keys, HF token, server auth)
+    implementation("androidx.security:security-crypto:1.0.0")
 
     // JSON + HTTP client (model downloads from HuggingFace)
     implementation("com.google.code.gson:gson:2.11.0")

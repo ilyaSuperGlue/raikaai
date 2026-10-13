@@ -2,9 +2,14 @@ package com.localgpt.app.ui.models
 
 import android.net.Uri
 import android.widget.Toast
+import androidx.compose.ui.text.style.TextAlign
 import com.localgpt.app.data.ChatConstants
+import com.localgpt.app.data.effectiveRemoteContextWindow
+import com.localgpt.app.data.parseRemoteModelContextWindows
+import com.localgpt.app.data.parseRemoteModelPricing
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +33,7 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -36,9 +42,9 @@ import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -65,6 +71,8 @@ import com.localgpt.app.localai.LocalAiCatalog
 import com.localgpt.app.localai.LocalAiModel
 import com.localgpt.app.localai.LocalModelDownloader.DownloadState
 import com.localgpt.app.ui.chat.ChatViewModel
+import com.localgpt.app.ui.component.EmptyState
+import com.localgpt.app.ui.component.SettingsTextField
 
 /**
  * Dedicated Models Management Screen cleanly styled with Material 3 uniform cards,
@@ -87,13 +95,21 @@ fun ModelsScreen(
 
     val remoteModels by viewModel.remoteModels
     val isFetchingRemoteModels by viewModel.isFetchingRemoteModels
+    val isDetectingContextWindow by viewModel.isDetectingContextWindow
+    val remoteSpendUsd by viewModel.remoteSpendUsd
+    val pricingMap = remember(settings.remoteModelPricingJson) {
+        parseRemoteModelPricing(settings.remoteModelPricingJson)
+    }
 
     val freeDiskBytes by viewModel.freeDiskSpaceBytes
     val freeDiskGb = freeDiskBytes / (1024.0 * 1024.0 * 1024.0)
 
     var customUrlInput by remember { mutableStateOf("") }
-    var remoteUrlInput by remember(settings.remoteBaseUrl) { mutableStateOf(settings.remoteBaseUrl) }
-    var remoteKeyInput by remember(settings.remoteApiKey) { mutableStateOf(settings.remoteApiKey) }
+    // Mirrors of the remote text fields below, used by the "Fetch Remote Models" button.
+    // The fields themselves use SettingsTextField (focus-guarded one-way sync) so typing
+    // is never wiped by unrelated settings emissions; onValueChange keeps these in sync.
+    var remoteUrlInput by remember { mutableStateOf(settings.remoteBaseUrl) }
+    var remoteKeyInput by remember { mutableStateOf(settings.remoteApiKey) }
 
     val filePickerLauncher =
         rememberLauncherForActivityResult(
@@ -237,7 +253,7 @@ fun ModelsScreen(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                listOf("GPU" to "GPU (OpenCL Snapdragon)", "CPU" to "CPU (Arm NEON)").forEach { (be, label) ->
+                                listOf(ChatConstants.BACKEND_GPU to "GPU (OpenCL Snapdragon)", ChatConstants.BACKEND_CPU to "CPU (Arm NEON)").forEach { (be, label) ->
                                     val isSelected = settings.backend.equals(be, ignoreCase = true)
                                     Surface(
                                         onClick = { viewModel.setBackend(be) },
@@ -375,23 +391,11 @@ fun ModelsScreen(
                             )
 
                             if (installedModels.isEmpty()) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Box(
-                                        modifier = Modifier.padding(24.dp),
-                                        contentAlignment = Alignment.Center,
-                                    ) {
-                                        Text(
-                                            "No models installed yet. Download a preset below or import a .litertlm file.",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                                        )
-                                    }
-                                }
+                                EmptyState(
+                                    icon = Icons.Default.Memory,
+                                    title = "No models installed",
+                                    message = "Download a preset below or import a .litertlm file.",
+                                )
                             } else {
                                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                     installedModels.forEach { item ->
@@ -468,7 +472,7 @@ fun ModelsScreen(
                                                                 if (isLoadingModel) {
                                                                     CircularProgressIndicator(modifier = Modifier.size(14.dp), strokeWidth = 2.dp, color = MaterialTheme.colorScheme.onPrimary)
                                                                 } else {
-                                                                    Text("Load to RAM", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                                    Text("Load into Memory", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
                                                                 }
                                                             }
                                                         }
@@ -481,10 +485,9 @@ fun ModelsScreen(
                                                                     viewModel.setActiveCustomPath(item.absolutePath)
                                                                 }
                                                             },
-                                                            shape = RoundedCornerShape(10.dp),
-                                                            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                                                            shape = RoundedCornerShape(50),
                                                         ) {
-                                                            Text("Use Model", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
+                                                            Text("Use Model", style = MaterialTheme.typography.labelMedium)
                                                         }
                                                     }
                                                 }
@@ -627,8 +630,8 @@ fun ModelsScreen(
                             urlInput = customUrlInput,
                             onUrlInputChange = { customUrlInput = it },
                             hfToken = settings.huggingFaceToken,
-                            onStartDownload = { url, fileName, sizeBytes ->
-                                viewModel.downloadCustomUrl(url, fileName, sizeBytes)
+                            onStartDownload = { url, fileName, sizeBytes, sha256 ->
+                                viewModel.downloadCustomUrl(url, fileName, sizeBytes, sha256.ifBlank { null })
                                 Toast.makeText(context, "Download started: $fileName", Toast.LENGTH_SHORT).show()
                             },
                         )
@@ -639,6 +642,50 @@ fun ModelsScreen(
                     }
                 }
             } else {
+                // ── Estimated Remote Spend Card ──
+                item(key = "remote_spend_card") {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    "Estimated Remote Spend",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                )
+                                Text(
+                                    "Estimated accumulated remote API cost (OpenRouter pricing).",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                )
+                            }
+                            Text(
+                                text = "$%.4f".format(remoteSpendUsd),
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                        if (remoteSpendUsd > 0) {
+                            Row(
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp).fillMaxWidth(),
+                                horizontalArrangement = Arrangement.End,
+                            ) {
+                                TextButton(onClick = { viewModel.resetRemoteSpend() }) {
+                                    Text("Reset")
+                                }
+                            }
+                        }
+                    }
+                }
+
                 // ── Remote Provider Setup Card ──
                 item(key = "remote_provider_card") {
                     Card(
@@ -657,31 +704,53 @@ fun ModelsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
 
-                            OutlinedTextField(
-                                value = remoteUrlInput,
-                                onValueChange = {
-                                    remoteUrlInput = it
-                                    viewModel.setRemoteBaseUrl(it)
-                                },
+                            SettingsTextField(
+                                initialValue = settings.remoteBaseUrl,
+                                onSave = { viewModel.setRemoteBaseUrl(it) },
+                                onValueChange = { remoteUrlInput = it },
                                 label = { Text("API Base URL") },
                                 placeholder = { Text("http://192.168.1.100:11434") },
-                                shape = RoundedCornerShape(12.dp),
-                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
 
-                            OutlinedTextField(
-                                value = remoteKeyInput,
-                                onValueChange = {
-                                    remoteKeyInput = it
-                                    viewModel.setRemoteApiKey(it)
-                                },
+                            SettingsTextField(
+                                initialValue = settings.remoteApiKey,
+                                onSave = { viewModel.setRemoteApiKey(it) },
+                                onValueChange = { remoteKeyInput = it },
                                 label = { Text("API Key (Optional for Ollama)") },
                                 placeholder = { Text("sk-...") },
-                                shape = RoundedCornerShape(12.dp),
-                                singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                             )
+
+                            // S3: warn when the base URL is plain HTTP — the API key and
+                            // prompts are sent unencrypted. Blocking is not an
+                            // option: LAN Ollama instances typically serve HTTP.
+                            val urlForWarning = remoteUrlInput.ifBlank { settings.remoteBaseUrl }
+                            if (urlForWarning.trimStart().startsWith("http://", ignoreCase = true)) {
+                                Row(
+                                    modifier =
+                                        Modifier
+                                            .fillMaxWidth()
+                                            .clip(RoundedCornerShape(12.dp))
+                                            .background(MaterialTheme.colorScheme.errorContainer)
+                                            .padding(12.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Icon(
+                                        Icons.Filled.Warning,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.onErrorContainer,
+                                        modifier = Modifier.size(20.dp),
+                                    )
+                                    Spacer(Modifier.width(10.dp))
+                                    Text(
+                                        "Plain HTTP: your API key and prompts are sent unencrypted. " +
+                                            "Use https:// (e.g. via a reverse proxy) if you don't trust this network.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onErrorContainer,
+                                    )
+                                }
+                            }
 
                             Button(
                                 onClick = { viewModel.fetchRemoteModels(remoteUrlInput, remoteKeyInput) },
@@ -724,6 +793,17 @@ fun ModelsScreen(
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         fontSize = 10.sp,
                                                     )
+                                                    pricingMap[item.id]?.let { pricing ->
+                                                        Text(
+                                                            text = "%.2f / %.2f per 1M tokens".format(
+                                                                pricing.promptPerToken * 1_000_000,
+                                                                pricing.completionPerToken * 1_000_000,
+                                                            ),
+                                                            style = MaterialTheme.typography.labelSmall,
+                                                            color = MaterialTheme.colorScheme.tertiary,
+                                                            fontSize = 10.sp,
+                                                        )
+                                                    }
                                                 }
                                                 if (isSelected) {
                                                     Surface(color = MaterialTheme.colorScheme.primary, shape = RoundedCornerShape(50)) {
@@ -742,6 +822,112 @@ fun ModelsScreen(
                                     }
                                 }
                             }
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                            // ── Image Generation Model ──
+                            Text(
+                                "Image Generation Model",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold,
+                            )
+                            Text(
+                                "Model ID for /v1/images/generations (e.g. an OpenRouter image model). Leave empty to use the active chat model.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            Spacer(Modifier.height(6.dp))
+                            OutlinedTextField(
+                                value = settings.remoteImageModelId,
+                                onValueChange = { viewModel.setRemoteImageModelId(it) },
+                                label = { Text("Image model ID (optional)") },
+                                singleLine = true,
+                                modifier = Modifier.fillMaxWidth(),
+                            )
+
+                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
+                            // ── Remote Context Window ──
+                            // Independent from the on-device context window: switching
+                            // back to a local model restores the local value untouched.
+                            val remoteWindow = settings.effectiveRemoteContextWindow(settings.remoteModelId)
+                            val perModelOverride =
+                                parseRemoteModelContextWindows(settings.remoteModelContextWindowsJson)[settings.remoteModelId]
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        "Remote Context Window",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        fontWeight = FontWeight.Bold,
+                                    )
+                                    Text(
+                                        if (settings.remoteModelId.isBlank()) {
+                                            "Default for remote models: $remoteWindow tokens"
+                                        } else if (perModelOverride != null) {
+                                            "${settings.remoteModelId}: $perModelOverride tokens (auto-detected)"
+                                        } else {
+                                            "${settings.remoteModelId}: $remoteWindow tokens (default)"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                if (perModelOverride != null && settings.remoteModelId.isNotBlank()) {
+                                    TextButton(onClick = { viewModel.clearRemoteModelContextWindow(settings.remoteModelId) }) {
+                                        Text("Reset", fontSize = 12.sp)
+                                    }
+                                }
+                            }
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            ) {
+                                listOf(
+                                    Pair(4096, "4K"),
+                                    Pair(8192, "8K"),
+                                    Pair(32768, "32K"),
+                                    Pair(131072, "128K"),
+                                ).forEach { (tokens, label) ->
+                                    val isSelected = settings.remoteContextWindowTokens == tokens && perModelOverride == null
+                                    Surface(
+                                        onClick = { viewModel.setRemoteContextWindowTokens(tokens) },
+                                        shape = RoundedCornerShape(12.dp),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceContainerHigh,
+                                        modifier = Modifier.weight(1f),
+                                    ) {
+                                        Text(
+                                            text = label,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.SemiBold,
+                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier.padding(vertical = 10.dp),
+                                            textAlign = TextAlign.Center,
+                                        )
+                                    }
+                                }
+                            }
+                            Button(
+                                onClick = { viewModel.detectRemoteContextWindow() },
+                                enabled = !isDetectingContextWindow && settings.remoteModelId.isNotBlank(),
+                                shape = RoundedCornerShape(12.dp),
+                                modifier = Modifier.fillMaxWidth(),
+                            ) {
+                                if (isDetectingContextWindow) {
+                                    CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                } else {
+                                    Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                                Spacer(Modifier.width(6.dp))
+                                Text(if (isDetectingContextWindow) "Detecting…" else "Auto-detect from Provider")
+                            }
+                            Text(
+                                "Ollama and OpenRouter models report their context length automatically " +
+                                    "when selected; otherwise set it manually to avoid cut-off replies.",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }

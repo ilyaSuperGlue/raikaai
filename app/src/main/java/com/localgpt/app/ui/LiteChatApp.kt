@@ -19,6 +19,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
@@ -34,6 +35,7 @@ import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.localgpt.app.ui.theme.success
 import androidx.compose.material3.ModalDrawerSheet
 import androidx.compose.material3.ModalNavigationDrawer
 import androidx.compose.material3.OutlinedButton
@@ -61,12 +63,10 @@ import com.localgpt.app.ui.about.AboutScreen
 import com.localgpt.app.ui.characters.CharactersScreen
 import com.localgpt.app.ui.chat.ChatScreen
 import com.localgpt.app.ui.chat.ChatViewModel
-import com.localgpt.app.ui.formatting.FormattingScreen
 import com.localgpt.app.ui.history.HistoryScreen
 import com.localgpt.app.ui.logs.LogsScreen
 import com.localgpt.app.ui.models.ModelsScreen
 import com.localgpt.app.ui.sampler.SamplerScreen
-import com.localgpt.app.ui.server.ServerScreen
 import com.localgpt.app.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
 
@@ -75,11 +75,11 @@ object NavRoute {
     const val CHARACTERS = "characters"
     const val SKILLS = "skills"
     const val SAMPLER = "sampler"
-    const val FORMATTING = "formatting"
     const val MODELS = "models"
     const val SERVER = "server"
     const val LOGS = "logs"
     const val HISTORY = "history"
+    const val MCP = "mcp"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
 }
@@ -176,13 +176,13 @@ fun LiteChatApp(
                             DrawerMenuItem(NavRoute.MODELS, "Models", Icons.Outlined.Memory),
                             DrawerMenuItem(NavRoute.SERVER, "Server", Icons.Outlined.Dns),
                             DrawerMenuItem(NavRoute.SKILLS, "Skills", Icons.Outlined.AutoAwesome),
+                            DrawerMenuItem(NavRoute.MCP, "MCP Servers", Icons.Outlined.Build),
                             DrawerMenuItem(NavRoute.SETTINGS, "Settings", Icons.Outlined.Settings),
                         )
                     val moreItems =
                         listOf(
                             DrawerMenuItem(NavRoute.CHARACTERS, "Characters", Icons.Outlined.Psychology),
                             DrawerMenuItem(NavRoute.SAMPLER, "Generation Parameters", Icons.Outlined.Tune),
-                            DrawerMenuItem(NavRoute.FORMATTING, "Formatting", Icons.Outlined.Description),
                             DrawerMenuItem(NavRoute.HISTORY, "History", Icons.Outlined.History),
                             DrawerMenuItem(NavRoute.LOGS, "Telemetry Logs", Icons.Outlined.Terminal),
                             DrawerMenuItem(NavRoute.ABOUT, "About", Icons.Outlined.Info),
@@ -283,14 +283,15 @@ fun LiteChatApp(
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                     )
                 }
-                composable(NavRoute.SAMPLER) {
-                    SamplerScreen(
+                composable(NavRoute.MCP) {
+                    com.localgpt.app.ui.mcp.McpScreen(
                         viewModel = viewModel,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onBack = { navController.popBackStack() },
                     )
                 }
-                composable(NavRoute.FORMATTING) {
-                    FormattingScreen(
+                composable(NavRoute.SAMPLER) {
+                    SamplerScreen(
                         viewModel = viewModel,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                     )
@@ -303,10 +304,9 @@ fun LiteChatApp(
                     )
                 }
                 composable(NavRoute.SERVER) {
-                    ServerScreen(
+                    com.localgpt.app.ui.server.ServerScreen(
                         viewModel = viewModel,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
-                        onBack = { navController.popBackStack() },
                     )
                 }
                 composable(NavRoute.LOGS) {

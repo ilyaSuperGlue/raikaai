@@ -27,7 +27,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -47,7 +46,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
 import androidx.compose.ui.unit.dp
+import com.localgpt.app.data.ChatConstants
 import com.localgpt.app.data.Settings
+import com.localgpt.app.ui.component.SettingsTextField
 import java.util.Locale
 
 /**
@@ -69,7 +70,6 @@ fun LocalAiParametersTab(
     onResetToRecommended: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    var hfTokenInput by remember(settings.huggingFaceToken) { mutableStateOf(settings.huggingFaceToken) }
     var showHfToken by remember { mutableStateOf(false) }
 
     Column(
@@ -102,11 +102,10 @@ fun LocalAiParametersTab(
 
         // ── 5. Hugging Face Access Token Card ──
         HuggingFaceTokenCard(
-            tokenInput = hfTokenInput,
+            initialToken = settings.huggingFaceToken,
             showToken = showHfToken,
-            onTokenInputChange = { hfTokenInput = it },
             onToggleVisibility = { showHfToken = !showHfToken },
-            onSaveToken = { onUpdateHuggingFaceToken(hfTokenInput.trim()) },
+            onSaveToken = { onUpdateHuggingFaceToken(it) },
         )
 
         // ── 6. Fine-Grained Sliders ──
@@ -115,7 +114,8 @@ fun LocalAiParametersTab(
             value = settings.temperature,
             valueDisplay = String.format(Locale.ROOT, "%.2f", settings.temperature),
             description = "Low values (0.1 - 0.3) provide factual, consistent responses. Higher values (0.7 - 0.9) increase creativity.",
-            range = 0.0f..1.0f,
+            range = 0.0f..2.0f,
+            steps = 20,
             onValueChange = onUpdateTemperature,
         )
 
@@ -421,9 +421,9 @@ private fun HardwareBackendCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
             ) {
-                val isGpu = currentBackend.equals("GPU", ignoreCase = true)
+                val isGpu = currentBackend.equals(ChatConstants.BACKEND_GPU, ignoreCase = true)
                 Button(
-                    onClick = { onUpdateBackend("GPU") },
+                    onClick = { onUpdateBackend(ChatConstants.BACKEND_GPU) },
                     colors =
                         ButtonDefaults.buttonColors(
                             containerColor = if (isGpu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -435,7 +435,7 @@ private fun HardwareBackendCard(
                     Text("GPU (OpenCL)", fontWeight = if (isGpu) FontWeight.Bold else FontWeight.Normal)
                 }
                 Button(
-                    onClick = { onUpdateBackend("CPU") },
+                    onClick = { onUpdateBackend(ChatConstants.BACKEND_CPU) },
                     colors =
                         ButtonDefaults.buttonColors(
                             containerColor = if (!isGpu) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
@@ -453,13 +453,15 @@ private fun HardwareBackendCard(
 
 @Composable
 private fun HuggingFaceTokenCard(
-    tokenInput: String,
+    initialToken: String,
     showToken: Boolean,
-    onTokenInputChange: (String) -> Unit,
     onToggleVisibility: () -> Unit,
-    onSaveToken: () -> Unit,
+    onSaveToken: (String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
+    // Mirror of the field below, used by the Save button. The field itself uses
+    // SettingsTextField so typing is never wiped by unrelated settings emissions.
+    var currentToken by remember { mutableStateOf(initialToken) }
     Card(
         modifier = modifier.fillMaxWidth(),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -478,11 +480,11 @@ private fun HuggingFaceTokenCard(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(modifier = Modifier.height(12.dp))
-            OutlinedTextField(
-                value = tokenInput,
-                onValueChange = onTokenInputChange,
+            SettingsTextField(
+                initialValue = initialToken,
+                onSave = {},
+                onValueChange = { currentToken = it },
                 label = { Text("hf_xxxxxxxxxxxxxxxxxxxx") },
-                singleLine = true,
                 visualTransformation = if (showToken) VisualTransformation.None else PasswordVisualTransformation(),
                 trailingIcon = {
                     IconButton(onClick = onToggleVisibility) {
@@ -493,11 +495,10 @@ private fun HuggingFaceTokenCard(
                     }
                 },
                 modifier = Modifier.fillMaxWidth(),
-                shape = RoundedCornerShape(12.dp),
             )
             Spacer(modifier = Modifier.height(8.dp))
             Button(
-                onClick = onSaveToken,
+                onClick = { onSaveToken(currentToken.trim()) },
                 modifier = Modifier.align(Alignment.End),
                 shape = RoundedCornerShape(10.dp),
             ) {
@@ -514,6 +515,7 @@ private fun ParameterSlider(
     valueDisplay: String,
     description: String,
     range: ClosedFloatingPointRange<Float>,
+    steps: Int = 0,
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -557,6 +559,7 @@ private fun ParameterSlider(
                 value = value,
                 onValueChange = onValueChange,
                 valueRange = range,
+                steps = steps,
                 modifier = Modifier.fillMaxWidth(),
             )
         }

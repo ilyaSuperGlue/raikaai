@@ -3,9 +3,11 @@ package com.localgpt.app.ui.chat
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import com.localgpt.app.data.ChatConstants
+import com.localgpt.app.data.effectiveRemoteContextWindow
+import com.localgpt.app.core.remote.RemoteAiClient
+import android.app.Activity
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -34,6 +36,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.PaddingValues
@@ -42,6 +45,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -55,10 +60,25 @@ import com.localgpt.app.core.audio.AudioRecorderHelper
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ArrowUpward
+import androidx.compose.material.icons.filled.Article
+import androidx.compose.material.icons.filled.AttachFile
+import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Build
+import androidx.compose.material.icons.filled.Bolt
+import androidx.compose.material.icons.filled.ChatBubbleOutline
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Warning
+import androidx.compose.material.icons.filled.CloudDownload
+import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.ContentCopy
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.Dns
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FileDownload
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.MoreVert
@@ -81,8 +101,25 @@ import androidx.compose.material.icons.outlined.MicOff
 import androidx.compose.material.icons.outlined.Person
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.UploadFile
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.CompareArrows
+import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Share
+import androidx.compose.material.icons.filled.SmartToy
+import androidx.compose.material.icons.filled.Speed
+import androidx.compose.material.icons.filled.Stop
+import androidx.compose.material.icons.filled.Terminal
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.material.icons.filled.Translate
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.material.icons.filled.UploadFile
+import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.DropdownMenu
@@ -98,6 +135,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -114,6 +152,7 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
@@ -136,14 +175,17 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.localgpt.app.data.ChatMessageEntry
 import com.localgpt.app.ui.component.MarkdownText
+import com.localgpt.app.ui.theme.success
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.ui.viewinterop.AndroidView
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 
 // SlashCommand, SpeechRecognizerHelper, TtsHelper extracted to separate files
@@ -155,6 +197,23 @@ import java.io.File
 // SpeechRecognizerHelper extracted to SpeechRecognizerHelper.kt
 // TtsHelper extracted to TtsHelper.kt
 // Composables extracted to ChatComponents.kt
+
+/**
+ * Short, truncation-friendly model label for compact UI spots (top bar subtitle, chips).
+ * Strips provider prefixes ("provider/model"), paths, and file extensions so the
+ * remaining name fits on one line instead of being cut mid-word.
+ */
+internal fun shortModelLabel(id: String): String =
+    id.substringAfterLast('/')
+        .substringAfterLast('\\')
+        .removePrefix("custom:")
+        .removeSuffix(".litertlm")
+        .removeSuffix(".task")
+        .removeSuffix(".bin")
+        .replace("_", " ")
+        .replace("-", " ")
+        .trim()
+        .ifBlank { id }
 
 /**
  * ChatterUI-inspired Full Modern Chat Interface for LiteChat.
@@ -174,15 +233,38 @@ fun ChatScreen(
     val activeBackend by viewModel.activeBackendState.collectAsState()
     val loadedModelPath by viewModel.loadedModelPath.collectAsState()
     val isGenerating by viewModel.isGenerating
+    // B39: hoisted derived state — topBar/bottomBar read this, and reading
+    // messages.isNotEmpty() directly there recomposed them on every ~50ms
+    // token batch.
+    val hasMessages by remember { derivedStateOf { viewModel.messages.isNotEmpty() } }
     val errorMessage by viewModel.errorMessage
     val context = LocalContext.current
 
     var input by remember { mutableStateOf("") }
+
+    // Widget prefill: "Ask LiteChat" home-screen widget delivers a prompt via
+    // MainActivity's intent extra; consume it once into the composer.
+    val pendingPrefill by viewModel.pendingPrefill
+    LaunchedEffect(pendingPrefill) {
+        val p = pendingPrefill
+        if (!p.isNullOrBlank()) {
+            viewModel.consumePrefill()
+            input = p
+        }
+    }
     var showOptionsMenu by remember { mutableStateOf(false) }
     var showRagSheet by remember { mutableStateOf(false) }
     var showSkillsSheet by remember { mutableStateOf(false) }
+    var showCompareDialog by remember { mutableStateOf(false) }
     var showModelDropdown by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
+    var showUrlDialog by remember { mutableStateOf(false) }
+    var urlInput by remember { mutableStateOf("") }
+    val urlFetchState by viewModel.urlFetchState
+    var showImageGenDialog by remember { mutableStateOf(false) }
+    var imageGenPrompt by remember { mutableStateOf("") }
+    var imageGenSize by remember { mutableStateOf("1024x1024") }
+    val imageGenState by viewModel.imageGenState
 
     val installedModels by viewModel.installedModels
     val remoteModels by viewModel.remoteModels
@@ -201,15 +283,43 @@ fun ChatScreen(
             uri?.let(viewModel::importRagDocument)
         }
 
-    val selectedImageUri by viewModel.selectedImageUri.collectAsState()
     val selectedAudioFile by viewModel.selectedAudioFile.collectAsState()
     val isAudioSupported by remember(settings.activeModelId, settings.customModelPath, settings.modelSource, loadedModelPath) {
         derivedStateOf { viewModel.isAudioSupported }
     }
 
+    val selectedAttachments by viewModel.selectedAttachments.collectAsState()
     val photoPickerLauncher =
-        rememberLauncherForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
-            viewModel.setSelectedImage(uri)
+        rememberLauncherForActivityResult(ActivityResultContracts.PickMultipleVisualMedia(maxItems = 5)) { uris ->
+            viewModel.addAttachments(uris, forceImage = true)
+        }
+    // Legacy fallback for devices without the system photo picker
+    // (no Play Services backport): launching PickVisualMedia there throws
+    // ActivityNotFoundException and kills the app instantly.
+    val imageFallbackLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.GetMultipleContents()) { uris ->
+            viewModel.addAttachments(uris, forceImage = true)
+        }
+    fun launchImagePicker() {
+        try {
+            if (ActivityResultContracts.PickVisualMedia.isPhotoPickerAvailable(context)) {
+                photoPickerLauncher.launch(
+                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly),
+                )
+            } else {
+                imageFallbackLauncher.launch("image/*")
+            }
+        } catch (_: Exception) {
+            try {
+                imageFallbackLauncher.launch("image/*")
+            } catch (_: Exception) {
+                Toast.makeText(context, "No image picker available on this device", Toast.LENGTH_SHORT).show()
+            }
+        }
+    }
+    val filePickerLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            if (uri != null) viewModel.addAttachments(listOf(uri))
         }
 
     val audioPickerLauncher =
@@ -241,6 +351,11 @@ fun ChatScreen(
             ttsHelper.destroy()
             audioPlayerHelper.stop()
             audioRecorderHelper.cancelRecording()
+            // B40: stop an in-flight generation when leaving the chat screen,
+            // but NOT on configuration change (rotation) — the VM survives it.
+            if ((context as? Activity)?.isChangingConfigurations != true) {
+                viewModel.stopGeneration()
+            }
         }
     }
 
@@ -322,27 +437,29 @@ fun ChatScreen(
             }
         }
 
-    // Token context calculation (effective: summary + unfolded tail)
+    // Token context calculation (effective: summary + unfolded tail).
+    // P2: throttled — the full walk is O(n) over every message.
     val totalContextTokens by remember {
         derivedStateOf {
             viewModel.compressionTick.value
-            viewModel.effectiveContextTokens()
+            viewModel.effectiveContextTokensThrottled()
         }
     }
 
-    val modelDisplayName = remember(settings.modelSource, settings.activeModelId, settings.customModelPath, settings.remoteModelId, loadedModelPath) {
-        if (settings.modelSource == ChatConstants.SOURCE_REMOTE) {
-            "Remote: " + (settings.remoteModelId.ifBlank { "Ollama (LAN)" })
+    val modelPin by viewModel.modelPinState
+
+    val modelDisplayName = remember(settings.modelSource, settings.activeModelId, settings.customModelPath, settings.remoteModelId, loadedModelPath, modelPin) {
+        val pin = modelPin
+        if (pin != null) {
+            val (_, id) = pin
+            shortModelLabel(id)
+        } else if (settings.modelSource == ChatConstants.SOURCE_REMOTE) {
+            shortModelLabel(settings.remoteModelId.ifBlank { "Ollama (LAN)" })
         } else {
             val fileName = loadedModelPath?.let { File(it).name }
                 ?: settings.customModelPath.ifBlank { null }?.let { File(it).name }
                 ?: settings.activeModelId.ifBlank { "No Model Selected" }
-            fileName
-                .removeSuffix(".litertlm")
-                .removeSuffix(".task")
-                .removeSuffix(".bin")
-                .replace("_", " ")
-                .replace("-", " ")
+            shortModelLabel(fileName)
         }
     }
 
@@ -676,66 +793,89 @@ fun ChatScreen(
                             }
                         }
 
-                        // Image Thumbnail Attachment Preview
-                        if (selectedImageUri != null) {
-                            val bitmap = remember(selectedImageUri) {
-                                try {
-                                    selectedImageUri?.let { uri ->
-                                        val opts = BitmapFactory.Options().apply {
-                                            inSampleSize = 2
-                                            inPreferredConfig = Bitmap.Config.RGB_565
+                        // Multi-attachment preview (image thumbnails + file chips)
+                        if (selectedAttachments.isNotEmpty()) {
+                            LazyRow(
+                                modifier = Modifier
+                                    .padding(start = 10.dp, top = 6.dp, end = 10.dp)
+                                    .fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                items(selectedAttachments, key = { it.uri.toString() }) { att ->
+                                    if (att.isImage) {
+                                        val bitmap by produceState<Bitmap?>(initialValue = null, att.uri) {
+                                            value =
+                                                withContext(Dispatchers.IO) {
+                                                    decodeSampledBitmapFromUri(context.contentResolver, att.uri, reqSizePx = 192)
+                                                }
                                         }
-                                        context.contentResolver.openInputStream(uri)?.use { stream ->
-                                            BitmapFactory.decodeStream(stream, null, opts)
+                                        // NOTE: no manual bitmap.recycle() here — the decoded
+                                        // bitmap is still referenced by the Image below and
+                                        // recycling it racy-ly crashes with
+                                        // "Canvas: trying to use a recycled bitmap".
+                                        val previewBitmap = bitmap
+                                        if (previewBitmap != null) {
+                                            Box(modifier = Modifier.size(44.dp)) {
+                                                Image(
+                                                    bitmap = previewBitmap.asImageBitmap(),
+                                                    contentDescription = "Selected image preview",
+                                                    modifier = Modifier
+                                                        .fillMaxSize()
+                                                        .clip(RoundedCornerShape(6.dp)),
+                                                    contentScale = ContentScale.Crop,
+                                                )
+                                                Surface(
+                                                    shape = CircleShape,
+                                                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
+                                                    modifier = Modifier
+                                                        .align(Alignment.TopEnd)
+                                                        .size(16.dp)
+                                                        .clickable { viewModel.removeAttachment(att.uri) },
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Close,
+                                                        contentDescription = "Remove attached image",
+                                                        modifier = Modifier.padding(2.dp),
+                                                        tint = MaterialTheme.colorScheme.onSurface,
+                                                    )
+                                                }
+                                            }
                                         }
-                                    }
-                                } catch (_: Throwable) {
-                                    null
-                                }
-                            }
-                            // Recycle bitmap when URI changes or composable leaves composition
-                            DisposableEffect(bitmap) {
-                                onDispose { bitmap?.recycle() }
-                            }
-                            if (bitmap != null) {
-                                Row(
-                                    modifier = Modifier
-                                        .padding(start = 10.dp, top = 6.dp, end = 10.dp)
-                                        .fillMaxWidth(),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Box(modifier = Modifier.size(44.dp)) {
-                                        Image(
-                                            bitmap = bitmap.asImageBitmap(),
-                                            contentDescription = "Selected image preview",
-                                            modifier = Modifier
-                                                .fillMaxSize()
-                                                .clip(RoundedCornerShape(6.dp)),
-                                            contentScale = ContentScale.Crop,
-                                        )
+                                    } else {
                                         Surface(
-                                            shape = CircleShape,
-                                            color = MaterialTheme.colorScheme.surface.copy(alpha = 0.85f),
-                                            modifier = Modifier
-                                                .align(Alignment.TopEnd)
-                                                .size(16.dp)
-                                                .clickable { viewModel.clearSelectedImage() },
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         ) {
-                                            Icon(
-                                                Icons.Default.Close,
-                                                contentDescription = "Remove attached image",
-                                                modifier = Modifier.padding(2.dp),
-                                                tint = MaterialTheme.colorScheme.onSurface,
-                                            )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+                                            ) {
+                                                Icon(
+                                                    Icons.Outlined.Description,
+                                                    contentDescription = null,
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier.size(16.dp),
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Text(
+                                                    att.name.take(18),
+                                                    style = MaterialTheme.typography.labelSmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    maxLines = 1,
+                                                )
+                                                Spacer(Modifier.width(4.dp))
+                                                Icon(
+                                                    Icons.Default.Close,
+                                                    contentDescription = "Remove attached file",
+                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                    modifier = Modifier
+                                                        .size(14.dp)
+                                                        .clickable { viewModel.removeAttachment(att.uri) },
+                                                )
+                                            }
                                         }
                                     }
-                                    Spacer(Modifier.width(8.dp))
-                                    Text(
-                                        "Image attached",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontWeight = FontWeight.SemiBold,
-                                    )
                                 }
                             }
                         }
@@ -847,6 +987,62 @@ fun ChatScreen(
                             }
                         }
 
+                        // URL fetch / image generation progress indicator
+                        val fetchingState = urlFetchState
+                        val generatingImageState = imageGenState
+                        val busyLabel = fetchingState ?: generatingImageState
+                        if (busyLabel != null) {
+                            Row(
+                                modifier = Modifier
+                                    .padding(start = 10.dp, top = 6.dp, end = 10.dp)
+                                    .fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(16.dp),
+                                    strokeWidth = 2.dp,
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    busyLabel,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                )
+                            }
+                        }
+
+                        // Warn when an image is attached in remote mode but the
+                        // selected remote model doesn't look vision-capable.
+                        if (selectedAttachments.any { it.isImage } &&
+                            settings.modelSource == ChatConstants.SOURCE_REMOTE &&
+                            !RemoteAiClient.isLikelyVisionModel(settings.remoteModelId)
+                        ) {
+                            Row(
+                                modifier =
+                                    Modifier
+                                        .fillMaxWidth()
+                                        .padding(horizontal = 10.dp)
+                                        .clip(RoundedCornerShape(10.dp))
+                                        .background(MaterialTheme.colorScheme.tertiaryContainer)
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Icon(
+                                    Icons.Default.Warning,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.onTertiaryContainer,
+                                    modifier = Modifier.size(16.dp),
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    "This remote model may not be able to read images. " +
+                                        "Use a vision model (e.g. qwen2-vl, llava) to analyze pictures.",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onTertiaryContainer,
+                                )
+                            }
+                        }
+
                         // ── Top Row: Compact Text Input Field ──
                         Row(
                             modifier = Modifier
@@ -873,7 +1069,7 @@ fun ChatScreen(
                                             Text(
                                                 text =
                                                     when {
-                                                        selectedImageUri != null -> "Ask about this image…"
+                                                        selectedAttachments.isNotEmpty() -> "Ask about the attachment(s)…"
                                                         selectedAudioFile != null -> "Ask about this audio clip…"
                                                         else -> "Message ${activePersona.name}…"
                                                     },
@@ -927,15 +1123,43 @@ fun ChatScreen(
                                         shape = RoundedCornerShape(14.dp),
                                     ) {
                                         DropdownMenuItem(
-                                            text = { Text("Attach Image (Vision)", style = MaterialTheme.typography.bodySmall) },
+                                            text = { Text("Attach Images (Vision)", style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
                                                 Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
                                                 showAttachmentMenu = false
-                                                photoPickerLauncher.launch(
-                                                    PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                                                )
+                                                launchImagePicker()
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Attach File (PDF/TXT/MD)", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                filePickerLauncher.launch(arrayOf("*/*"))
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Summarize Link", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                showUrlDialog = true
+                                            },
+                                        )
+                                        DropdownMenuItem(
+                                            text = { Text("Generate Image", style = MaterialTheme.typography.bodySmall) },
+                                            leadingIcon = {
+                                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
+                                            },
+                                            onClick = {
+                                                showAttachmentMenu = false
+                                                showImageGenDialog = true
                                             },
                                         )
                                         DropdownMenuItem(
@@ -1030,6 +1254,15 @@ fun ChatScreen(
                                             verticalAlignment = Alignment.CenterVertically,
                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                                         ) {
+                                            if (modelPin != null) {
+                                                Icon(
+                                                    imageVector = Icons.Default.PushPin,
+                                                    contentDescription = "Pinned model",
+                                                    tint = MaterialTheme.colorScheme.primary,
+                                                    modifier = Modifier.size(12.dp),
+                                                )
+                                                Spacer(Modifier.width(3.dp))
+                                            }
                                             Text(
                                                 text = modelDisplayName.take(16) + if (modelDisplayName.length > 16) "…" else "",
                                                 style = MaterialTheme.typography.labelSmall,
@@ -1048,157 +1281,13 @@ fun ChatScreen(
                                         }
                                     }
 
-                                    // Floating Dropup Menu
-                                    DropdownMenu(
+                                    ModelQuickSwitchMenu(
                                         expanded = showModelDropdown,
-                                        onDismissRequest = { showModelDropdown = false },
-                                        shape = RoundedCornerShape(14.dp),
-                                        modifier = Modifier.widthIn(min = 240.dp, max = 300.dp),
-                                    ) {
-                                        // Header
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(horizontal = 12.dp, vertical = 6.dp),
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(
-                                                    Icons.Outlined.Memory,
-                                                    contentDescription = null,
-                                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.size(15.dp),
-                                                )
-                                                Spacer(Modifier.width(5.dp))
-                                                Text(
-                                                    text = "Model",
-                                                    style = MaterialTheme.typography.labelMedium,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = MaterialTheme.colorScheme.onSurface,
-                                                )
-                                            }
-                                            Surface(
-                                                shape = RoundedCornerShape(50),
-                                                color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                            ) {
-                                                Text(
-                                                    text = if (settings.modelSource == ChatConstants.SOURCE_REMOTE) "Remote" else (activeBackend ?: "GPU"),
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontSize = 10.sp,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
-                                                )
-                                            }
-                                        }
-
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-
-                                        if (installedModels.isEmpty() && remoteModels.isEmpty()) {
-                                            DropdownMenuItem(
-                                                text = { Text("No installed models found", style = MaterialTheme.typography.bodySmall) },
-                                                onClick = {
-                                                    showModelDropdown = false
-                                                    onNavigateToModels()
-                                                },
-                                            )
-                                        } else {
-                                            // Installed Models
-                                            installedModels.forEach { model ->
-                                                val isActive = if (settings.customModelPath.isNotBlank()) {
-                                                    settings.customModelPath == model.absolutePath
-                                                } else {
-                                                    settings.activeModelId == model.id
-                                                }
-                                                val isCurrentlyLoaded = isModelLoaded && isActive
-
-                                                DropdownMenuItem(
-                                                    text = {
-                                                        Column {
-                                                            Text(
-                                                                text = model.displayName,
-                                                                style = MaterialTheme.typography.bodySmall,
-                                                                fontWeight = if (isActive) FontWeight.Bold else FontWeight.Normal,
-                                                                color = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis,
-                                                            )
-                                                            Text(
-                                                                text = "${model.sizeDisplay} · ${if (isCurrentlyLoaded) "In RAM" else "Ready"}",
-                                                                style = MaterialTheme.typography.labelSmall,
-                                                                color = if (isCurrentlyLoaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                fontSize = 9.sp,
-                                                            )
-                                                        }
-                                                    },
-                                                    leadingIcon = {
-                                                        Icon(
-                                                            imageVector = if (isActive) Icons.Outlined.CheckCircle else Icons.Outlined.Memory,
-                                                            contentDescription = null,
-                                                            tint = if (isActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            modifier = Modifier.size(16.dp),
-                                                        )
-                                                    },
-                                                    onClick = {
-                                                        showModelDropdown = false
-                                                        viewModel.setModelSource(ChatConstants.SOURCE_LOCAL)
-                                                        if (model.isPreset) {
-                                                            viewModel.setActivePreset(model.id)
-                                                        } else {
-                                                            viewModel.setActiveCustomPath(model.absolutePath)
-                                                        }
-                                                        viewModel.loadActiveModel()
-                                                    },
-                                                )
-                                            }
-
-                                            // Remote Models if any
-                                            if (remoteModels.isNotEmpty()) {
-                                                remoteModels.take(4).forEach { rModel ->
-                                                    val isRemoteActive = settings.modelSource == ChatConstants.SOURCE_REMOTE && settings.remoteModelId == rModel.id
-                                                    DropdownMenuItem(
-                                                        text = {
-                                                            Text(
-                                                                text = rModel.id,
-                                                                style = MaterialTheme.typography.bodySmall,
-                                                                fontWeight = if (isRemoteActive) FontWeight.Bold else FontWeight.Normal,
-                                                                color = if (isRemoteActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
-                                                                maxLines = 1,
-                                                                overflow = TextOverflow.Ellipsis,
-                                                            )
-                                                        },
-                                                        leadingIcon = {
-                                                            Icon(
-                                                                Icons.Outlined.Dns,
-                                                                contentDescription = null,
-                                                                tint = if (isRemoteActive) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                                                modifier = Modifier.size(16.dp),
-                                                            )
-                                                        },
-                                                        onClick = {
-                                                            showModelDropdown = false
-                                                            viewModel.setModelSource(ChatConstants.SOURCE_REMOTE)
-                                                            viewModel.setRemoteModelId(rModel.id)
-                                                        },
-                                                    )
-                                                }
-                                            }
-                                        }
-
-                                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f))
-
-                                        DropdownMenuItem(
-                                            text = { Text("Browse Models Hub…", style = MaterialTheme.typography.labelSmall) },
-                                            leadingIcon = {
-                                                Icon(Icons.Outlined.CloudDownload, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(16.dp))
-                                            },
-                                            onClick = {
-                                                showModelDropdown = false
-                                                onNavigateToModels()
-                                            },
-                                        )
-                                    }
+                                        onDismiss = { showModelDropdown = false },
+                                        viewModel = viewModel,
+                                        onNavigateToModels = onNavigateToModels,
+                                        onCompareClick = { showCompareDialog = true },
+                                    )
                                 }
 
                                 // 3. Quick AI Skills Pill (when active)
@@ -1264,7 +1353,7 @@ fun ChatScreen(
                             }
 
                             // Right Group: Voice Input & Send / Stop Action Button
-                            val canSend = input.isNotBlank() || selectedImageUri != null || selectedAudioFile != null
+                            val canSend = input.isNotBlank() || selectedAttachments.isNotEmpty() || selectedAudioFile != null
                             val isListening = speechHelper.isListening.value || isRecordingAudio
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1433,6 +1522,289 @@ fun ChatScreen(
                 }
             }
         }
+    }
+
+    // ── Compare Mode Dialog ──
+    if (showCompareDialog) {
+        AlertDialog(
+            onDismissRequest = { showCompareDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.CompareArrows,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Compare Mode")
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(10.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            "Run every prompt on 2 models",
+                            style = MaterialTheme.typography.bodySmall,
+                            modifier = Modifier.weight(1f),
+                        )
+                        Switch(
+                            checked = settings.compareMode,
+                            onCheckedChange = { viewModel.setCompareMode(it) },
+                        )
+                    }
+                    Text(
+                        "Model A = active model. Pick model B (challenger):",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold,
+                    )
+                    Column(
+                        verticalArrangement = Arrangement.spacedBy(2.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .heightIn(max = 320.dp)
+                            .verticalScroll(rememberScrollState()),
+                    ) {
+                        if (installedModels.isNotEmpty()) {
+                            Text(
+                                "On-device",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        installedModels.forEach { model ->
+                            val selected =
+                                settings.compareSource == ChatConstants.SOURCE_LOCAL &&
+                                    settings.compareModelId == model.absolutePath
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        viewModel.setCompareChallenger(ChatConstants.SOURCE_LOCAL, model.absolutePath)
+                                    }
+                                    .padding(vertical = 6.dp, horizontal = 4.dp),
+                            ) {
+                                RadioButton(selected = selected, onClick = {
+                                    viewModel.setCompareChallenger(ChatConstants.SOURCE_LOCAL, model.absolutePath)
+                                })
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    model.displayName,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        if (remoteModels.isNotEmpty()) {
+                            Text(
+                                "Remote",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.Bold,
+                            )
+                        }
+                        remoteModels.forEach { rModel ->
+                            val selected =
+                                settings.compareSource == ChatConstants.SOURCE_REMOTE &&
+                                    settings.compareModelId == rModel.id
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .clickable {
+                                        viewModel.setCompareChallenger(ChatConstants.SOURCE_REMOTE, rModel.id)
+                                    }
+                                    .padding(vertical = 6.dp, horizontal = 4.dp),
+                            ) {
+                                RadioButton(selected = selected, onClick = {
+                                    viewModel.setCompareChallenger(ChatConstants.SOURCE_REMOTE, rModel.id)
+                                })
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    rModel.id,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                )
+                            }
+                        }
+                        if (installedModels.isEmpty() && remoteModels.isEmpty()) {
+                            Text(
+                                "No models yet. Download one in Models Hub first.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    }
+                    Text(
+                        "Result B appears as variant 2 (swipe 1/2) with the compare label under the message.",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showCompareDialog = false }) { Text("Done") }
+            },
+        )
+    }
+
+    val mcpApprovalReq = viewModel.pendingMcpApproval.value
+    if (mcpApprovalReq != null) {
+        val toolSig =
+            viewModel.mcpToolsByServer.value[mcpApprovalReq.serverId]
+                ?.find { it.name == mcpApprovalReq.toolName }
+                ?.signature ?: mcpApprovalReq.toolName
+        AlertDialog(
+            onDismissRequest = { viewModel.respondMcpApproval(false) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Build,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Allow tool call?")
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "The assistant wants to run a tool on your MCP server. Review before allowing.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Text(
+                        text = toolSig,
+                        style = MaterialTheme.typography.bodySmall,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "Server: ${mcpApprovalReq.serverName}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = mcpApprovalReq.argumentsJson.ifBlank { "{}" },
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .heightIn(max = 180.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.respondMcpApproval(true) }) { Text("Allow") }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.respondMcpApproval(false) }) { Text("Deny") }
+            },
+        )
+    }
+
+    if (showUrlDialog) {
+        AlertDialog(
+            onDismissRequest = { showUrlDialog = false },
+            title = { Text("Summarize Link") },
+            text = {
+                OutlinedTextField(
+                    value = urlInput,
+                    onValueChange = { urlInput = it },
+                    label = { Text("URL") },
+                    placeholder = { Text("https://example.com/article") },
+                    singleLine = true,
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        showUrlDialog = false
+                        viewModel.summarizeUrl(urlInput)
+                        urlInput = ""
+                    },
+                    enabled = urlInput.isNotBlank(),
+                ) { Text("Summarize") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showUrlDialog = false }) { Text("Cancel") }
+            },
+        )
+    }
+
+    if (showImageGenDialog) {
+        AlertDialog(
+            onDismissRequest = { showImageGenDialog = false },
+            title = { Text("Generate Image") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = imageGenPrompt,
+                        onValueChange = { imageGenPrompt = it },
+                        label = { Text("Prompt") },
+                        placeholder = { Text("A cozy cabin in the snowy mountains…") },
+                        minLines = 2,
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    Text("Size", style = MaterialTheme.typography.labelSmall)
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        listOf("1024x1024", "1024x1792", "1792x1024").forEach { size ->
+                            FilterChip(
+                                selected = imageGenSize == size,
+                                onClick = { imageGenSize = size },
+                                label = { Text(size, style = MaterialTheme.typography.labelSmall) },
+                            )
+                        }
+                    }
+                    val imgModel = settings.remoteImageModelId.ifBlank { settings.remoteModelId }
+                    Text(
+                        if (imgModel.isBlank()) "Pick an image model in the Models tab first."
+                        else "Model: $imgModel",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showImageGenDialog = false
+                        viewModel.generateImage(imageGenPrompt, imageGenSize)
+                        imageGenPrompt = ""
+                    },
+                    enabled = imageGenPrompt.isNotBlank(),
+                ) { Text("Generate") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showImageGenDialog = false }) { Text("Cancel") }
+            },
+        )
     }
 
     // ── Library Sheet: Knowledge Base + Artifacts ──
@@ -1816,6 +2188,8 @@ fun ChatScreen(
                         )
                         web
                     },
+                    // B37: WebViews hold native resources; destroy on dismiss.
+                    onRelease = { it.destroy() },
                     modifier = Modifier.fillMaxSize().weight(1f),
                 )
             }

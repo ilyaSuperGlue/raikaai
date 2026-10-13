@@ -101,6 +101,7 @@ fun SkillsScreen(
     var showCreateDialog by remember { mutableStateOf(false) }
     var editingSkill by remember { mutableStateOf<Skill?>(null) }
     var deleteCandidate by remember { mutableStateOf<Skill?>(null) }
+    var pendingImportReview by remember { mutableStateOf<Skill?>(null) }
 
     val filePicker = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.GetContent()
@@ -109,7 +110,9 @@ fun SkillsScreen(
             scope.launch {
                 val imported = SkillsManager.getInstance(context).importFromUri(uri)
                 if (imported != null) {
-                    Toast.makeText(context, "Skill '${imported.name}' imported successfully", Toast.LENGTH_SHORT).show()
+                    // Imported skills stay disabled until the user reviews the
+                    // instructions and explicitly enables them (B9).
+                    pendingImportReview = imported
                 } else {
                     Toast.makeText(context, "Failed to import skill file", Toast.LENGTH_SHORT).show()
                 }
@@ -259,7 +262,7 @@ fun SkillsScreen(
 
                             SkillItemRow(
                                 title = "Live Web Search (Internet)",
-                                description = "Real-time on-device search (DuckDuckGo, Wikipedia, URLs) with factual citations.",
+                                description = "Real-time on-device search (DuckDuckGo, Wikipedia, URLs) with factual citations. Privacy: fetching full page content sends the URL through the r.jina.ai proxy.",
                                 icon = Icons.Default.Search,
                                 isEnabled = settings.enableWebSearch,
                                 onToggle = { viewModel.setEnableWebSearch(it) },
@@ -548,6 +551,18 @@ fun SkillsScreen(
             },
         )
     }
+
+    // ── Import Review Dialog (B9): preview instructions before enabling ──
+    pendingImportReview?.let { skill ->
+        SkillImportReviewDialog(
+            skill = skill,
+            onEnable = {
+                scope.launch { SkillsManager.getInstance(context).toggleSkill(skill.id, true) }
+                pendingImportReview = null
+            },
+            onDismiss = { pendingImportReview = null },
+        )
+    }
 }
 
 @Composable
@@ -574,8 +589,7 @@ private fun SkillItemRow(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = title,
-                style = MaterialTheme.typography.titleSmall,
-                fontWeight = FontWeight.Bold,
+                style = MaterialTheme.typography.titleMedium,
                 color = if (isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
             )
             Spacer(Modifier.height(3.dp))
@@ -645,8 +659,7 @@ private fun PromptSkillCard(
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = skill.name,
-                        style = MaterialTheme.typography.titleSmall,
-                        fontWeight = FontWeight.Bold,
+                        style = MaterialTheme.typography.titleMedium,
                         color = if (skill.isEnabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(

@@ -17,6 +17,7 @@ import androidx.core.content.ContextCompat
 import com.localgpt.app.ui.chat.ChatScreen
 import com.localgpt.app.ui.chat.ChatViewModel
 import com.localgpt.app.ui.theme.LiteChatTheme
+import com.localgpt.app.widget.LiteChatWidgetProvider.Companion.EXTRA_PREFILL_PROMPT
 
 class MainActivity : ComponentActivity() {
     private val viewModel: ChatViewModel by viewModels()
@@ -28,9 +29,16 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         requestNotificationPermissionIfNeeded()
+        viewModel.applyPrefill(intent?.getStringExtra(EXTRA_PREFILL_PROMPT))
         setContent {
             Root(viewModel)
         }
+    }
+
+    override fun onNewIntent(intent: android.content.Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        viewModel.applyPrefill(intent.getStringExtra(EXTRA_PREFILL_PROMPT))
     }
 
     private fun requestNotificationPermissionIfNeeded() {
@@ -57,8 +65,16 @@ private fun Root(viewModel: ChatViewModel) {
     LiteChatTheme(
         darkTheme = darkTheme,
         pureBlack = settings.pureBlack,
-        themeColor = androidx.compose.ui.graphics.Color(settings.themeColor.toInt()),
+        themeColor = androidx.compose.ui.graphics.Color(
+            settings.themeColor
+                .toString()
+                .toLongOrNull()
+                ?.takeIf { it != 0L }
+                ?: DEFAULT_THEME_COLOR,
+        ),
     ) {
         com.localgpt.app.ui.LiteChatApp(viewModel)
     }
 }
+
+private const val DEFAULT_THEME_COLOR = 0xFF00897BL

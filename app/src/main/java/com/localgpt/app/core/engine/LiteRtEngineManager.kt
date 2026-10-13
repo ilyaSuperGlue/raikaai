@@ -152,7 +152,7 @@ class LiteRtEngineManager private constructor(
         val contextWindow: Int = 2048,
         val backend: String = "GPU", // "GPU" | "CPU"
         val systemPrompt: String = "",
-        val enableThinking: Boolean = true,
+        val enableThinking: Boolean = false,
     )
 
     init {
@@ -164,6 +164,13 @@ class LiteRtEngineManager private constructor(
     private var activeModelPath: String? = null
     private var activeBackend: String? = null
     private var activeVisionSupported: Boolean = false
+    private var activeAudioSupported: Boolean = false
+
+    val isAudioSupported: Boolean
+        get() = activeAudioSupported || (activeModelPath?.let { isAudioCandidate(it) } ?: false)
+
+    val isVisionSupported: Boolean
+        get() = activeVisionSupported || (activeModelPath?.let { isVisionCandidate(it) } ?: false)
 
     /** Conversation of the in-flight generation, so [cancelGeneration] can abort it natively. */
     @Volatile
@@ -227,6 +234,8 @@ class LiteRtEngineManager private constructor(
         params: EngineParams,
         imagePath: String? = null,
         imageBytes: ByteArray? = null,
+        audioPath: String? = null,
+        audioBytes: ByteArray? = null,
         onMetrics: ((InferenceMetrics) -> Unit)? = null,
     ): Flow<String> =
         flow {
@@ -242,12 +251,15 @@ class LiteRtEngineManager private constructor(
 
             _isGenerating.value = true
             try {
-                val activeEngine = getOrCreateEngine(params)
+                val hasAudio = !audioPath.isNullOrBlank() || (audioBytes != null && audioBytes.isNotEmpty())
+                val hasImage = !imagePath.isNullOrBlank() || (imageBytes != null && imageBytes.isNotEmpty())
+                val activeEngine = getOrCreateEngine(params, requireAudio = hasAudio, requireVision = hasImage)
                 val backendName = activeBackend ?: params.backend
                 val modelName = File(params.modelPath).name
 
                 val imgTag = if (!imagePath.isNullOrBlank()) " + image ($imagePath)" else if (imageBytes != null && imageBytes.isNotEmpty()) " + image (${imageBytes.size / 1024} KB)" else ""
-                logEngine("[LiteRT Request] Stream on $backendName ($modelName)$imgTag")
+                val audioTag = if (!audioPath.isNullOrBlank()) " + audio ($audioPath)" else if (audioBytes != null && audioBytes.isNotEmpty()) " + audio (${audioBytes.size / 1024} KB)" else ""
+                logEngine("[LiteRT Request] Stream on $backendName ($modelName)$imgTag$audioTag")
                 logEngine("  ├── Input: ~$inputTokens tokens (${prompt.length} chars) · temp=${params.temperature}, topK=${params.topK}")
 
                 var outputText = ""
@@ -324,33 +336,68 @@ class LiteRtEngineManager private constructor(
                             null
                         }
 
-                    try {
-                        val stream =
-                            if (validImageFile != null && activeVisionSupported) {
-                                try {
-                                    val contents =
-                                        Contents.of(
-                                            Content.ImageFile(validImageFile.absolutePath),
-                                            Content.Text(prompt),
-                                        )
-                                    conv.sendMessageAsync(contents, thinkingConfig = thinkingConfig)
-                                } catch (e: Throwable) {
-                                    logEngine("[WARN] Multimodal vision input rejected (${e.message}). Falling back to text prompt.")
-                                    conv.sendMessageAsync(prompt, thinkingConfig = thinkingConfig)
-                                }
-                            } else {
-                                if (validImageFile != null && !activeVisionSupported) {
-                                    logEngine("[WARN] Active model has no vision encoder. Prompting with text only.")
-                                }
-                                conv.sendMessageAsync(prompt, thinkingConfig = thinkingConfig)
+                    val validAudioFile =
+                        if (!audioPath.isNullOrBlank()) {
+                            File(audioPath).takeIf { it.exists() }
+                        } else if (audioBytes != null && audioBytes.isNotEmpty()) {
+                            try {
+                                val temp = File(context.cacheDir, "temp_audio_input.wav")
+                                temp.writeBytes(audioBytes)
+                                temp
+                            } catch (_: Exception) {
+                                null
                             }
+                        } else {
+                            null
+                        }
+
+                    try {
+                        val contentList = mutableListOf<Content>()
+
+                        // 1. Add Image attachment if available and supported
+                        val imgData = imageBytes ?: validImageFile?.let { runCatching { it.readBytes() }.getOrNull() }
+                        if (imgData != null && imgData.isNotEmpty() && activeVisionSupported) {
+                            contentList.add(Content.ImageBytes(imgData))
+                        } else if (validImageFile != null && activeVisionSupported) {
+                            contentList.add(Content.ImageFile(validImageFile.absolutePath))
+                        }
+
+                        // 2. Add Audio attachment if available and supported (Gemma 4 / Gemma 3n)
+                        val audioData = audioBytes ?: validAudioFile?.let { runCatching { it.readBytes() }.getOrNull() }
+                        if (audioData != null && audioData.isNotEmpty() && activeAudioSupported) {
+                            contentList.add(Content.AudioBytes(audioData))
+                        } else if (validAudioFile != null && activeAudioSupported) {
+                            contentList.add(Content.AudioFile(validAudioFile.absolutePath))
+                        }
+
+                        // 3. Add text prompt after media attachments (ensures correct autoregressive ordering)
+                        if (prompt.isNotBlank() || contentList.isEmpty()) {
+                            contentList.add(Content.Text(prompt.ifBlank { "Please listen to this audio clip and respond." }))
+                        }
+
+                        val stream = if (contentList.any { it !is Content.Text }) {
+                            try {
+                                conv.sendMessageAsync(Contents.of(contentList), thinkingConfig = thinkingConfig)
+                            } catch (e: Throwable) {
+                                logEngine("[WARN] Multimodal input rejected (${e.message}). Falling back to text prompt.")
+                                conv.sendMessageAsync(prompt.ifBlank { "Please respond to this audio clip." }, thinkingConfig = thinkingConfig)
+                            }
+                        } else {
+                            if (validImageFile != null && !activeVisionSupported) {
+                                logEngine("[WARN] Active model has no vision encoder. Prompting with text only.")
+                            }
+                            if ((validAudioFile != null || (audioBytes != null && audioBytes.isNotEmpty())) && !activeAudioSupported) {
+                                logEngine("[WARN] Active model has no audio encoder on this backend. Prompting with text only.")
+                            }
+                            conv.sendMessageAsync(prompt, thinkingConfig = thinkingConfig)
+                        }
 
                         try {
                             stream.collect(processChunk)
                         } catch (t: Throwable) {
-                            if (validImageFile != null && outputText.isBlank()) {
+                            if ((validImageFile != null || validAudioFile != null) && outputText.isBlank()) {
                                 logEngine("[WARN] Multimodal streaming encountered error (${t.message}), retrying with text prompt fallback...")
-                                val fallbackStream = conv.sendMessageAsync(prompt, thinkingConfig = thinkingConfig)
+                                val fallbackStream = conv.sendMessageAsync(prompt.ifBlank { "Please respond." }, thinkingConfig = thinkingConfig)
                                 fallbackStream.collect(processChunk)
                             } else {
                                 throw t
@@ -407,9 +454,18 @@ class LiteRtEngineManager private constructor(
         params: EngineParams,
         imagePath: String? = null,
         imageBytes: ByteArray? = null,
+        audioPath: String? = null,
+        audioBytes: ByteArray? = null,
     ): String {
         val sb = StringBuilder()
-        streamResponse(prompt = prompt, params = params, imagePath = imagePath, imageBytes = imageBytes).collect { sb.append(it) }
+        streamResponse(
+            prompt = prompt,
+            params = params,
+            imagePath = imagePath,
+            imageBytes = imageBytes,
+            audioPath = audioPath,
+            audioBytes = audioBytes,
+        ).collect { sb.append(it) }
         return sb.toString().trim()
     }
 
@@ -430,7 +486,11 @@ class LiteRtEngineManager private constructor(
      * Falls back from GPU (OpenCL) to CPU (XNNPack) when initialization fails.
      * Fully runs on Dispatchers.IO to guarantee zero blocking of Android main thread.
      */
-    suspend fun getOrCreateEngine(params: EngineParams): Engine =
+    suspend fun getOrCreateEngine(
+        params: EngineParams,
+        requireAudio: Boolean = false,
+        requireVision: Boolean = false,
+    ): Engine =
         withContext(Dispatchers.IO) {
             mutex.withLock {
                 val file = File(params.modelPath)
@@ -441,16 +501,21 @@ class LiteRtEngineManager private constructor(
                 throw IllegalStateException(err)
             }
 
+            val needsAudioReload = requireAudio && !activeAudioSupported && isAudioCandidate(params.modelPath)
+            val needsVisionReload = requireVision && !activeVisionSupported && isVisionCandidate(params.modelPath)
+
             val needsReload =
                 engine == null ||
                     activeModelPath != params.modelPath ||
-                    (activeBackend != null && !activeBackend!!.startsWith(params.backend, ignoreCase = true))
+                    (activeBackend != null && !activeBackend!!.startsWith(params.backend, ignoreCase = true)) ||
+                    needsAudioReload ||
+                    needsVisionReload
 
             if (needsReload) {
                 unloadLocked()
                 val specs = getSystemSpecs(context)
                 val fileSizeStr = formatBytes(file.length())
-                val tokenBudget = maxOf(1024, maxOf(params.contextWindow, params.maxTokens))
+                val tokenBudget = minOf(maxOf(1024, maxOf(params.contextWindow, params.maxTokens)), 8192)
 
                 logEngine("[LiteRT Device] ${specs.deviceModel} (${specs.chipset}) · ${specs.cores} Cores · ${specs.abi}")
                 logEngine(
@@ -466,6 +531,7 @@ class LiteRtEngineManager private constructor(
 
                 val startInit = System.currentTimeMillis()
                 val candidateForVision = isVisionCandidate(params.modelPath)
+                val candidateForAudio = isAudioCandidate(params.modelPath)
 
                 try {
                     val targetBackend =
@@ -473,36 +539,49 @@ class LiteRtEngineManager private constructor(
                     val initTarget = if (targetBackend is Backend.GPU) "OpenCL GPU shader cache" else "CPU XNNPack engine"
                     logEngine("[LiteRT Engine] Initializing $initTarget...")
 
-                    val (newEngine, visionOk) =
+                    val initResult =
                         initEngineInstance(
                             modelPath = params.modelPath,
                             targetBackend = targetBackend,
                             tokenBudget = tokenBudget,
                             tryVision = candidateForVision,
+                            tryAudio = candidateForAudio,
                         )
-                    engine = newEngine
+                    engine = initResult.engine
                     activeBackend = params.backend
-                    activeVisionSupported = visionOk
+                    activeVisionSupported = initResult.visionSupported
+                    activeAudioSupported = initResult.audioSupported
                     val initDuration = System.currentTimeMillis() - startInit
-                    val visionBadge = if (visionOk) " + Vision" else " (Text Only)"
-                    logEngine("[LiteRT Engine] ${params.backend}$visionBadge Initialization Successful (${initDuration}ms)")
+                    val modalityBadges = buildString {
+                        if (initResult.visionSupported) append(" + Vision")
+                        if (initResult.audioSupported) append(" + Audio")
+                        if (!initResult.visionSupported && !initResult.audioSupported) append(" (Text Only)")
+                    }
+                    logEngine("[LiteRT Engine] ${params.backend}$modalityBadges Initialization Successful (${initDuration}ms)")
                 } catch (e: Exception) {
                     if (!params.backend.equals("CPU", ignoreCase = true)) {
                         logEngine("[WARN] GPU OpenCL rejected (${e.message ?: e.javaClass.simpleName}). Falling back to CPU (XNNPack)...")
                         KLog.w("LiteRT", "GPU OpenCL rejected, falling back to CPU: ${e.message}")
                         try {
-                            val (newEngine, visionOk) =
+                            val initResult =
                                 initEngineInstance(
                                     modelPath = params.modelPath,
                                     targetBackend = Backend.CPU(),
                                     tokenBudget = tokenBudget,
                                     tryVision = candidateForVision,
+                                    tryAudio = candidateForAudio,
                                 )
-                            engine = newEngine
+                            engine = initResult.engine
                             activeBackend = "CPU (Fallback)"
-                            activeVisionSupported = visionOk
+                            activeVisionSupported = initResult.visionSupported
+                            activeAudioSupported = initResult.audioSupported
                             val fallbackDuration = System.currentTimeMillis() - startInit
-                            logEngine("[LiteRT Engine] CPU Fallback Successful (${fallbackDuration}ms)")
+                            val modalityBadges = buildString {
+                                if (initResult.visionSupported) append(" + Vision")
+                                if (initResult.audioSupported) append(" + Audio")
+                                if (!initResult.visionSupported && !initResult.audioSupported) append(" (Text Only)")
+                            }
+                            logEngine("[LiteRT Engine] CPU Fallback$modalityBadges Successful (${fallbackDuration}ms)")
                         } catch (cpuEx: Exception) {
                             val failMsg = "GPU and CPU initialization failed: ${cpuEx.message ?: cpuEx.javaClass.simpleName}"
                             logEngine("[ERROR] $failMsg")
@@ -526,7 +605,13 @@ class LiteRtEngineManager private constructor(
         }
     }
 
-    private fun isVisionCandidate(modelPath: String): Boolean {
+    private data class EngineInitResult(
+        val engine: Engine,
+        val visionSupported: Boolean,
+        val audioSupported: Boolean,
+    )
+
+    fun isVisionCandidate(modelPath: String): Boolean {
         val name = File(modelPath).name.lowercase()
         return name.contains("e2b") ||
             name.contains("e4b") ||
@@ -537,67 +622,105 @@ class LiteRtEngineManager private constructor(
             name.contains("multimodal")
     }
 
+    fun isAudioCandidate(modelPath: String): Boolean {
+        val name = File(modelPath).name.lowercase()
+        return name.contains("e2b") ||
+            name.contains("e4b") ||
+            name.contains("gemma-4") ||
+            name.contains("gemma4") ||
+            name.contains("gemma-3n") ||
+            name.contains("gemma3n") ||
+            name.contains("audio") ||
+            name.contains("omni") ||
+            name.contains("multimodal")
+    }
+
     private fun initEngineInstance(
         modelPath: String,
         targetBackend: Backend,
         tokenBudget: Int,
         tryVision: Boolean,
-    ): Pair<Engine, Boolean> {
-        if (tryVision) {
-            try {
-                val eng =
-                    Engine(
-                        EngineConfig(
-                            modelPath = modelPath,
-                            backend = targetBackend,
-                            visionBackend = targetBackend,
-                            maxNumTokens = tokenBudget,
-                            maxNumImages = 1,
-                            cacheDir = context.cacheDir.absolutePath,
+        tryAudio: Boolean,
+    ): EngineInitResult {
+        fun tryConfig(enableVision: Boolean, enableAudio: Boolean): Engine? {
+            return try {
+                logEngine("[LiteRT Engine] Attempting config: Vision=$enableVision, Audio=$enableAudio on $targetBackend (budget=$tokenBudget tokens)...")
+                val config =
+                    EngineConfig(
+                        modelPath = modelPath,
+                        backend = targetBackend,
+                        visionBackend = if (enableVision) targetBackend else null,
+                        audioBackend = if (enableAudio) Backend.CPU() else null,
+                        maxNumTokens = tokenBudget,
+                        cacheDir = if (modelPath.startsWith("/data/local/tmp")) context.getExternalFilesDir(null)?.absolutePath else null,
+                    )
+                val eng = Engine(config)
+                eng.initialize()
+                try {
+                    val testConv = eng.createConversation(
+                        ConversationConfig(
+                            samplerConfig = SamplerConfig(
+                                topK = 40,
+                                topP = 0.95,
+                                temperature = 0.7,
+                            ),
                         ),
                     )
-                eng.initialize()
-                // Verify conversation creation succeeds without TF_LITE_VISION_ENCODER missing error
-                try {
-                    val testConv = eng.createConversation()
                     testConv.close()
-                    return Pair(eng, true)
                 } catch (convEx: Throwable) {
-                    if (convEx.message?.contains("VISION_ENCODER", ignoreCase = true) == true ||
-                        convEx.message?.contains("TF_LITE_VISION", ignoreCase = true) == true
-                    ) {
-                        logEngine("[INFO] Model lacks vision encoder (${convEx.message}). Re-initializing as text LLM...")
-                        try { eng.close() } catch (e: Exception) { KLog.e("LiteRT", "Failed to close engine", e) }
-                    } else {
-                        try { eng.close() } catch (e: Exception) { KLog.e("LiteRT", "Failed to close engine", e) }
-                        throw convEx
-                    }
+                    logEngine("[WARN] Conversation test creation failed (vision=$enableVision, audio=$enableAudio): ${convEx.message}")
+                    try { eng.close() } catch (_: Exception) {}
+                    return null
                 }
-            } catch (initEx: Throwable) {
-                if (initEx.message?.contains("VISION_ENCODER", ignoreCase = true) == true ||
-                    initEx.message?.contains("TF_LITE_VISION", ignoreCase = true) == true
-                ) {
-                    logEngine("[INFO] Model lacks vision encoder. Re-initializing as text LLM...")
-                } else {
-                    throw initEx
-                }
+                logEngine("[LiteRT Engine] Validated config: Vision=$enableVision, Audio=$enableAudio successfully.")
+                eng
+            } catch (t: Throwable) {
+                logEngine("[WARN] Config (Vision=$enableVision, Audio=$enableAudio) rejected: ${t.message ?: t.javaClass.simpleName}")
+                KLog.e("LiteRT", "tryConfig rejected for vision=$enableVision, audio=$enableAudio", t)
+                null
             }
         }
 
-        // Initialize pure text LLM (visionBackend = null, maxNumImages = null)
+        // 1. Try full multimodal (Vision + Audio if requested)
+        if (tryVision && tryAudio) {
+            val eng = tryConfig(enableVision = true, enableAudio = true)
+            if (eng != null) {
+                return EngineInitResult(eng, visionSupported = true, audioSupported = true)
+            }
+            logEngine("[INFO] Combined Vision+Audio rejected. Trying individual modalities...")
+        }
+
+        // 2. Try Audio only if requested
+        if (tryAudio) {
+            val eng = tryConfig(enableVision = false, enableAudio = true)
+            if (eng != null) {
+                return EngineInitResult(eng, visionSupported = false, audioSupported = true)
+            }
+        }
+
+        // 3. Try Vision only if requested
+        if (tryVision) {
+            val eng = tryConfig(enableVision = true, enableAudio = false)
+            if (eng != null) {
+                return EngineInitResult(eng, visionSupported = true, audioSupported = false)
+            }
+        }
+
+        // 4. Fallback to Text-only engine
+        logEngine("[INFO] Initializing as text LLM...")
         val textEng =
             Engine(
                 EngineConfig(
                     modelPath = modelPath,
                     backend = targetBackend,
                     visionBackend = null,
+                    audioBackend = null,
                     maxNumTokens = tokenBudget,
-                    maxNumImages = null,
-                    cacheDir = context.cacheDir.absolutePath,
+                    cacheDir = if (modelPath.startsWith("/data/local/tmp")) context.getExternalFilesDir(null)?.absolutePath else null,
                 ),
             )
         textEng.initialize()
-        return Pair(textEng, false)
+        return EngineInitResult(textEng, visionSupported = false, audioSupported = false)
     }
 
     private fun unloadLocked() {
@@ -610,6 +733,8 @@ class LiteRtEngineManager private constructor(
             engine = null
             activeModelPath = null
             activeBackend = null
+            activeVisionSupported = false
+            activeAudioSupported = false
             _activeBackendState.value = null
             _isModelLoaded.value = false
             _loadedModelPath.value = null

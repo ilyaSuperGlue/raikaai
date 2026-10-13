@@ -99,7 +99,7 @@ fun SamplerScreen(
                 Spacer(Modifier.width(10.dp))
                 Column {
                     Text(
-                        text = "Generation Parameters",
+                        text = "Chat Settings",
                         style = MaterialTheme.typography.titleLarge,
                         fontWeight = FontWeight.Bold,
                     )
@@ -319,7 +319,7 @@ fun SamplerScreen(
                                 horizontalArrangement = Arrangement.SpaceBetween,
                             ) {
                                 Column(modifier = Modifier.weight(1f)) {
-                                    Text("Reasoning / Thinking Mode", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                    Text("Reasoning / Thinking Mode", style = MaterialTheme.typography.titleMedium)
                                     Text("Renders <thought> scratchpad blocks inside expandable reasoning accordions.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
                                 Spacer(Modifier.width(12.dp))
@@ -577,7 +577,7 @@ private fun SamplerSliderField(
             horizontalArrangement = Arrangement.SpaceBetween,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Text(title, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(title, style = MaterialTheme.typography.titleMedium)
             Surface(
                 shape = RoundedCornerShape(6.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHigh,

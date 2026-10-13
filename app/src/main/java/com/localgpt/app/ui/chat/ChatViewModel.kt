@@ -4,7 +4,13 @@ import android.app.Application
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.net.Uri
+import android.util.Base64
+import com.localgpt.app.attachments.AttachmentProcessor
+import com.localgpt.app.attachments.PendingAttachment
+import com.localgpt.app.attachments.PreparedAttachment
+import com.localgpt.app.data.ChatAttachment
 import com.localgpt.app.data.ChatConstants
+import com.localgpt.app.web.UrlSummarizer
 import java.io.File
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -14,16 +20,26 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.localgpt.app.core.engine.LiteRtEngineManager
 import com.localgpt.app.core.remote.RemoteAiClient
+import com.localgpt.app.core.remote.RemoteChatMessage
 import com.localgpt.app.core.remote.RemoteModelItem
+import com.localgpt.app.core.remote.capMessagesToWindow
 import com.localgpt.app.core.server.ChatServerService
 import com.localgpt.app.core.server.OpenAiServer
 import com.localgpt.app.core.server.PromptBuilder
 import com.localgpt.app.data.ChatMessageEntry
 import com.localgpt.app.data.ChatRepository
 import com.localgpt.app.data.Conversation
+import com.localgpt.app.data.ConversationHeader
 import com.localgpt.app.data.DEFAULT_SYSTEM_PROMPT
 import com.localgpt.app.data.Settings
 import com.localgpt.app.data.SettingsRepository
+import com.localgpt.app.data.effectiveRemoteContextWindow
+import com.localgpt.app.data.parseRemoteModelContextWindows
+import com.localgpt.app.data.parseRemoteModelPricing
+import com.localgpt.app.data.remoteModelPricingToJson
+import com.localgpt.app.reminder.ReminderParser
+import com.localgpt.app.reminder.cancelAllReminders
+import com.localgpt.app.reminder.scheduleReminder
 import com.localgpt.app.artifacts.ArtifactStore
 import com.localgpt.app.localai.LocalAiCatalog
 import com.localgpt.app.localai.LocalModelDownloader
@@ -33,8 +49,10 @@ import com.localgpt.app.util.CodeArtifacts
 import com.localgpt.app.util.FileSaver
 import com.localgpt.app.util.KLog
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -140,12 +158,25 @@ data class BenchmarkResult(
     val timestamp: Long = System.currentTimeMillis(),
 )
 
+/**
+ * Search-trigger keywords matched on word boundaries. Precompiled once:
+ * contains() on substrings used to fire web searches for ordinary words
+ * ("hasilnya", "dijadwalkan", "mencari").
+ */
+private val WEB_SEARCH_KEYWORD_REGEX =
+    Regex(
+        "\\b(terbaru|terkini|berita|skor|hasil|jadwal|harga|cuaca|cari|search|latest|news|today|score|weather)\\b",
+        RegexOption.IGNORE_CASE,
+    )
+
 class ChatViewModel(
     appContext: Application,
 ) : AndroidViewModel(appContext) {
     private companion object {
         const val COMPRESS_KEEP_RECENT = 6
         const val COMPRESS_THRESHOLD = 0.75f
+        /** Rough token cost of one attached image for remote requests. */
+        const val REMOTE_IMAGE_TOKEN_ESTIMATE = 1500
         const val CODE_OUTPUT_RULES =
             "\n\n[RESPONSE GUIDELINES]\n" +
             "1. Provide a clear, helpful explanation or summary for the user.\n" +
@@ -173,11 +204,14 @@ class ChatViewModel(
     val ragDocuments: StateFlow<List<com.localgpt.app.rag.RagDocument>> get() = rag.documents
 
     val settings = MutableStateFlow(Settings())
+
+    /** Estimated cumulative remote API spend in USD. */
+    val remoteSpendUsd = mutableStateOf(0.0)
     val messages = mutableStateListOf<ChatMessageEntry>()
     val isGenerating = mutableStateOf(false)
     val errorMessage = mutableStateOf<String?>(null)
     val installedModels = mutableStateOf<List<com.localgpt.app.localai.InstalledModel>>(emptyList())
-    val conversations = mutableStateOf<List<Conversation>>(emptyList())
+    val conversations = mutableStateOf<List<ConversationHeader>>(emptyList())
 
     val customPersonas = mutableStateListOf<PersonaPreset>()
     val isBenchmarking = mutableStateOf(false)
@@ -188,8 +222,8 @@ class ChatViewModel(
     // Active Persona tracking
     val activePersona = MutableStateFlow<PersonaPreset>(PERSONA_PRESETS.first())
 
-    // Multimodal image attachment state
-    val selectedImageUri = MutableStateFlow<Uri?>(null)
+    // Multimodal attachment state (images + documents)
+    val selectedAttachments = MutableStateFlow<List<PendingAttachment>>(emptyList())
 
     // Multimodal native audio attachment state
     val selectedAudioFile = MutableStateFlow<File?>(null)
@@ -241,13 +275,39 @@ class ChatViewModel(
     // Remote Provider state
     val remoteModels = mutableStateOf<List<RemoteModelItem>>(emptyList())
     val isFetchingRemoteModels = mutableStateOf(false)
+    val isDetectingContextWindow = mutableStateOf(false)
+
+    fun addAttachments(uris: List<Uri>, forceImage: Boolean = false) {
+        if (uris.isEmpty()) return
+        val fresh =
+            uris.mapNotNull { uri ->
+                try {
+                    AttachmentProcessor.buildPending(app, uri, forceImage)
+                } catch (t: Throwable) {
+                    KLog.e("ChatVM", "Failed to stage attachment", t)
+                    null
+                }
+            }
+        if (fresh.isNotEmpty()) {
+            selectedAttachments.value = (selectedAttachments.value + fresh).take(8)
+        }
+    }
 
     fun setSelectedImage(uri: Uri?) {
-        selectedImageUri.value = uri
+        // Legacy single-image API: route through the multi-attachment list.
+        if (uri == null) {
+            selectedAttachments.value = selectedAttachments.value.filterNot { it.isImage }
+        } else {
+            addAttachments(listOf(uri), forceImage = true)
+        }
+    }
+
+    fun removeAttachment(uri: Uri) {
+        selectedAttachments.value = selectedAttachments.value.filterNot { it.uri == uri }
     }
 
     fun clearSelectedImage() {
-        selectedImageUri.value = null
+        selectedAttachments.value = emptyList()
     }
 
     fun setSelectedAudio(file: File?) {
@@ -275,47 +335,118 @@ class ChatViewModel(
         selectedAudioFile.value = null
     }
 
-    private fun persistImageFromUri(uri: Uri): File? {
-        return try {
-            val imagesDir = File(app.filesDir, "chat_images").apply { if (!exists()) mkdirs() }
-            val destFile = File(imagesDir, "img_${System.currentTimeMillis()}.jpg")
-            val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-            app.contentResolver.openInputStream(uri)?.use { input ->
-                BitmapFactory.decodeStream(input, null, options)
+    /** Default prompt when the user sends only attachment(s) without text. */
+    private fun defaultPromptForAttachments(prepared: List<PreparedAttachment>): String {
+        val hasImages = prepared.any { it.attachment.type == "image" }
+        val hasDocs = prepared.any { it.attachment.type == "file" && it.extractedText != null }
+        return when {
+            hasImages && hasDocs -> "Describe the images and summarize the attached documents."
+            hasImages -> if (prepared.count { it.attachment.type == "image" } > 1) "Describe these images." else "Describe this image."
+            hasDocs -> "Summarize the attached document(s)."
+            else -> "What can you tell me about the attached file(s)?"
+        }
+    }
+
+    // Image-generation state: non-null while an image is being generated.
+    val imageGenState = mutableStateOf<String?>(null)
+
+    /** Generates an image via the remote provider's /v1/images/generations endpoint. */
+    fun generateImage(prompt: String, size: String = "1024x1024") {
+        val s = effectiveSettings()
+        if (s.modelSource != ChatConstants.SOURCE_REMOTE || s.remoteBaseUrl.isBlank()) {
+            errorMessage.value = "Image generation needs Remote Provider mode (e.g. OpenRouter)."
+            return
+        }
+        val imageModel = s.remoteImageModelId.ifBlank { s.remoteModelId }
+        if (imageModel.isBlank()) {
+            errorMessage.value = "Pick an image model in the Models tab first."
+            return
+        }
+        if (isGenerating.value || imageGenState.value != null) return
+        viewModelScope.launch {
+            imageGenState.value = "Generating image…"
+            try {
+                val bytes =
+                    RemoteAiClient.generateImage(
+                        s.remoteBaseUrl,
+                        s.remoteApiKey,
+                        imageModel,
+                        prompt,
+                        size,
+                    ).getOrThrow()
+                val dir = File(app.filesDir, "chat_images").apply { if (!exists()) mkdirs() }
+                val file = File(dir, "gen_${System.currentTimeMillis()}.png")
+                withContext(Dispatchers.IO) { file.writeBytes(bytes) }
+                if (conversation == null) conversation = Conversation().also { currentConversationId = it.id }
+                val userEntry =
+                    ChatMessageEntry(
+                        role = ChatConstants.ROLE_USER,
+                        content = "Generate image ($size): $prompt",
+                        parentId = messages.lastOrNull()?.id,
+                    )
+                messages.add(userEntry)
+                registerActiveChild(userEntry)
+                val assistant =
+                    ChatMessageEntry(
+                        role = ChatConstants.ROLE_ASSISTANT,
+                        content = "Generated with `$imageModel`:",
+                        imagePath = file.absolutePath,
+                        parentId = userEntry.id,
+                    )
+                messages.add(assistant)
+                registerActiveChild(assistant)
+                persist()
+            } catch (t: Throwable) {
+                KLog.e("ChatVM", "Image generation failed", t)
+                errorMessage.value = "Image generation failed: ${t.message ?: t.javaClass.simpleName}"
+            } finally {
+                imageGenState.value = null
             }
-            val maxDim = 1024
-            var sampleSize = 1
-            val maxOriginal = maxOf(options.outWidth, options.outHeight)
-            while ((maxOriginal / (sampleSize * 2)) >= maxDim) {
-                sampleSize *= 2
+        }
+    }
+
+    // URL summarization state: non-null while a page is being fetched.
+    val urlFetchState = mutableStateOf<String?>(null)
+
+    /**
+     * Pending composer prefill from the home-screen widget ("prefill_prompt"
+     * intent extra). ChatScreen consumes this once via [consumePrefill].
+     */
+    val pendingPrefill = mutableStateOf<String?>(null)
+
+    fun applyPrefill(text: String?) {
+        if (!text.isNullOrBlank()) pendingPrefill.value = text
+    }
+
+    fun consumePrefill(): String? {
+        val v = pendingPrefill.value
+        pendingPrefill.value = null
+        return v
+    }
+
+    /** Fetches a web page and asks the model to summarize it. */
+    fun summarizeUrl(rawUrl: String) {
+        if (isGenerating.value || urlFetchState.value != null) return
+        if (UrlSummarizer.normalizeUrl(rawUrl) == null) {
+            errorMessage.value = "Invalid URL. Example: https://example.com/article"
+            return
+        }
+        viewModelScope.launch {
+            urlFetchState.value = "Mengambil halaman…"
+            val page =
+                try {
+                    UrlSummarizer.fetchReadableText(app, rawUrl)
+                } finally {
+                    urlFetchState.value = null
+                }
+            if (page == null) {
+                errorMessage.value = "Failed to fetch the page. Check the URL or your internet connection."
+                return@launch
             }
-            val decodeOptions = BitmapFactory.Options().apply {
-                inSampleSize = sampleSize
-                inPreferredConfig = Bitmap.Config.RGB_565
-            }
-            val bitmap = app.contentResolver.openInputStream(uri)?.use { input ->
-                BitmapFactory.decodeStream(input, null, decodeOptions)
-            } ?: return null
-            val width = bitmap.width
-            val height = bitmap.height
-            val finalBitmap = if (width > maxDim || height > maxDim) {
-                val ratio = maxDim.toFloat() / maxOf(width, height)
-                val newW = (width * ratio).toInt().coerceAtLeast(1)
-                val newH = (height * ratio).toInt().coerceAtLeast(1)
-                val scaled = Bitmap.createScaledBitmap(bitmap, newW, newH, true)
-                if (scaled != bitmap) bitmap.recycle()
-                scaled
-            } else {
-                bitmap
-            }
-            destFile.outputStream().use { out ->
-                finalBitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
-            }
-            finalBitmap.recycle()
-            destFile
-        } catch (t: Throwable) {
-            KLog.e("ChatVM", "Failed to save and downscale attached image", t)
-            null
+            sendMessage(
+                "Ringkas halaman web berikut.\nJudul: ${page.title}\nURL: ${page.url}\n\n" +
+                    "Provide a summary in English with key bullet points:\n\n${page.text}",
+            )
         }
     }
 
@@ -330,6 +461,22 @@ class ChatViewModel(
     private var nodes = mutableListOf<ChatMessageEntry>() // flat tree storage for branching
     private var genJob: Job? = null
 
+    /**
+     * Compare mode: pass 2 runs the same prompt on a challenger model, then
+     * its output is merged as a second variant of pass 1's assistant message.
+     */
+    private data class ComparePass(
+        val settings: Settings,
+        val labelA: String,
+        val labelB: String,
+    )
+
+    /** Pass 2 waiting to start after pass 1's finally (cleared on stop/error). */
+    private var pendingComparePass: ComparePass? = null
+
+    /** Pass 2 finished; merge its assistant message as a variant (consumed in finally). */
+    private var pendingCompareMerge: ComparePass? = null
+
     // ── Conversation Tree (Branching) Helpers ────────────────────────
 
     private fun registerActiveChild(child: ChatMessageEntry) {
@@ -337,6 +484,17 @@ class ChatViewModel(
         val id = child.id ?: return
         val map = conv.branchActive ?: mutableMapOf<String, String>().also { conv.branchActive = it }
         map[child.parentId ?: ChatRepository.ROOT_KEY] = id
+    }
+
+    /**
+     * Removes the trailing assistant message, if any. Callers must validate
+     * first — removing before validation would wipe the visible response on
+     * failure.
+     */
+    private fun removeTrailingAssistantMessage() {
+        if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
+            messages.removeAt(messages.lastIndex)
+        }
     }
 
     private fun rebuildFromTree() {
@@ -377,7 +535,7 @@ class ChatViewModel(
 
     // ── RAG (Knowledge Documents) ────────────────────────────────────
 
-    private fun ragContext(query: String): Pair<String, List<String>>? =
+    private suspend fun ragContext(query: String): Pair<String, List<String>>? =
         if (settings.value.ragEnabled && query.isNotBlank()) {
             try {
                 rag.retrieve(query, settings.value.useChatMemory)
@@ -388,33 +546,26 @@ class ChatViewModel(
             null
         }
 
-    private suspend fun withRagSystem(base: String, query: String): Pair<String, List<String>?> {
+    private suspend fun withRagSystem(
+        base: String,
+        query: String,
+        s: Settings? = null,
+    ): Pair<String, List<String>?> {
         val ctx = ragContext(query)
         var system = if (base.isBlank()) CODE_OUTPUT_RULES.trimStart('\n') else base + CODE_OUTPUT_RULES
         val activeSkills = skillsManager.getActivePromptInstructions()
         if (activeSkills.isNotBlank()) {
             system = "$system$activeSkills"
         }
+        s?.let { system += mcpToolsPromptBlock(it) }
         ctx?.first?.let { system = "$system\n\n$it" }
 
         val allSources = (ctx?.second ?: emptyList()).toMutableList()
         val isExplicitSearch = query.startsWith("/search", ignoreCase = true) || query.startsWith("/web", ignoreCase = true)
         val isWebSkillActive = skills.value.any { it.isEnabled && (it.id == "builtin_web_researcher" || it.iconCategory.equals("search", ignoreCase = true) || it.category.equals("Research", ignoreCase = true)) }
-        val hasSearchKeyword = query.contains("terbaru", ignoreCase = true) ||
-                query.contains("terkini", ignoreCase = true) ||
-                query.contains("berita", ignoreCase = true) ||
-                query.contains("skor", ignoreCase = true) ||
-                query.contains("hasil", ignoreCase = true) ||
-                query.contains("jadwal", ignoreCase = true) ||
-                query.contains("harga", ignoreCase = true) ||
-                query.contains("cuaca", ignoreCase = true) ||
-                query.contains("search", ignoreCase = true) ||
-                query.contains("cari", ignoreCase = true) ||
-                query.contains("latest", ignoreCase = true) ||
-                query.contains("news", ignoreCase = true) ||
-                query.contains("today", ignoreCase = true) ||
-                query.contains("score", ignoreCase = true) ||
-                query.contains("weather", ignoreCase = true)
+        // Word boundaries: plain contains() false-positives on words like
+        // "hasilnya", "dijadwalkan", or "mencari".
+        val hasSearchKeyword = WEB_SEARCH_KEYWORD_REGEX.containsMatchIn(query)
 
         val shouldSearch = settings.value.enableWebSearch || isWebSkillActive || isExplicitSearch || hasSearchKeyword
 
@@ -511,6 +662,24 @@ class ChatViewModel(
             (summary?.let { estimateTokens(it) } ?: 0)
     }
 
+    private var cachedContextTokens = 0
+    private var cachedContextTokensAt = 0L
+
+    /**
+     * Throttled variant of [effectiveContextTokens] for UI display. The full
+     * walk is O(n) over every message, so recomputing on each ~50ms token
+     * batch visibly degrades long chats. The status-bar counter converges
+     * within ~1s, which is plenty for display purposes.
+     */
+    fun effectiveContextTokensThrottled(): Int {
+        val now = System.currentTimeMillis()
+        if (now - cachedContextTokensAt >= 1_000L) {
+            cachedContextTokens = effectiveContextTokens()
+            cachedContextTokensAt = now
+        }
+        return cachedContextTokens
+    }
+
     private fun injectSummary(
         system: String,
         summary: String?,
@@ -526,10 +695,17 @@ class ChatViewModel(
      * Ensures the working context fits the window. When usage crosses the
      * trigger ratio, evicted turns are archived into Chat Memory (RAG) and a
      * rolling summary is (re)generated. Never mutates the visible history.
+     *
+     * @param modelPath on-device model for summary generation; null in remote
+     * mode (no local summarizer) — then only the existing summary is reused
+     * and the caller hard-caps the request history instead.
+     * @param windowTokens effective context window; defaults to the on-device
+     * setting, pass the remote window in remote mode.
      */
     private suspend fun ensureContextFit(
         s: Settings,
-        modelPath: String,
+        modelPath: String?,
+        windowTokens: Int = s.contextWindowTokens,
     ): String? {
         val conv = conversation ?: return null
         if (!s.autoCompress) return conv.summary
@@ -543,13 +719,17 @@ class ChatViewModel(
             unfolded.sumOf { estimateTokens(it.content) } +
                 (summary?.let { estimateTokens(it) } ?: 0)
         val headroom = s.maxTokens + 256
-        val triggerTok = (s.contextWindowTokens * COMPRESS_THRESHOLD).toInt() - headroom
+        val triggerTok = (windowTokens * COMPRESS_THRESHOLD).toInt() - headroom
         if (effTok < triggerTok) return summary
 
         // Fold everything older than the recent tail into the summary.
         val foldable =
             if (unfolded.size > COMPRESS_KEEP_RECENT) unfolded.dropLast(COMPRESS_KEEP_RECENT) else emptyList()
         if (foldable.isEmpty()) return summary
+
+        // Remote mode without a local model: cannot run the summarizer, so
+        // leave the summary untouched — the caller trims the request instead.
+        if (modelPath == null) return summary
 
         isCompressing.value = true
         try {
@@ -587,7 +767,7 @@ class ChatViewModel(
                     topK = 40,
                     topP = 0.90f,
                     maxTokens = 256,
-                    contextWindow = maxOf(1024, s.contextWindowTokens),
+                    contextWindow = maxOf(1024, windowTokens),
                     backend = s.backend,
                     systemPrompt = "",
                     enableThinking = false,
@@ -674,11 +854,9 @@ class ChatViewModel(
 
     init {
         viewModelScope.launch {
-            settingsRepo.checkAndApplyDefaults()
-        }
-        viewModelScope.launch {
             settingsRepo.settingsFlow.collect { s ->
                 settings.value = s
+                remoteSpendUsd.value = s.remoteSpendMicros / 1_000_000.0
                 loadCustomPersonasFromJson(s.customPersonasJson)
                 // Retry a persona restore that previously fell back to General
                 // only because the custom list wasn't loaded yet.
@@ -691,6 +869,12 @@ class ChatViewModel(
                         pendingPersonaRestoreId = null
                     }
                 }
+            }
+        }
+        // MCP server configs with tokens re-hydrated from encrypted storage.
+        viewModelScope.launch {
+            settingsRepo.mcpServersFlow.collect { servers ->
+                mcpManager.setServers(servers)
             }
         }
         viewModelScope.launch {
@@ -733,7 +917,7 @@ class ChatViewModel(
 
     fun refreshConversations() {
         viewModelScope.launch {
-            conversations.value = chatRepo.listConversations()
+            conversations.value = chatRepo.listConversationHeaders()
         }
     }
 
@@ -762,6 +946,107 @@ class ChatViewModel(
 
     fun loadConversation(id: String) = selectConversation(id)
 
+    /** Currently pinned model for the active conversation, as (source, id). Null = follow global. */
+    val modelPinState = mutableStateOf<Pair<String, String>?>(null)
+
+    private fun refreshPinState() {
+        val conv = conversation
+        val src = conv?.pinnedModelSource
+        val id = conv?.pinnedModelId
+        modelPinState.value =
+            if (!src.isNullOrBlank() && !id.isNullOrBlank()) {
+                src to id
+            } else {
+                null
+            }
+    }
+
+    /**
+     * Effective settings for generation in the current conversation: a pinned
+     * model overrides the global source/model selection.
+     */
+    fun effectiveSettings(): Settings {
+        val s = settings.value
+        val pin = modelPinState.value ?: return s
+        val (src, id) = pin
+        return when (src) {
+            ChatConstants.SOURCE_REMOTE ->
+                s.copy(modelSource = src, remoteModelId = id)
+            else ->
+                if (id.startsWith("custom:")) {
+                    s.copy(
+                        modelSource = ChatConstants.SOURCE_LOCAL,
+                        customModelPath = id.removePrefix("custom:"),
+                        activeModelId = "",
+                    )
+                } else {
+                    s.copy(
+                        modelSource = ChatConstants.SOURCE_LOCAL,
+                        activeModelId = id,
+                        customModelPath = "",
+                    )
+                }
+        }
+    }
+
+    /** Pins the currently selected global model to this conversation. */
+    fun pinCurrentModel() {
+        val s = settings.value
+        if (conversation == null) conversation = Conversation().also { currentConversationId = it.id }
+        val conv = conversation ?: return
+        val (src, id) =
+            when (s.modelSource) {
+                ChatConstants.SOURCE_REMOTE -> s.modelSource to s.remoteModelId
+                else ->
+                    ChatConstants.SOURCE_LOCAL to
+                        if (s.customModelPath.isNotBlank()) "custom:${s.customModelPath}" else s.activeModelId
+            }
+        if (id.isBlank()) {
+            errorMessage.value = "Pick a model before pinning."
+            return
+        }
+        conv.pinnedModelSource = src
+        conv.pinnedModelId = id
+        persist()
+        refreshPinState()
+    }
+
+    /** Removes the model pin; the conversation follows the global model again. */
+    fun clearModelPin() {
+        conversation?.pinnedModelSource = null
+        conversation?.pinnedModelId = null
+        persist()
+        refreshPinState()
+    }
+
+    /** Moves a conversation into a folder ("" = no folder). */
+    fun setConversationFolder(id: String, folder: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val conv = chatRepo.get(id) ?: return@launch
+            conv.folder = folder.trim().take(40)
+            chatRepo.save(conv)
+            refreshConversations()
+        }
+    }
+
+    /** Distinct non-empty folder names across conversations. */
+    fun conversationFolders(): List<String> =
+        conversations.value.mapNotNull { it.folder.takeIf { f -> f.isNotBlank() } }.distinct().sorted()
+
+    /** Replaces a conversation's tags (unlike folder, a chat can carry several). */
+    fun setConversationTags(id: String, tags: List<String>) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val conv = chatRepo.get(id) ?: return@launch
+            conv.tags = com.localgpt.app.data.sanitizeTags(tags)
+            chatRepo.save(conv)
+            refreshConversations()
+        }
+    }
+
+    /** Distinct tags across conversations. */
+    fun conversationTags(): List<String> =
+        conversations.value.flatMap { it.tags }.filter { it.isNotBlank() }.distinct().sorted()
+
     fun selectConversation(id: String) {
         if (currentConversationId == id) return
         stopGeneration()
@@ -777,6 +1062,7 @@ class ChatViewModel(
                 activePersona.value = resolved
                 pendingPersonaRestoreId =
                     if (conv.personaId != null && resolved.id != conv.personaId) conv.id else null
+                refreshPinState()
             }
         }
     }
@@ -803,6 +1089,7 @@ class ChatViewModel(
         conversation = newConv
         nodes.clear()
         messages.clear()
+        refreshPinState()
         applyPersona(p)
         if (p.greeting.isNotBlank()) {
             messages.add(
@@ -871,11 +1158,27 @@ class ChatViewModel(
         LiteRtEngineManager.clearLogs()
     }
 
-    fun exportAllConversationsJson(): String {
-        return com.google.gson.Gson().toJson(conversations.value)
+    /** Full-text body search across conversations; bodies are loaded on demand (P6). */
+    suspend fun searchConversationBodies(query: String): Set<String> =
+        chatRepo.listConversations()
+            .filter { conv -> conv.messages.any { it.content.contains(query, ignoreCase = true) } }
+            .map { it.id }
+            .toSet()
+
+    /** Full bodies are loaded on demand so the UI list stays on cheap headers (P6). */
+    suspend fun exportAllConversationsJson(): String {
+        return com.google.gson.Gson().toJson(chatRepo.listConversations())
     }
 
     fun exportChatMarkdown(conv: Conversation): String = chatRepo.exportToMarkdown(conv)
+
+    /** Loads the full conversation on demand for per-item export from header lists (P6). */
+    suspend fun exportChatMarkdownById(id: String): String =
+        chatRepo.get(id)?.let { chatRepo.exportToMarkdown(it) } ?: ""
+
+    /** Loads full bodies on demand for the "export all as markdown" share action (P6). */
+    suspend fun exportAllChatsMarkdown(): String =
+        chatRepo.listConversations().joinToString("\n\n---\n\n") { chatRepo.exportToMarkdown(it) }
 
     fun exportCurrentChatMarkdown(): String {
         val conv = conversation ?: return ""
@@ -887,6 +1190,11 @@ class ChatViewModel(
     fun stopGeneration() {
         genJob?.cancel()
         genJob = null
+        // A stopped compare must never chain pass 2 or merge into a later run.
+        pendingComparePass = null
+        pendingCompareMerge = null
+        // Never leave an approval dialog hanging after stop/switch.
+        denyMcpApproval()
         engine.cancelGeneration()
         isGenerating.value = false
         if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT && messages.last().content.isBlank()) {
@@ -899,6 +1207,42 @@ class ChatViewModel(
 
     // ── Autonomous Tool Calling Loop (Google AI Edge Architecture) ────
 
+    /**
+     * Collects a stream of text deltas into the trailing assistant message.
+     * UI updates are batched at ~50ms intervals to avoid excessive recomposition.
+     * [onDelta] is invoked for every raw delta (e.g. for token counting).
+     * Collection stops appending if the user switched conversation mid-stream.
+     */
+    private suspend fun collectStreamIntoMessage(
+        deltas: Flow<String>,
+        targetChatId: String?,
+        onDelta: ((String) -> Unit)? = null,
+    ) {
+        var lastEmissionTime = 0L
+        val tokenBuffer = StringBuilder()
+        deltas.collect { delta ->
+            if (currentConversationId != targetChatId) return@collect
+            tokenBuffer.append(delta)
+            onDelta?.invoke(delta)
+            val now = System.currentTimeMillis()
+            if (now - lastEmissionTime >= 50L) {
+                lastEmissionTime = now
+                flushTokenBuffer(tokenBuffer)
+            }
+        }
+        flushTokenBuffer(tokenBuffer)
+    }
+
+    /** Appends the buffered text to the trailing assistant message, if any. */
+    private fun flushTokenBuffer(tokenBuffer: StringBuilder) {
+        if (tokenBuffer.isEmpty()) return
+        val idx = messages.lastIndex
+        if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+            val current = messages[idx]
+            messages[idx] = current.copy(content = current.content + tokenBuffer.toString())
+            tokenBuffer.setLength(0)
+        }
+    }
 
     private suspend fun handleAutonomousToolCall(
         modelPath: String,
@@ -910,7 +1254,24 @@ class ChatViewModel(
         onMetricsUpdate: (LiteRtEngineManager.InferenceMetrics) -> Unit,
     ): List<String>? {
         val lastContent = messages.lastOrNull { it.role == ChatConstants.ROLE_ASSISTANT }?.content.orEmpty()
-        val toolCall = com.localgpt.app.skills.ToolCallParser.parse(lastContent) ?: return currentSources
+        val toolCall = com.localgpt.app.skills.ToolCallParser.parse(lastContent)
+        if (toolCall == null) {
+            // Not a web_search call — maybe an MCP tool call.
+            val mcpCall = com.localgpt.app.skills.ToolCallParser.parseGenericCall(lastContent)
+            if (mcpCall != null && s.mcpEnabled && s.modelSource == ChatConstants.SOURCE_LOCAL) {
+                return handleMcpToolCall(
+                    call = mcpCall,
+                    modelPath = modelPath,
+                    s = s,
+                    targetChatId = targetChatId,
+                    history = history,
+                    effectiveSystem = effectiveSystem,
+                    currentSources = currentSources,
+                    onMetricsUpdate = onMetricsUpdate,
+                )
+            }
+            return currentSources
+        }
         if (!toolCall.name.startsWith("web_search", ignoreCase = true) || toolCall.query.isBlank()) return currentSources
 
         val rawQuery = toolCall.query.trim()
@@ -919,7 +1280,9 @@ class ChatViewModel(
         KLog.d("ChatVM", "Autonomous Tool Call: tool='${toolCall.name}', lang='${toolCall.lang}', raw='$rawQuery', resolved='$contextualQuery', subject='$subject'")
         val idx = messages.lastIndex
         val searchMsg = "Searching the web for \"$contextualQuery\"..."
-        if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+        // B42: don't touch another conversation's messages if the user
+        // switched chats while the tool call was being prepared.
+        if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
             messages[idx] = messages[idx].copy(content = searchMsg)
         }
 
@@ -987,244 +1350,486 @@ class ChatViewModel(
             contextWindow = s.contextWindowTokens,
         )
 
+        // B42: the web search above is a network call — the user may have
+        // switched conversations meanwhile. Never mutate the new
+        // conversation's messages with this chat's tool-call state.
+        if (currentConversationId != targetChatId) return currentSources
         if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
             messages[idx] = messages[idx].copy(content = "", sources = updatedSources)
         }
 
-        var lastEmittedTime = 0L
-        val tokenBuffer = StringBuilder()
+        collectStreamIntoMessage(
+            deltas =
+                engine.streamResponse(
+                    prompt = followUpPrompt,
+                    params =
+                        LiteRtEngineManager.EngineParams(
+                            modelPath = modelPath,
+                            temperature = effectiveTemperature(s),
+                            topK = effectiveTopK(s),
+                            topP = s.topP,
+                            maxTokens = s.maxTokens,
+                            contextWindow = s.contextWindowTokens,
+                            backend = s.backend,
+                            systemPrompt = effectiveSystem,
+                            enableThinking = s.enableThinking,
+                        ),
+                    onMetrics = { onMetricsUpdate(it) },
+                ),
+            targetChatId = targetChatId,
+        )
 
-        engine.streamResponse(
-            prompt = followUpPrompt,
-            params = LiteRtEngineManager.EngineParams(
-                modelPath = modelPath,
-                temperature = effectiveTemperature(s),
-                topK = effectiveTopK(s),
-                topP = s.topP,
-                maxTokens = s.maxTokens,
-                contextWindow = s.contextWindowTokens,
-                backend = s.backend,
-                systemPrompt = effectiveSystem,
-                enableThinking = s.enableThinking,
-            ),
-            onMetrics = { onMetricsUpdate(it) },
-        ).collect { delta ->
-            if (currentConversationId != targetChatId) return@collect
-            tokenBuffer.append(delta)
-            val now = System.currentTimeMillis()
-            if (now - lastEmittedTime >= 50L) {
-                lastEmittedTime = now
-                val curIdx = messages.lastIndex
-                if (curIdx >= 0 && messages[curIdx].role == ChatConstants.ROLE_ASSISTANT) {
-                    val toAdd = tokenBuffer.toString()
-                    tokenBuffer.setLength(0)
-                    val cur = messages[curIdx]
-                    messages[curIdx] = cur.copy(content = cur.content + toAdd)
+        return updatedSources
+    }
+
+    /**
+     * Executes one autonomous MCP tool call round: parse → explicit user
+     * approval → execute → follow-up stream with the result injected.
+     * Exactly one round per generation (no re-parsing of the follow-up), so a
+     * runaway model cannot trigger unbounded tool executions.
+     */
+    private suspend fun handleMcpToolCall(
+        call: com.localgpt.app.skills.ToolCallParser.GenericToolCall,
+        modelPath: String,
+        s: Settings,
+        targetChatId: String?,
+        history: List<PromptBuilder.ChatMessage>,
+        effectiveSystem: String,
+        currentSources: List<String>?,
+        onMetricsUpdate: (LiteRtEngineManager.InferenceMetrics) -> Unit,
+    ): List<String>? {
+        val tool = mcpManager.findTool(call.name)
+        val idx = messages.lastIndex
+        val updatedSources = (currentSources ?: emptyList()).toMutableList()
+
+        val toolContext: String
+        if (tool == null) {
+            KLog.w("ChatVM", "MCP tool '${call.name}' not found on any enabled server")
+            toolContext =
+                "[MCP TOOL UNAVAILABLE]\n" +
+                    "Tool '${call.name}' is not available on any enabled MCP server. " +
+                    "Only call tools from the [MCP TOOLS] list. Apologize briefly and ask the user how to proceed."
+        } else {
+            // Show status while waiting for the explicit approval gate.
+            if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                messages[idx] = messages[idx].copy(content = "Requesting approval to run `${tool.name}`…")
+            }
+            val req =
+                com.localgpt.app.mcp.McpCallRequest(
+                    serverId = tool.serverId,
+                    serverName = tool.serverName,
+                    toolName = tool.name,
+                    arguments = call.arguments,
+                )
+            val approved = requestMcpApproval(req)
+            // The user may have switched conversations while deciding.
+            if (currentConversationId != targetChatId) return currentSources
+            toolContext =
+                if (!approved) {
+                    KLog.d("ChatVM", "MCP tool '${tool.name}' denied by user")
+                    "[MCP TOOL CALL DENIED]\n" +
+                        "The user denied the `${tool.name}` call. Do not retry it. " +
+                        "Explain briefly and ask how they'd like to continue."
+                } else {
+                    if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                        messages[idx] = messages[idx].copy(content = "Running `${tool.name}`…")
+                    }
+                    val result =
+                        runCatching { mcpManager.callTool(tool.serverId, tool.name, call.arguments) }
+                    result.fold(
+                        onSuccess = { r ->
+                            updatedSources.add("MCP: ${tool.name} (${tool.serverName})")
+                            buildString {
+                                append("[MCP TOOL RESULT]\n")
+                                append("Tool: ${tool.name}  [server: ${tool.serverName}]\n")
+                                append("Arguments: ${req.argumentsJson.take(2000)}\n")
+                                if (r.isError) append("The tool reported an error:\n")
+                                append("Result:\n${r.text.take(8000)}")
+                            }
+                        },
+                        onFailure = { e ->
+                            KLog.w("ChatVM", "MCP tool '${tool.name}' failed: ${e.message}")
+                            "[MCP TOOL ERROR]\n" +
+                                "Calling `${tool.name}` failed: ${e.message ?: e.javaClass.simpleName}. " +
+                                "Explain briefly and suggest alternatives."
+                        },
+                    )
                 }
-            }
         }
 
-        if (tokenBuffer.isNotEmpty()) {
-            val curIdx = messages.lastIndex
-            if (curIdx >= 0 && messages[curIdx].role == ChatConstants.ROLE_ASSISTANT) {
-                val cur = messages[curIdx]
-                messages[curIdx] = cur.copy(content = cur.content + tokenBuffer.toString())
+        // Inject the tool outcome into the last user turn and stream a follow-up.
+        val followUpHistory = history.mapIndexed { i, msg ->
+            if (i == history.lastIndex && msg.role.equals(ChatConstants.ROLE_USER, ignoreCase = true)) {
+                PromptBuilder.ChatMessage(
+                    role = ChatConstants.ROLE_USER,
+                    content = "$toolContext\n\nQuestion: ${msg.content}",
+                )
+            } else {
+                msg
             }
         }
+        val followUpPrompt =
+            PromptBuilder.build(
+                messages = followUpHistory,
+                systemPrompt = effectiveSystem,
+                templateFormat = s.promptTemplateFormat,
+                modelPath = modelPath,
+                enableThinking = s.enableThinking,
+                contextWindow = s.contextWindowTokens,
+            )
+
+        // B42: never mutate a new conversation with this chat's tool-call state.
+        if (currentConversationId != targetChatId) return currentSources
+        if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+            messages[idx] = messages[idx].copy(content = "", sources = updatedSources)
+        }
+
+        collectStreamIntoMessage(
+            deltas =
+                engine.streamResponse(
+                    prompt = followUpPrompt,
+                    params =
+                        LiteRtEngineManager.EngineParams(
+                            modelPath = modelPath,
+                            temperature = effectiveTemperature(s),
+                            topK = effectiveTopK(s),
+                            topP = s.topP,
+                            maxTokens = s.maxTokens,
+                            contextWindow = s.contextWindowTokens,
+                            backend = s.backend,
+                            systemPrompt = effectiveSystem,
+                            enableThinking = s.enableThinking,
+                        ),
+                    onMetrics = { onMetricsUpdate(it) },
+                ),
+            targetChatId = targetChatId,
+        )
 
         return updatedSources
     }
 
     // ── Generation Logic (Local LiteRT vs Remote Provider) ───────────
 
+    private val reminderCancelId =
+        Regex(
+            """^(?:tolong\s+)?(?:batalkan|hapus)\s+(?:semua\s+)?(?:pengingat|reminder)s?\b.*$""",
+            RegexOption.IGNORE_CASE,
+        )
+    private val reminderCancelEn =
+        Regex("""^cancel\s+(?:all\s+)?reminders?\b.*$""", RegexOption.IGNORE_CASE)
+
+    /**
+     * Handles reminder commands locally (no model call). Returns true if the
+     * text was a reminder command and was fully handled.
+     */
+    private fun tryHandleReminderCommand(body: String): Boolean {
+        val trimmed = body.trim()
+        if (reminderCancelId.matches(trimmed) || reminderCancelEn.matches(trimmed)) {
+            cancelAllReminders(app)
+            appendLocalExchange(
+                trimmed,
+                "All scheduled reminders have been cancelled.",
+            )
+            return true
+        }
+        val spec = ReminderParser.parse(trimmed) ?: return false
+        scheduleReminder(app, spec)
+        val whenStr =
+            java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale("id"))
+                .format(java.util.Date(spec.triggerAtMillis))
+        appendLocalExchange(
+            trimmed,
+            "Reminder set for $whenStr:\n\"${spec.note}\"",
+        )
+        return true
+    }
+
+    /** Appends a user/assistant pair for locally-handled commands (no model call). */
+    private fun appendLocalExchange(userText: String, assistantText: String) {
+        if (conversation == null) {
+            val newConv = Conversation().also { currentConversationId = it.id }
+            conversation = newConv
+            nodes.clear()
+            messages.clear()
+            refreshPinState()
+        }
+        val userEntry = ChatMessageEntry(role = ChatConstants.ROLE_USER, content = userText)
+        messages.add(userEntry)
+        messages.add(
+            ChatMessageEntry(
+                role = ChatConstants.ROLE_ASSISTANT,
+                content = assistantText,
+                parentId = userEntry.id,
+            ),
+        )
+        persist()
+    }
+
     fun sendMessage(userText: String) {
         val body = userText.trim()
-        val currentImageUri = selectedImageUri.value
         val currentAudioFile = selectedAudioFile.value
-        if ((body.isBlank() && currentImageUri == null && currentAudioFile == null) || isGenerating.value) return
+        val pending = selectedAttachments.value
+        if ((body.isBlank() && pending.isEmpty() && currentAudioFile == null) || isGenerating.value) return
+        // Local command: reminder scheduling/cancellation is handled on-device
+        // without a model call.
+        if (pending.isEmpty() && currentAudioFile == null && tryHandleReminderCommand(body)) return
         // Set flag immediately to prevent double-send race condition
         isGenerating.value = true
         errorMessage.value = null
-        val s = settings.value
+        val s = effectiveSettings()
+        // Compare mode: stash the challenger pass; pass 1 runs on the active
+        // model, pass 2 is chained from the generation finally-block.
+        pendingComparePass = comparePassFor(s)
+        genJob =
+            viewModelScope.launch {
+            var savedAudioFile: File? = currentAudioFile
+            var audioBytes: ByteArray? = null
+            if (savedAudioFile != null) {
+                audioBytes = try { savedAudioFile.readBytes() } catch (_: Exception) { null }
+                clearSelectedAudio()
+            }
 
-        var savedImageFile: File? = null
-        var imageBytes: ByteArray? = null
-        if (currentImageUri != null) {
-            savedImageFile = persistImageFromUri(currentImageUri)
-            imageBytes = savedImageFile?.let { try { it.readBytes() } catch (_: Exception) { null } }
+            // Persist + process attachments: images downscaled, document text
+            // extracted, PDFs rendered to page images.
+            val prepared: List<PreparedAttachment> = AttachmentProcessor.prepare(app, pending)
             clearSelectedImage()
+
+            val attachments = prepared.map { it.attachment }
+            val imagePaths = attachments.filter { it.type == "image" }.map { it.path }
+            // Inject extracted document text into the prompt.
+            val docBlocks =
+                prepared.mapNotNull { pa ->
+                    pa.extractedText?.takeIf { it.isNotBlank() }?.let { text ->
+                        "\n\n[Attached file \"${pa.attachment.name}\":]\n$text"
+                    }
+                }
+            val unsupportedNote =
+                prepared
+                    .filter { it.attachment.type == "file" && it.extractedText == null }
+                    .takeIf { it.isNotEmpty() }
+                    ?.joinToString(", ") { "\"${it.attachment.name}\"" }
+                    ?.let { "\n\n[Note: attached file(s) $it could not be read as text.]" }
+                    .orEmpty()
+
+            val promptText =
+                buildString {
+                    append(
+                        when {
+                            body.isNotBlank() -> body
+                            savedAudioFile != null -> "Please listen to this audio clip and respond."
+                            else -> defaultPromptForAttachments(prepared)
+                        }
+                    )
+                    docBlocks.forEach { append(it) }
+                    append(unsupportedNote)
+                }
+
+            if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
+                sendRemoteMessage(promptText, s, imagePaths, attachments)
+                return@launch
+            }
+
+            val modelPath = ChatServerService.resolveModelPath(app, s)
+            if (modelPath == null) {
+                errorMessage.value = "No on-device model found. Please download a model or switch to Remote Provider."
+                isGenerating.value = false
+                return@launch
+            }
+
+            if (conversation == null) {
+                conversation = Conversation().also { currentConversationId = it.id }
+                conversation?.personaId = activePersona.value.id
+            }
+            // Local engine supports a single vision image: use the first one.
+            val firstImageBytes = imagePaths.firstOrNull()?.let { try { File(it).readBytes() } catch (_: Exception) { null } }
+            val userEntry =
+                ChatMessageEntry(
+                    role = ChatConstants.ROLE_USER,
+                    content = promptText,
+                    imagePath = imagePaths.firstOrNull(),
+                    audioPath = savedAudioFile?.absolutePath,
+                    attachments = attachments,
+                    parentId = messages.lastOrNull()?.id,
+                )
+            messages.add(userEntry)
+            registerActiveChild(userEntry)
+
+            val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = userEntry.id)
+            messages.add(assistant)
+            registerActiveChild(assistant)
+
+            var lastMetrics: LiteRtEngineManager.InferenceMetrics? = null
+            var ragSources: List<String>? = null
+
+            val targetChatId = currentConversationId
+            // Single coroutine for the whole send flow: previously a redundant
+            // nested launch overwrote genJob mid-flight, so stopGeneration()
+            // could miss the outer job.
+            try {
+                        val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
+                        val appliedWindow = activeSummary != null
+                        val windowed = promptWindowMessages()
+                        val (ragSystem, sources1) = withRagSystem(resolveSystemPrompt(s), promptText, s)
+                        ragSources = sources1
+                        val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
+                        val history =
+                            windowed
+                                .dropLast(1)
+                                .map { PromptBuilder.ChatMessage(it.role, it.content) }
+                        val prompt =
+                            PromptBuilder.build(
+                                messages = history,
+                                systemPrompt = effectiveSystem,
+                                templateFormat = s.promptTemplateFormat,
+                                modelPath = modelPath,
+                                enableThinking = s.enableThinking,
+                                contextWindow = s.contextWindowTokens,
+                            )
+                            collectStreamIntoMessage(
+                                deltas =
+                                    engine.streamResponse(
+                                        prompt = prompt,
+                                        params =
+                                            LiteRtEngineManager.EngineParams(
+                                                modelPath = modelPath,
+                                                temperature = effectiveTemperature(s),
+                                                topK = effectiveTopK(s),
+                                                topP = s.topP,
+                                                maxTokens = s.maxTokens,
+                                                contextWindow = s.contextWindowTokens,
+                                                backend = s.backend,
+                                                systemPrompt = effectiveSystem,
+                                                enableThinking = s.enableThinking,
+                                            ),
+                                        imagePath = imagePaths.firstOrNull(),
+                                        imageBytes = firstImageBytes,
+                                        audioPath = savedAudioFile?.absolutePath,
+                                        audioBytes = audioBytes,
+                                        onMetrics = { lastMetrics = it },
+                                    ),
+                                targetChatId = targetChatId,
+                            )
+
+                        ragSources = handleAutonomousToolCall(
+                            modelPath = modelPath,
+                            s = s,
+                            targetChatId = targetChatId,
+                            history = history,
+                            effectiveSystem = effectiveSystem,
+                            currentSources = ragSources,
+                            onMetricsUpdate = { lastMetrics = it },
+                        )
+                    } catch (e: Exception) {
+                        // Drop compare state: a failed/cancelled/switched pass 1 must not chain pass 2.
+                        pendingComparePass = null
+                        if (e is CancellationException || currentConversationId != targetChatId) return@launch
+                        KLog.e("ChatVM", "Generation failed", e)
+                        if (messages.lastOrNull()?.content?.isBlank() == true) {
+                            messages.removeAt(messages.lastIndex)
+                        }
+                        errorMessage.value = "Generation failed: ${e.message ?: e.javaClass.simpleName}"
+                    } finally {
+                        // Consume compare state up-front: a conversation switch
+                        // mid-generation must not leak a stale pass into a
+                        // later, unrelated generation.
+                        val pass2 = pendingComparePass
+                        val merge = pendingCompareMerge
+                        pendingComparePass = null
+                        pendingCompareMerge = null
+                        if (currentConversationId == targetChatId) {
+                            if (lastMetrics != null && messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
+                                val idx = messages.lastIndex
+                                val current = messages[idx]
+                                val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
+                                messages[idx] = current.copy(stats = lastMetrics.displayBadge, variants = variants, sources = ragSources)
+                            }
+                            persist()
+                            captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
+                            when {
+                                // Compare pass 1 done: stay in generating state, run the challenger.
+                                pass2 != null -> {
+                                    pendingCompareMerge = pass2
+                                    runComparePass2(pass2)
+                                }
+                                // Compare pass 2 done: fold the challenger output into A's variants.
+                                merge != null -> {
+                                    isGenerating.value = false
+                                    mergeLastAssistantAsVariant(merge)
+                                }
+                                else -> isGenerating.value = false
+                            }
+                        }
+                    }
+        }
+    }
+
+    /**
+     * Encodes a persisted attachment image as an OpenAI-style
+     * `data:image/jpeg;base64,...` URL for remote vision models.
+     * The persisted file is already a downscaled JPEG (≤1024px, q85).
+     */
+    private suspend fun encodeImageDataUrl(imagePath: String?): String? =
+        withContext(Dispatchers.IO) {
+            if (imagePath.isNullOrBlank()) return@withContext null
+            try {
+                val file = File(imagePath)
+                if (!file.exists() || file.length() == 0L || file.length() > 8_000_000L) return@withContext null
+                "data:image/jpeg;base64," + Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
+            } catch (t: Throwable) {
+                KLog.w("ChatVM", "Failed to encode image for remote: ${t.message}")
+                null
+            }
         }
 
-        var savedAudioFile: File? = currentAudioFile
-        var audioBytes: ByteArray? = null
-        if (savedAudioFile != null) {
-            audioBytes = try { savedAudioFile.readBytes() } catch (_: Exception) { null }
-            clearSelectedAudio()
-        }
-
-        val promptText = when {
-            body.isNotBlank() -> body
-            savedAudioFile != null -> "Please listen to this audio clip and respond."
-            else -> "Describe this image."
-        }
-
-        if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
-            sendRemoteMessage(promptText, s)
-            return
-        }
-
-        val modelPath = ChatServerService.resolveModelPath(app, s)
-        if (modelPath == null) {
-            errorMessage.value = "No on-device model found. Please download a model or switch to Remote Provider."
+    private fun sendRemoteMessage(
+        body: String,
+        s: Settings,
+        imagePaths: List<String> = emptyList(),
+        attachments: List<ChatAttachment> = emptyList(),
+    ) {
+        if (s.remoteBaseUrl.isBlank() || s.remoteModelId.isBlank()) {
+            errorMessage.value = "Please configure Remote Base URL and select a model in Models tab."
+            // B1: sendMessage() already set isGenerating=true before calling us;
+            // reset it so the send button doesn't get stuck as a Stop button.
             isGenerating.value = false
             return
         }
-
         if (conversation == null) {
             conversation = Conversation().also { currentConversationId = it.id }
             conversation?.personaId = activePersona.value.id
         }
+
+        // Regenerate/edit flows pass a blank body to reuse the existing user
+        // message — don't append an empty user node in that case.
         val userEntry =
-            ChatMessageEntry(
-                role = ChatConstants.ROLE_USER,
-                content = promptText,
-                imagePath = savedImageFile?.absolutePath,
-                audioPath = savedAudioFile?.absolutePath,
-                parentId = messages.lastOrNull()?.id,
-            )
-        messages.add(userEntry)
-        registerActiveChild(userEntry)
-
-        val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = userEntry.id)
-        messages.add(assistant)
-        registerActiveChild(assistant)
-
-        var lastMetrics: LiteRtEngineManager.InferenceMetrics? = null
-        var ragSources: List<String>? = null
-
-        val targetChatId = currentConversationId
-        genJob =
-            viewModelScope.launch {
-                try {
-                    val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
-                    val appliedWindow = activeSummary != null
-                    val windowed = promptWindowMessages()
-                    val (ragSystem, sources1) = withRagSystem(resolveSystemPrompt(s), promptText)
-                    ragSources = sources1
-                    val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
-                    val history =
-                        windowed
-                            .dropLast(1)
-                            .map { PromptBuilder.ChatMessage(it.role, it.content) }
-                    val prompt =
-                        PromptBuilder.build(
-                            messages = history,
-                            systemPrompt = effectiveSystem,
-                            templateFormat = s.promptTemplateFormat,
-                            modelPath = modelPath,
-                            enableThinking = s.enableThinking,
-                            contextWindow = s.contextWindowTokens,
-                        )
-                        var lastEmissionTime = 0L
-                        val tokenBuffer = StringBuilder()
-
-                        engine
-                            .streamResponse(
-                                prompt = prompt,
-                                params =
-                                    LiteRtEngineManager.EngineParams(
-                                        modelPath = modelPath,
-                                        temperature = effectiveTemperature(s),
-                                        topK = effectiveTopK(s),
-                                        topP = s.topP,
-                                        maxTokens = s.maxTokens,
-                                        contextWindow = s.contextWindowTokens,
-                                        backend = s.backend,
-                                        systemPrompt = effectiveSystem,
-                                        enableThinking = s.enableThinking,
-                                    ),
-                                imagePath = savedImageFile?.absolutePath,
-                                imageBytes = imageBytes,
-                                audioPath = savedAudioFile?.absolutePath,
-                                audioBytes = audioBytes,
-                                onMetrics = { metrics ->
-                                    lastMetrics = metrics
-                                },
-                            ).collect { delta ->
-                                if (currentConversationId != targetChatId) return@collect
-                                tokenBuffer.append(delta)
-                                val now = System.currentTimeMillis()
-                                if (now - lastEmissionTime >= 50L) {
-                                    lastEmissionTime = now
-                                    val idx = messages.lastIndex
-                                    if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                        val toAdd = tokenBuffer.toString()
-                                        tokenBuffer.setLength(0)
-                                        val current = messages[idx]
-                                        messages[idx] = current.copy(content = current.content + toAdd)
-                                    }
-                                }
-                            }
-
-                        if (tokenBuffer.isNotEmpty()) {
-                            val idx = messages.lastIndex
-                            if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                val current = messages[idx]
-                                messages[idx] = current.copy(content = current.content + tokenBuffer.toString())
-                            }
-                        }
-
-                    ragSources = handleAutonomousToolCall(
-                        modelPath = modelPath,
-                        s = s,
-                        targetChatId = targetChatId,
-                        history = history,
-                        effectiveSystem = effectiveSystem,
-                        currentSources = ragSources,
-                        onMetricsUpdate = { lastMetrics = it },
-                    )
-                } catch (e: Exception) {
-                    if (e is CancellationException || currentConversationId != targetChatId) return@launch
-                    KLog.e("ChatVM", "Generation failed", e)
-                    if (messages.lastOrNull()?.content?.isBlank() == true) {
-                        messages.removeAt(messages.lastIndex)
+            if (body.isBlank()) {
+                messages.lastOrNull { it.role == ChatConstants.ROLE_USER }
+                    ?: run {
+                        errorMessage.value = "No user message to regenerate."
+                        return
                     }
-                    errorMessage.value = "Generation failed: ${e.message ?: e.javaClass.simpleName}"
-                } finally {
-                    if (currentConversationId == targetChatId) {
-                        isGenerating.value = false
-                        if (lastMetrics != null && messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
-                            val idx = messages.lastIndex
-                            val current = messages[idx]
-                            val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
-                            messages[idx] = current.copy(stats = lastMetrics.displayBadge, variants = variants, sources = ragSources)
-                        }
-                        persist()
-                        captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
-                    }
+            } else {
+                ChatMessageEntry(
+                    role = ChatConstants.ROLE_USER,
+                    content = body,
+                    imagePath = imagePaths.firstOrNull(),
+                    attachments = attachments,
+                    parentId = messages.lastOrNull()?.id,
+                ).also {
+                    messages.add(it)
+                    registerActiveChild(it)
                 }
             }
-    }
 
-    private fun sendRemoteMessage(body: String, s: Settings) {
-        if (s.remoteBaseUrl.isBlank() || s.remoteModelId.isBlank()) {
-            errorMessage.value = "Please configure Remote Base URL and select a model in Models tab."
-            return
-        }
-        if (conversation == null) {
-            conversation = Conversation().also { currentConversationId = it.id }
-            conversation?.personaId = activePersona.value.id
-        }
-
-        val branchQuery = body.ifBlank { messages.lastOrNull { it.role == ChatConstants.ROLE_USER }?.content ?: "" }
-        val userEntry =
-            ChatMessageEntry(
-                role = ChatConstants.ROLE_USER,
-                content = body,
-                parentId = messages.lastOrNull()?.id,
-            )
-        messages.add(userEntry)
-        registerActiveChild(userEntry)
+        val branchQuery = userEntry.content
+        // Regenerate reuses the stored attachments of the existing message.
+        val effectiveImagePaths =
+            if (imagePaths.isNotEmpty()) {
+                imagePaths
+            } else {
+                userEntry.attachments.filter { it.type == "image" }.map { it.path }
+                    .ifEmpty { listOfNotNull(userEntry.imagePath) }
+            }
 
         val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = userEntry.id)
         messages.add(assistant)
@@ -1232,7 +1837,14 @@ class ChatViewModel(
         isGenerating.value = true
 
         val start = System.currentTimeMillis()
-        var tokenCount = 0
+        // NOTE: tokenCount used to count SSE chunks (one per delta), not
+        // tokens — providers send whole sentences per chunk, so the badge
+        // showed e.g. "17 tokens" for a 400-token reply. Throughput is now
+        // measured from the provider's usage report (falling back to a
+        // length-based estimate) and timed from the first streamed chunk.
+        var firstChunkAt = 0L
+        var usageCompletionTokens: Int? = null
+        var promptTokensEstimate = 0
         val targetRemoteChatId = currentConversationId
         var ragSources: List<String>? = null
 
@@ -1244,42 +1856,63 @@ class ChatViewModel(
                         val noThinkDirective = "Do NOT think or reason inside <think>...</think> tags. Provide the final response directly."
                         systemContent = if (systemContent.isNotBlank()) "$systemContent\n$noThinkDirective" else noThinkDirective
                     }
-                    val (ragSystem, sources) = withRagSystem(systemContent, branchQuery)
+                    val (ragSystem, sources) = withRagSystem(systemContent, branchQuery, s)
                     ragSources = sources
-                    // Remote providers manage their own windows; reuse a stored summary when present.
-                    val storedSummary = conversation?.summary
-                    val appliedWindowRemote = !storedSummary.isNullOrBlank()
+                    // Remote context window: per-model override wins, otherwise
+                    // the global remote default. The on-device setting is left
+                    // untouched so switching back to local restores it as-is.
+                    val remoteWindow = s.effectiveRemoteContextWindow(s.remoteModelId)
+                    val localModelPath = ChatServerService.resolveModelPath(app, s)
+                    val activeSummary =
+                        runCatching { ensureContextFit(s, localModelPath, remoteWindow) }.getOrNull()
+                    val appliedWindowRemote = !activeSummary.isNullOrBlank()
                     val finalSystem =
-                        injectSummary(ragSystem, storedSummary, appliedWindowRemote)
+                        injectSummary(ragSystem, activeSummary, appliedWindowRemote)
 
-                    val historyMap = mutableListOf<Map<String, String>>()
+                    val imageDataUrls = effectiveImagePaths.mapNotNull { encodeImageDataUrl(it) }
+                    val history = mutableListOf<RemoteChatMessage>()
                     if (finalSystem.isNotBlank()) {
-                        historyMap.add(mapOf("role" to "system", "content" to finalSystem))
+                        history.add(RemoteChatMessage(role = "system", text = finalSystem))
                     }
                     val windowed = promptWindowMessages()
                     windowed.dropLast(1).forEach {
-                        historyMap.add(mapOf("role" to it.role, "content" to it.content))
+                        history.add(RemoteChatMessage(role = it.role, text = it.content))
                     }
-
-                    RemoteAiClient
-                        .streamChat(
-                            baseUrl = s.remoteBaseUrl,
-                            apiKey = s.remoteApiKey,
-                            model = s.remoteModelId,
-                            messages = historyMap,
-                            temperature = effectiveTemperature(s),
-                            topP = s.topP,
-                            maxTokens = s.maxTokens,
-                        ).collect { delta ->
-                            if (currentConversationId != targetRemoteChatId) return@collect
-                            val idx = messages.lastIndex
-                            if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                val current = messages[idx]
-                                messages[idx] = current.copy(content = current.content + delta)
-                            }
-                            tokenCount++
+                    // Attach the image to the latest user message (last entry).
+                    if (imageDataUrls.isNotEmpty() && history.isNotEmpty()) {
+                        val last = history.last()
+                        history[history.lastIndex] = last.copy(imageDataUrls = imageDataUrls)
+                    }
+                    // Hard-cap to the remote window so long conversations are
+                    // trimmed client-side instead of failing with a 400 from
+                    // the server.
+                    val tokenCounts =
+                        history.map { msg ->
+                            estimateTokens(msg.text) + msg.imageDataUrls.size * REMOTE_IMAGE_TOKEN_ESTIMATE
                         }
+                    val capped = capMessagesToWindow(history, tokenCounts, remoteWindow, s.maxTokens + 256)
+                    promptTokensEstimate = tokenCounts.sum()
+
+                    collectStreamIntoMessage(
+                        deltas =
+                            RemoteAiClient.streamChat(
+                                baseUrl = s.remoteBaseUrl,
+                                apiKey = s.remoteApiKey,
+                                model = s.remoteModelId,
+                                messages = capped,
+                                temperature = effectiveTemperature(s),
+                                topP = s.topP,
+                                maxTokens = s.maxTokens,
+                                onUsageTokens = { usageCompletionTokens = it },
+                            ),
+                        targetChatId = targetRemoteChatId,
+                        onDelta = {
+                            if (firstChunkAt == 0L) firstChunkAt = System.currentTimeMillis()
+                        },
+                    )
                 } catch (e: Exception) {
+                    // Drop compare state: a failed/cancelled/switched pass 1 must not chain pass 2.
+                    pendingComparePass = null
                     if (e is CancellationException || currentConversationId != targetRemoteChatId) return@launch
                     KLog.e("ChatVM", "Remote generation failed", e)
                     if (messages.lastOrNull()?.content?.isBlank() == true) {
@@ -1287,19 +1920,37 @@ class ChatViewModel(
                     }
                     errorMessage.value = "Remote generation failed: ${e.message ?: e.javaClass.simpleName}"
                 } finally {
+                    // Consume compare state up-front (see sendMessage's finally).
+                    val pass2 = pendingComparePass
+                    val merge = pendingCompareMerge
+                    pendingComparePass = null
+                    pendingCompareMerge = null
                     if (currentConversationId == targetRemoteChatId) {
-                        isGenerating.value = false
                         if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
-                            val duration = maxOf(0.1f, (System.currentTimeMillis() - start) / 1000f)
-                            val tokSec = tokenCount / duration
-                            val badge = "%.1f tok/s · %d tokens · Remote".format(tokSec, tokenCount)
                             val idx = messages.lastIndex
                             val current = messages[idx]
+                            val outputTokens = usageCompletionTokens ?: estimateTokens(current.content)
+                            val decodeStart = if (firstChunkAt > 0L) firstChunkAt else start
+                            val duration = maxOf(0.1f, (System.currentTimeMillis() - decodeStart) / 1000f)
+                            val tokSec = outputTokens / duration
+                            val badge = "%.1f tok/s · %d tokens · Remote".format(tokSec, outputTokens)
                             val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
                             messages[idx] = current.copy(stats = badge, variants = variants, sources = ragSources)
+                            recordRemoteCost(s.remoteModelId, promptTokensEstimate, outputTokens)
                         }
                         persist()
                         captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
+                        when {
+                            pass2 != null -> {
+                                pendingCompareMerge = pass2
+                                runComparePass2(pass2)
+                            }
+                            merge != null -> {
+                                isGenerating.value = false
+                                mergeLastAssistantAsVariant(merge)
+                            }
+                            else -> isGenerating.value = false
+                        }
                     }
                 }
             }
@@ -1317,7 +1968,7 @@ class ChatViewModel(
         stopGeneration()
         val oldMsg = messages[index]
         if (oldMsg.role != ChatConstants.ROLE_USER) return
-        val s = settings.value
+        val s = effectiveSettings()
 
         val forked =
             oldMsg.copy(
@@ -1367,7 +2018,7 @@ class ChatViewModel(
                     val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
                     val appliedWindow = activeSummary != null
                     val windowed = promptWindowMessages()
-                    val (ragSystem, sources2) = withRagSystem(resolveSystemPrompt(s), newText.trim())
+                    val (ragSystem, sources2) = withRagSystem(resolveSystemPrompt(s), newText.trim(), s)
                     ragSources = sources2
                     val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
                     val history =
@@ -1381,50 +2032,30 @@ class ChatViewModel(
                             enableThinking = s.enableThinking,
                             contextWindow = s.contextWindowTokens,
                         )
-                        var lastEmissionTime = 0L
-                        val tokenBuffer = StringBuilder()
-
-                        engine
-                            .streamResponse(
-                                prompt = prompt,
-                                params =
-                                    LiteRtEngineManager.EngineParams(
-                                        modelPath = modelPath,
-                                        temperature = effectiveTemperature(s),
-                                        topK = effectiveTopK(s),
-                                        topP = s.topP,
-                                        maxTokens = s.maxTokens,
-                                        contextWindow = s.contextWindowTokens,
-                                        backend = s.backend,
-                                        systemPrompt = effectiveSystem,
-                                        enableThinking = s.enableThinking,
-                                    ),
-                                imagePath = oldMsg.imagePath,
-                                imageBytes = imageBytes,
-                                audioPath = oldMsg.audioPath,
-                                audioBytes = audioBytes,
-                                onMetrics = { lastMetrics = it },
-                            ).collect { delta ->
-                                if (currentConversationId != targetChatId) return@collect
-                                tokenBuffer.append(delta)
-                                val now = System.currentTimeMillis()
-                                if (now - lastEmissionTime >= 50L) {
-                                    lastEmissionTime = now
-                                    val idx = messages.lastIndex
-                                    if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                        val toAdd = tokenBuffer.toString()
-                                        tokenBuffer.setLength(0)
-                                        messages[idx] = messages[idx].copy(content = messages[idx].content + toAdd)
-                                    }
-                                }
-                            }
-
-                        if (tokenBuffer.isNotEmpty()) {
-                            val idx = messages.lastIndex
-                            if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                messages[idx] = messages[idx].copy(content = messages[idx].content + tokenBuffer.toString())
-                            }
-                        }
+                        collectStreamIntoMessage(
+                            deltas =
+                                engine.streamResponse(
+                                    prompt = prompt,
+                                    params =
+                                        LiteRtEngineManager.EngineParams(
+                                            modelPath = modelPath,
+                                            temperature = effectiveTemperature(s),
+                                            topK = effectiveTopK(s),
+                                            topP = s.topP,
+                                            maxTokens = s.maxTokens,
+                                            contextWindow = s.contextWindowTokens,
+                                            backend = s.backend,
+                                            systemPrompt = effectiveSystem,
+                                            enableThinking = s.enableThinking,
+                                        ),
+                                    imagePath = oldMsg.imagePath,
+                                    imageBytes = imageBytes,
+                                    audioPath = oldMsg.audioPath,
+                                    audioBytes = audioBytes,
+                                    onMetrics = { lastMetrics = it },
+                                ),
+                            targetChatId = targetChatId,
+                        )
 
                     ragSources = handleAutonomousToolCall(
                         modelPath = modelPath,
@@ -1463,20 +2094,41 @@ class ChatViewModel(
     }
 
     fun regenerateLastResponse() {
-        if (isGenerating.value || messages.isEmpty()) return
+        regenerateInternal(sOverride = null, keepExisting = false, allowWhileGenerating = false)
+    }
+
+    /**
+     * Regenerate flow shared by the UI button and compare-mode pass 2.
+     *
+     * @param sOverride settings to generate with (default: effective settings).
+     * @param keepExisting when true the trailing assistant message is kept and
+     * the new output is appended after it (compare mode) instead of replacing it.
+     * @param allowWhileGenerating bypass the [isGenerating] guard — compare mode
+     * chains pass 2 while the flag is still true.
+     */
+    private fun regenerateInternal(
+        sOverride: Settings?,
+        keepExisting: Boolean,
+        allowWhileGenerating: Boolean,
+    ) {
+        if ((!allowWhileGenerating && isGenerating.value) || messages.isEmpty()) return
         val lastAssistant = messages.lastOrNull { it.role == ChatConstants.ROLE_ASSISTANT }
         val existingVariants = lastAssistant?.variants?.toMutableList() ?: mutableListOf()
         if (lastAssistant != null && lastAssistant.content.isNotBlank() && !existingVariants.contains(lastAssistant.content)) {
             existingVariants.add(lastAssistant.content)
         }
 
-        if (messages.last().role == ChatConstants.ROLE_ASSISTANT) {
-            messages.removeAt(messages.lastIndex)
-        }
         val lastUser = messages.lastOrNull { it.role == ChatConstants.ROLE_USER } ?: return
-        val s = settings.value
+        val s = sOverride ?: effectiveSettings()
 
+        // Validate before touching the message list: a failed validation must
+        // not wipe the currently visible response.
         if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
+            if (s.remoteBaseUrl.isBlank() || s.remoteModelId.isBlank()) {
+                errorMessage.value = "Please configure Remote Base URL and select a model in Models tab."
+                return
+            }
+            if (!keepExisting) removeTrailingAssistantMessage()
             sendRemoteMessage("", s)
             return
         }
@@ -1486,6 +2138,7 @@ class ChatViewModel(
             errorMessage.value = "No model found to regenerate response."
             return
         }
+        if (!keepExisting) removeTrailingAssistantMessage()
 
         val imageBytes =
             lastUser.imagePath?.let { path ->
@@ -1511,7 +2164,7 @@ class ChatViewModel(
                     val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
                     val appliedWindow = activeSummary != null
                     val windowed = promptWindowMessages()
-                    val (ragSystem, sources3) = withRagSystem(resolveSystemPrompt(s), lastUser.content)
+                    val (ragSystem, sources3) = withRagSystem(resolveSystemPrompt(s), lastUser.content, s)
                     ragSources = sources3
                     val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
                     val history =
@@ -1525,50 +2178,30 @@ class ChatViewModel(
                             enableThinking = s.enableThinking,
                             contextWindow = s.contextWindowTokens,
                         )
-                        var lastEmissionTime = 0L
-                        val tokenBuffer = StringBuilder()
-
-                        engine
-                            .streamResponse(
-                                prompt = prompt,
-                                params =
-                                    LiteRtEngineManager.EngineParams(
-                                        modelPath = modelPath,
-                                        temperature = effectiveTemperature(s),
-                                        topK = effectiveTopK(s),
-                                        topP = s.topP,
-                                        maxTokens = s.maxTokens,
-                                        contextWindow = s.contextWindowTokens,
-                                        backend = s.backend,
-                                        systemPrompt = effectiveSystem,
-                                        enableThinking = s.enableThinking,
-                                    ),
-                                imagePath = lastUser.imagePath,
-                                imageBytes = imageBytes,
-                                audioPath = lastUser.audioPath,
-                                audioBytes = audioBytes,
-                                onMetrics = { lastMetrics = it },
-                            ).collect { delta ->
-                                if (currentConversationId != targetRegenChatId) return@collect
-                                tokenBuffer.append(delta)
-                                val now = System.currentTimeMillis()
-                                if (now - lastEmissionTime >= 50L) {
-                                    lastEmissionTime = now
-                                    val idx = messages.lastIndex
-                                    if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                        val toAdd = tokenBuffer.toString()
-                                        tokenBuffer.setLength(0)
-                                        messages[idx] = messages[idx].copy(content = messages[idx].content + toAdd)
-                                    }
-                                }
-                            }
-
-                        if (tokenBuffer.isNotEmpty()) {
-                            val idx = messages.lastIndex
-                            if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                messages[idx] = messages[idx].copy(content = messages[idx].content + tokenBuffer.toString())
-                            }
-                        }
+                        collectStreamIntoMessage(
+                            deltas =
+                                engine.streamResponse(
+                                    prompt = prompt,
+                                    params =
+                                        LiteRtEngineManager.EngineParams(
+                                            modelPath = modelPath,
+                                            temperature = effectiveTemperature(s),
+                                            topK = effectiveTopK(s),
+                                            topP = s.topP,
+                                            maxTokens = s.maxTokens,
+                                            contextWindow = s.contextWindowTokens,
+                                            backend = s.backend,
+                                            systemPrompt = effectiveSystem,
+                                            enableThinking = s.enableThinking,
+                                        ),
+                                    imagePath = lastUser.imagePath,
+                                    imageBytes = imageBytes,
+                                    audioPath = lastUser.audioPath,
+                                    audioBytes = audioBytes,
+                                    onMetrics = { lastMetrics = it },
+                                ),
+                            targetChatId = targetRegenChatId,
+                        )
 
                     ragSources = handleAutonomousToolCall(
                         modelPath = modelPath,
@@ -1587,8 +2220,10 @@ class ChatViewModel(
                     }
                     errorMessage.value = "Generation failed: ${e.message ?: e.javaClass.simpleName}"
                 } finally {
+                    // Consume compare-merge state up-front (see sendMessage's finally).
+                    val merge = pendingCompareMerge
+                    pendingCompareMerge = null
                     if (currentConversationId == targetRegenChatId) {
-                        isGenerating.value = false
                         if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
                             val idx = messages.lastIndex
                             val current = messages[idx]
@@ -1603,6 +2238,10 @@ class ChatViewModel(
                         }
                         persist()
                         captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
+                        if (merge != null) {
+                            mergeLastAssistantAsVariant(merge)
+                        }
+                        isGenerating.value = false
                     }
                 }
             }
@@ -1674,7 +2313,302 @@ class ChatViewModel(
 
     fun setRemoteApiKey(key: String) = launchSetting { settingsRepo.setRemoteApiKey(key) }
 
-    fun setRemoteModelId(id: String) = launchSetting { settingsRepo.setRemoteModelId(id) }
+    fun setRemoteImageModelId(id: String) = launchSetting { settingsRepo.setRemoteImageModelId(id) }
+
+    fun setRemoteModelId(id: String) =
+        launchSetting {
+            settingsRepo.setRemoteModelId(id)
+            // Auto-detect the context window for a newly selected model, once:
+            // skip when a per-model override was already stored.
+            if (id.isNotBlank() &&
+                parseRemoteModelContextWindows(settings.value.remoteModelContextWindowsJson)[id] == null
+            ) {
+                detectRemoteContextWindow(id)
+            }
+        }
+
+    fun setRemoteContextWindowTokens(tokens: Int) =
+        launchSetting { settingsRepo.setRemoteContextWindowTokens(tokens) }
+
+    fun clearRemoteModelContextWindow(modelId: String) =
+        launchSetting { settingsRepo.clearRemoteModelContextWindow(modelId) }
+
+    fun setCompareMode(enabled: Boolean) = launchSetting { settingsRepo.setCompareMode(enabled) }
+
+    fun setCompareChallenger(source: String, modelId: String) =
+        launchSetting { settingsRepo.setCompareChallenger(source, modelId) }
+
+    /** Short display name of the currently active model (compare label A). */
+    private fun activeModelLabel(s: Settings): String =
+        if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
+            "[Remote] ${s.remoteModelId.ifBlank { "remote" }}"
+        } else {
+            val path = ChatServerService.resolveModelPath(app, s)
+            val name = path?.let { File(it).nameWithoutExtension }.orEmpty()
+            "[On-device] ${name.ifBlank { s.activeModelId.ifBlank { "local" } }}"
+        }
+
+    /**
+     * Builds the challenger pass for compare mode, or null when compare is
+     * off / misconfigured / identical to the active model.
+     */
+    private fun comparePassFor(s: Settings): ComparePass? {
+        if (!s.compareMode) return null
+        val labelA = activeModelLabel(s)
+        return when (s.compareSource) {
+            ChatConstants.SOURCE_REMOTE -> {
+                if (s.compareModelId.isBlank() || s.remoteBaseUrl.isBlank()) return null
+                if (s.modelSource == ChatConstants.SOURCE_REMOTE && s.compareModelId == s.remoteModelId) return null
+                ComparePass(
+                    settings = s.copy(modelSource = ChatConstants.SOURCE_REMOTE, remoteModelId = s.compareModelId),
+                    labelA = labelA,
+                    labelB = "[Remote] ${s.compareModelId}",
+                )
+            }
+            ChatConstants.SOURCE_LOCAL -> {
+                val path =
+                    s.compareModelId.ifBlank { ChatServerService.resolveModelPath(app, s) }
+                        ?: return null
+                val curPath = ChatServerService.resolveModelPath(app, s)
+                if (s.modelSource == ChatConstants.SOURCE_LOCAL && path == curPath) return null
+                ComparePass(
+                    settings = s.copy(modelSource = ChatConstants.SOURCE_LOCAL, customModelPath = path),
+                    labelA = labelA,
+                    labelB = "[On-device] ${File(path).nameWithoutExtension.ifBlank { "local" }}",
+                )
+            }
+            else -> null
+        }
+    }
+
+    /**
+     * Starts compare pass 2: reuses the last user message and generates with
+     * the challenger settings. The resulting assistant message is merged as
+     * a variant of pass 1's message in the generation finally-block.
+     * Must be called with [isGenerating] still true.
+     */
+    private fun runComparePass2(pass: ComparePass) {
+        val jobBefore = genJob
+        regenerateInternal(sOverride = pass.settings, keepExisting = true, allowWhileGenerating = true)
+        if (genJob == null || genJob === jobBefore) {
+            // Validation failed inside regenerateInternal: nothing launched.
+            // Bail out of compare cleanly instead of leaving a stale merge.
+            isGenerating.value = false
+            if (errorMessage.value.isNullOrBlank()) {
+                errorMessage.value = "Compare challenger unavailable."
+            }
+        } else {
+            pendingCompareMerge = pass
+        }
+    }
+
+    /**
+     * Merges the last assistant message (compare pass 2 output) into the
+     * previous assistant message as an extra variant, then drops the orphaned
+     * node so reloads keep a single message with a 1/2 switcher.
+     */
+    private fun mergeLastAssistantAsVariant(pass: ComparePass) {
+        if (messages.size < 2) return
+        val b = messages.removeAt(messages.lastIndex)
+        if (b.role != ChatConstants.ROLE_ASSISTANT) {
+            messages.add(b)
+            return
+        }
+        val aIdx = messages.lastIndex
+        if (aIdx < 0) {
+            messages.add(b)
+            return
+        }
+        val a = messages[aIdx]
+        if (a.role != ChatConstants.ROLE_ASSISTANT) {
+            messages.add(b)
+            return
+        }
+        nodes.removeAll { it.id == b.id }
+        if (b.content.isBlank()) {
+            // Challenger produced nothing (e.g. stopped): just drop it.
+            registerActiveChild(a)
+            persist()
+            return
+        }
+        val variants = if (a.variants.isEmpty()) listOf(a.content) else a.variants
+        val merged =
+            a.copy(
+                variants = variants + b.content,
+                stats = "${a.stats} · A/B: ${pass.labelA} vs ${pass.labelB}",
+            )
+        messages[aIdx] = merged
+        registerActiveChild(merged)
+        persist()
+    }
+
+    // ── MCP client ────────────────────────────────────────────────────
+
+    private val mcpManager get() = com.localgpt.app.mcp.McpManager.getInstance(app)
+    val mcpServers: StateFlow<List<com.localgpt.app.mcp.McpServerConfig>> get() = mcpManager.servers
+    val mcpToolsByServer: StateFlow<Map<String, List<com.localgpt.app.mcp.McpTool>>> get() = mcpManager.toolsByServer
+    val mcpToolErrors: StateFlow<Map<String, String>> get() = mcpManager.errors
+
+    /**
+     * Explicit safety boundary for autonomous MCP tool calls: when the model
+     * emits a tool call, generation suspends here until the user approves or
+     * denies it in the UI. Never auto-approved.
+     */
+    val pendingMcpApproval = mutableStateOf<com.localgpt.app.mcp.McpCallRequest?>(null)
+    private var mcpApproval: CompletableDeferred<Boolean>? = null
+
+    fun setMcpEnabled(enabled: Boolean) = launchSetting { settingsRepo.setMcpEnabled(enabled) }
+
+    fun upsertMcpServer(
+        server: com.localgpt.app.mcp.McpServerConfig,
+        authToken: String? = null,
+    ) = viewModelScope.launch(Dispatchers.IO) { settingsRepo.upsertMcpServer(server, authToken) }
+
+    fun removeMcpServer(serverId: String) =
+        viewModelScope.launch(Dispatchers.IO) { settingsRepo.removeMcpServer(serverId) }
+
+    fun setMcpServerEnabled(server: com.localgpt.app.mcp.McpServerConfig, enabled: Boolean) =
+        upsertMcpServer(server.copy(enabled = enabled))
+
+    fun refreshMcpTools() =
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { mcpManager.refreshAllEnabled() }
+                .onFailure { e ->
+                    withContext(Dispatchers.Main) {
+                        errorMessage.value = "MCP discovery failed: ${e.message}"
+                    }
+                }
+        }
+
+    fun refreshMcpServerTools(server: com.localgpt.app.mcp.McpServerConfig) =
+        viewModelScope.launch(Dispatchers.IO) {
+            runCatching { mcpManager.refreshTools(server) }
+                .onFailure { e ->
+                    withContext(Dispatchers.Main) {
+                        errorMessage.value = "MCP '${server.name}': ${e.message}"
+                    }
+                }
+        }
+
+    /**
+     * Manual tool invocation from the MCP screen. This is an explicit user
+     * action, so it bypasses the approval gate used by autonomous calls.
+     */
+    fun testMcpCall(
+        serverId: String,
+        toolName: String,
+        argsJson: String,
+        onResult: (String) -> Unit,
+    ) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val result =
+                runCatching {
+                    val args =
+                        runCatching {
+                            com.google.gson.JsonParser.parseString(argsJson.ifBlank { "{}" }).asJsonObject
+                        }.getOrElse { com.google.gson.JsonObject() }
+                    mcpManager.callTool(serverId, toolName, args)
+                }
+            withContext(Dispatchers.Main) {
+                onResult(
+                    result.fold(
+                        onSuccess = {
+                            if (it.isError) "Tool returned an error:\n${it.text}" else "Result:\n${it.text}"
+                        },
+                        onFailure = { "Call failed: ${it.message}" },
+                    ),
+                )
+            }
+        }
+    }
+
+    /** Called from the approval dialog. */
+    fun respondMcpApproval(approved: Boolean) {
+        val d = mcpApproval
+        mcpApproval = null
+        pendingMcpApproval.value = null
+        d?.complete(approved)
+    }
+
+    /** Denies any pending approval (stop / conversation switch). */
+    private fun denyMcpApproval() {
+        val d = mcpApproval
+        mcpApproval = null
+        pendingMcpApproval.value = null
+        d?.complete(false)
+    }
+
+    private suspend fun requestMcpApproval(req: com.localgpt.app.mcp.McpCallRequest): Boolean {
+        // Deny a stale request before arming a new one.
+        mcpApproval?.complete(false)
+        val d = CompletableDeferred<Boolean>()
+        mcpApproval = d
+        pendingMcpApproval.value = req
+        return try {
+            d.await()
+        } finally {
+            // Only clear if this request is still the current one — a newer
+            // request may have armed itself while this one was settling.
+            if (mcpApproval === d) {
+                mcpApproval = null
+                pendingMcpApproval.value = null
+            }
+        }
+    }
+
+    /**
+     * Builds the MCP tools section injected into the system prompt for local
+     * generation. Capped so small-context on-device models aren't starved.
+     * Remote providers are excluded: their tool calls have no executor here.
+     */
+    private fun mcpToolsPromptBlock(s: Settings): String {
+        if (!s.mcpEnabled || s.modelSource != ChatConstants.SOURCE_LOCAL) return ""
+        val tools = mcpManager.allEnabledTools().take(12)
+        if (tools.isEmpty()) return ""
+        return buildString {
+            append("\n\n[MCP TOOLS]\n")
+            append("You may call tools hosted on the user's connected MCP servers. To call one, emit EXACTLY one block and then stop:\n")
+            append("<tool_call>{\"name\": \"<tool_name>\", \"arguments\": {…}}</tool_call>\n")
+            append("The user must approve each call; after approval the tool result is provided and you continue. Never invent tool results.\n")
+            append("Available tools:\n")
+            tools.forEach { t ->
+                append("- ${t.signature}")
+                val desc = t.description.take(160)
+                if (desc.isNotBlank()) append(": $desc")
+                append("  [server: ${t.serverName}]\n")
+            }
+        }.take(2500)
+    }
+
+    /**
+     * Best-effort detection of the selected remote model's context window
+     * (Ollama `/api/show`, OpenRouter `context_length`). On success the value
+     * is stored as a per-model override; the global remote default and the
+     * on-device setting are untouched.
+     */
+    fun detectRemoteContextWindow(modelId: String = settings.value.remoteModelId) {
+        val s = settings.value
+        if (s.remoteBaseUrl.isBlank() || modelId.isBlank()) {
+            errorMessage.value = "Set the Remote Base URL and select a model first."
+            return
+        }
+        if (isDetectingContextWindow.value) return
+        isDetectingContextWindow.value = true
+        viewModelScope.launch {
+            try {
+                val detected =
+                    RemoteAiClient.detectContextWindow(s.remoteBaseUrl, s.remoteApiKey, modelId)
+                if (detected != null) {
+                    settingsRepo.setRemoteModelContextWindow(modelId, detected)
+                } else {
+                    errorMessage.value =
+                        "Could not detect the context window for this provider — set it manually below."
+                }
+            } finally {
+                isDetectingContextWindow.value = false
+            }
+        }
+    }
 
     fun fetchRemoteModels(baseUrl: String, apiKey: String = "") {
         isFetchingRemoteModels.value = true
@@ -1688,8 +2622,30 @@ class ChatViewModel(
             }.onFailure {
                 errorMessage.value = "Failed to connect to remote server: ${it.message}"
             }
+            // Best-effort: cache per-model pricing for cost estimates (OpenRouter only).
+            runCatching {
+                val pricing = RemoteAiClient.fetchOpenRouterPricing(baseUrl, apiKey)
+                if (pricing.isNotEmpty()) {
+                    settingsRepo.setRemoteModelPricingJson(remoteModelPricingToJson(pricing))
+                }
+            }
             isFetchingRemoteModels.value = false
         }
+    }
+
+    /** Records the estimated USD cost of one remote generation. */
+    private fun recordRemoteCost(modelId: String, promptTokens: Int, completionTokens: Int) {
+        if (modelId.isBlank() || (promptTokens <= 0 && completionTokens <= 0)) return
+        val pricing = parseRemoteModelPricing(settings.value.remoteModelPricingJson)[modelId] ?: return
+        val usd = promptTokens * pricing.promptPerToken + completionTokens * pricing.completionPerToken
+        if (usd <= 0) return
+        viewModelScope.launch {
+            settingsRepo.addRemoteSpendMicros((usd * 1_000_000).toLong().coerceAtLeast(1L))
+        }
+    }
+
+    fun resetRemoteSpend() {
+        viewModelScope.launch { settingsRepo.resetRemoteSpend() }
     }
 
     // ── Model Management ─────────────────────────────────────────────
@@ -1698,18 +2654,27 @@ class ChatViewModel(
         val s = settings.value
         val modelPath = ChatServerService.resolveModelPath(app, s) ?: return
         viewModelScope.launch(Dispatchers.IO) {
-            engine.load(
-                LiteRtEngineManager.EngineParams(
-                    modelPath = modelPath,
-                    temperature = s.temperature,
-                    topK = s.topK,
-                    topP = s.topP,
-                    maxTokens = s.maxTokens,
-                    contextWindow = s.contextWindowTokens,
-                    backend = s.backend,
-                    systemPrompt = s.systemPrompt,
-                ),
-            )
+            try {
+                engine.load(
+                    LiteRtEngineManager.EngineParams(
+                        modelPath = modelPath,
+                        temperature = s.temperature,
+                        topK = s.topK,
+                        topP = s.topP,
+                        maxTokens = s.maxTokens,
+                        contextWindow = s.contextWindowTokens,
+                        backend = s.backend,
+                        systemPrompt = s.systemPrompt,
+                    ),
+                )
+            } catch (e: Exception) {
+                // Jangan biarkan exception tak tertangkap membunuh proses (force close),
+                // mis. file model tidak ada. Tampilkan sebagai pesan error biasa.
+                KLog.e("ChatViewModel", "loadActiveModel failed", e)
+                withContext(Dispatchers.Main) {
+                    errorMessage.value = "Failed to load model: ${e.message}"
+                }
+            }
         }
     }
 
@@ -1725,10 +2690,10 @@ class ChatViewModel(
         downloader.startDownload(model)
     }
 
-    fun downloadCustomUrl(downloadUrl: String, fileName: String? = null, expectedSizeBytes: Long = 0L) {
+    fun downloadCustomUrl(downloadUrl: String, fileName: String? = null, expectedSizeBytes: Long = 0L, sha256: String? = null) {
         val fn = fileName?.ifBlank { null } ?: downloadUrl.substringAfterLast('/').substringBefore('?').ifBlank { "custom_model.litertlm" }
         val id = "custom_" + fn.hashCode()
-        downloader.startCustomDownload(id, fn, downloadUrl, expectedSizeBytes)
+        downloader.startCustomDownload(id, fn, downloadUrl, expectedSizeBytes, expectedSha256 = sha256)
     }
 
     fun cancelDownload(modelId: String) = downloader.cancelDownload(modelId)
@@ -2021,7 +2986,7 @@ class ChatViewModel(
             settingsRepo.setMaxTokens(512)
             settingsRepo.setContextWindowTokens(2048)
             settingsRepo.setPromptTemplateFormat("auto")
-            settingsRepo.setBackend("GPU")
+            settingsRepo.setBackend(ChatConstants.BACKEND_GPU)
         }
     }
 

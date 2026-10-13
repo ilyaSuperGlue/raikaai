@@ -3,6 +3,7 @@ package com.localgpt.app.ui.chat
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -62,13 +63,13 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import com.localgpt.app.core.audio.AudioPlayerHelper
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -90,8 +91,10 @@ import com.localgpt.app.data.ChatMessageEntry
 import com.localgpt.app.ui.component.MarkdownText
 import com.localgpt.app.ui.component.SearchSourcesCard
 import com.localgpt.app.web.WebSourceCitation
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.io.File
 import java.util.Locale
 
@@ -193,10 +196,12 @@ internal fun MessageList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val messageCount = viewModel.messages.size
+    val settings by viewModel.settings.collectAsState()
 
-    // Scroll to bottom (index 0 in reverseLayout) when a new message is sent or started
-    LaunchedEffect(messageCount) {
-        if (messageCount > 0) {
+    // Scroll to bottom (index 0 in reverseLayout) when a new message is sent or started.
+    // Respects the "Auto-scroll" setting — when off, the list stays where the user left it.
+    LaunchedEffect(messageCount, settings.autoScroll) {
+        if (messageCount > 0 && settings.autoScroll) {
             listState.animateScrollToItem(0)
         }
     }
@@ -366,12 +371,97 @@ internal fun MessageBubble(
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
                     modifier = Modifier.fillMaxWidth(0.85f),
                 ) {
-                    Text(
-                        message.content,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    )
+                    Column {
+                // Attachments: images (multi) + document chips.
+                // Falls back to legacy single imagePath for old conversations.
+                val attachmentImages =
+                    remember(message.attachments, message.imagePath) {
+                        val fromList = message.attachments.filter { it.type == "image" }.map { it.path }
+                        if (fromList.isNotEmpty()) fromList
+                        else listOfNotNull(message.imagePath?.takeIf { it.isNotBlank() })
+                    }
+                val attachmentFiles =
+                    remember(message.attachments) {
+                        message.attachments.filter { it.type == "file" }
+                    }
+                attachmentImages.forEach { imagePath ->
+                    // B38: decode off the main thread, downsampled to bubble
+                    // width (was: main-thread full-size decode in remember).
+                    val bitmap by produceState<Bitmap?>(initialValue = null, imagePath) {
+                        value =
+                            withContext(Dispatchers.IO) {
+                                decodeSampledBitmapFromFile(File(imagePath), reqSizePx = 1024)
+                            }
+                    }
+                    // NOTE: no manual bitmap.recycle() — the bitmap is still
+                    // referenced by the Image below; racy recycling crashes
+                    // with "Canvas: trying to use a recycled bitmap".
+                    // Copy to a local val first: smart cast doesn't work on
+                    // delegated properties.
+                    val currentBitmap = bitmap
+                    if (currentBitmap != null) {
+                        Image(
+                            bitmap = currentBitmap.asImageBitmap(),
+                            contentDescription = "Attached Image",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .clip(RoundedCornerShape(12.dp)),
+                            contentScale = ContentScale.FillWidth,
+                        )
+                    }
+                }
+                if (attachmentFiles.isNotEmpty()) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 10.dp, vertical = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        attachmentFiles.take(3).forEach { file ->
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant,
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                ) {
+                                    Icon(
+                                        Icons.Default.Description,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(14.dp),
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                    Spacer(Modifier.width(4.dp))
+                                    Text(
+                                        file.name.take(16),
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                    )
+                                }
+                            }
+                        }
+                        if (attachmentFiles.size > 3) {
+                            Text(
+                                "+${attachmentFiles.size - 3}",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.align(Alignment.CenterVertically),
+                            )
+                        }
+                    }
+                }
+
+                // Message Text Content
+                        Text(
+                            message.content,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        )
+                    }
                 }
             }
 

@@ -29,10 +29,17 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import com.localgpt.app.ui.theme.success
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.setValue
+import com.localgpt.app.App
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -51,6 +58,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.localgpt.app.ui.chat.ChatViewModel
+import com.localgpt.app.ui.component.EmptyState
 import java.util.Locale
 
 /**
@@ -183,6 +191,51 @@ fun LogsScreen(
                 modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
             )
 
+            // ── 1b. Last crash report (written by App's uncaught-exception
+            // handler; shown here so crashes are diagnosable without adb) ──
+            var crashDismissed by remember { mutableStateOf(false) }
+            val crashReport = remember { App.crashReportFile(context)?.readText().orEmpty().takeIf { it.isNotBlank() } }
+            if (!crashDismissed && crashReport != null) {
+                Card(
+                    shape = RoundedCornerShape(16.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
+                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
+                ) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            "Last Crash Report",
+                            style = MaterialTheme.typography.titleMedium,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            crashReport.take(4000),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onErrorContainer,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(180.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                        Spacer(Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(onClick = {
+                                clipboard.setText(androidx.compose.ui.text.AnnotatedString(crashReport))
+                                Toast.makeText(context, "Crash report copied", Toast.LENGTH_SHORT).show()
+                            }) {
+                                Text("Copy")
+                            }
+                            TextButton(onClick = {
+                                App.clearCrashReport(context)
+                                crashDismissed = true
+                            }) {
+                                Text("Dismiss")
+                            }
+                        }
+                    }
+                }
+            }
+
             // ── 2. Terminal Log Window ──
             Card(
                 shape = RoundedCornerShape(16.dp),
@@ -191,13 +244,11 @@ fun LogsScreen(
                 modifier = Modifier.fillMaxSize().padding(bottom = 16.dp),
             ) {
                 if (filteredLogs.isEmpty()) {
-                    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text(
-                            "No log records found",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                    EmptyState(
+                        icon = Icons.Default.Terminal,
+                        title = "No log records found",
+                        message = "Engine telemetry will appear here once the model runs.",
+                    )
                 } else {
                     LazyColumn(
                         state = listState,
@@ -207,9 +258,9 @@ fun LogsScreen(
                         items(filteredLogs) { line ->
                             val color =
                                 when {
-                                    line.contains("ERROR", ignoreCase = true) || line.contains("failed", ignoreCase = true) -> Color(0xFFEF5350)
-                                    line.contains("WARN", ignoreCase = true) -> Color(0xFFFFB74D)
-                                    line.contains("SUCCESS", ignoreCase = true) || line.contains("Ready", ignoreCase = true) -> Color(0xFF81C784)
+                                    line.contains("ERROR", ignoreCase = true) || line.contains("failed", ignoreCase = true) -> MaterialTheme.colorScheme.error
+                                    line.contains("WARN", ignoreCase = true) -> MaterialTheme.colorScheme.tertiary
+                                    line.contains("SUCCESS", ignoreCase = true) || line.contains("Ready", ignoreCase = true) -> MaterialTheme.colorScheme.success
                                     else -> MaterialTheme.colorScheme.onSurface
                                 }
 

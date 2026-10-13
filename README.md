@@ -1,21 +1,30 @@
-# LiteChat (LocalGPT)
+<div align="center">
+  <img src="docs/assets/app_icon.png" width="100" alt="LiteChat Logo" />
+  <h1>LiteChat</h1>
 
-LiteChat is a standalone, 100% on-device Android AI client and local inference server powered by **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`). It runs large language models (such as Gemma 4, SmolLM, Llama, and Qwen) directly on smartphone hardware with GPU acceleration (OpenCL) and CPU fallback (Arm NEON / XNNPack).
+  <p>
+    <a href="https://github.com/kouzen-neo/litechat/actions/workflows/build-apk.yml"><img src="https://img.shields.io/github/actions/workflow/status/kouzen-neo/litechat/build-apk.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="Build"></a>
+    <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Android-API%2026%2B-3DDC84.svg?style=for-the-badge&logo=android&logoColor=white" alt="Android SDK"></a>
+    <a href="https://ai.google.dev/edge/litert"><img src="https://img.shields.io/badge/Google_LiteRT-GPU_Accelerated-4285F4.svg?style=for-the-badge&logo=google&logoColor=white" alt="LiteRT"></a>
+  </p>
+</div>
 
-LiteChat also embeds an OpenAI-compatible HTTP server (`/v1`) using **Ktor CIO**, turning your Android phone into a local LLM inference backend for desktop apps, web interfaces, and IDE extensions (e.g., VS Code Continue, OpenWebUI, SillyTavern) over Wi-Fi / LAN.
+LiteChat is a free and open-source Android AI client and local inference server powered by **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`). It runs large language models (such as Gemma 4, SmolLM, Llama, and Qwen) on smartphone hardware with GPU acceleration (OpenCL) and CPU fallback (Arm NEON / XNNPack).
+
+LiteChat also embeds an OpenAI-compatible HTTP server (`/v1`) using **Ktor CIO**, so your phone can act as a local LLM inference backend for desktop apps, web interfaces, and IDE extensions (e.g., VS Code Continue, OpenWebUI, SillyTavern) over Wi-Fi / LAN.
 
 ---
 
 ## Key Features
 
-- **100% On-Device & Offline Inference**: Zero cloud dependencies or subscriptions. Models execute entirely in local RAM and VRAM.
-- **Hardware Acceleration**: High-performance OpenCL GPU shader compilation with automatic CPU fallback.
+- **On-Device & Offline Inference**: No account or subscription needed. Models run locally on the device.
+- **Hardware Acceleration**: OpenCL GPU inference with automatic CPU fallback.
 - **Embedded OpenAI-Compatible HTTP Server**:
   - `POST /v1/chat/completions` (Server-Sent Events streaming chunks and standard JSON)
   - `POST /v1/completions` (Raw completion)
   - `GET /v1/models` and `GET /v1/models/{model}`
   - `GET /health`
-  - Full CORS support for cross-origin browser and web app integration.
+  - CORS support for browser and web app integration.
 - **Material 3 Expressive Design System**:
   - Adaptive grouped cards and Material 3 controls.
   - Light, Dark, and Pure Black (#000000 OLED) theme modes.
@@ -25,7 +34,7 @@ LiteChat also embeds an OpenAI-compatible HTTP server (`/v1`) using **Ktor CIO**
   - Resumeable chunked background downloader via OkHttp and Android Foreground Services.
   - SAF (Storage Access Framework) local file importer.
 - **Interactive AI Tools**:
-  - In-app speed benchmarking tool (TTFT, decode tokens per second, CPU vs. GPU comparison).
+  - Inference benchmark tool (TTFT, decode tokens per second, CPU vs. GPU comparison).
   - Custom AI Persona system with persistent system prompt templates.
   - Context window token consumption monitor.
   - Offline Text-to-Speech (TTS) and Voice Input (Speech-to-Text).

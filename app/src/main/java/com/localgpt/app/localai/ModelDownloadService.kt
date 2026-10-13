@@ -26,15 +26,23 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import okhttp3.Call
+import okhttp3.HttpUrl
 import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import java.io.File
 import java.io.FileOutputStream
+import java.net.InetAddress
 import java.net.URI
+import java.net.UnknownHostException
+import java.security.MessageDigest
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 /**
  * Foreground Service for downloading On-Device AI models in the background.
@@ -55,6 +63,7 @@ class ModelDownloadService : Service() {
         private const val EXTRA_FILE_NAME = "extra_file_name"
         private const val EXTRA_URL = "extra_url"
         private const val EXTRA_SIZE_BYTES = "extra_size_bytes"
+        private const val EXTRA_SHA256 = "extra_sha256"
 
         @Volatile
         private var channelCreated = false
@@ -88,6 +97,7 @@ class ModelDownloadService : Service() {
             fileName: String,
             downloadUrl: String,
             sizeBytes: Long,
+            expectedSha256: String? = null,
         ) {
             try {
                 ensureNotificationChannel(context)
@@ -99,6 +109,7 @@ class ModelDownloadService : Service() {
                         putExtra(EXTRA_FILE_NAME, fileName)
                         putExtra(EXTRA_URL, downloadUrl)
                         putExtra(EXTRA_SIZE_BYTES, sizeBytes)
+                        if (!expectedSha256.isNullOrBlank()) putExtra(EXTRA_SHA256, expectedSha256)
                     }
                 ContextCompat.startForegroundService(context, intent)
             } catch (e: Exception) {
@@ -141,11 +152,21 @@ class ModelDownloadService : Service() {
             .followSslRedirects(false)
             .build()
 
-    @Volatile
-    private var isCancelled = false
+    /** Per-download cancellation handle. Replaces the old single global flag. */
+    private data class DownloadHandle(
+        val call: AtomicReference<Call?> = AtomicReference(null),
+        val cancelled: AtomicBoolean = AtomicBoolean(false),
+    )
 
-    @Volatile
-    private var currentCall: Call? = null
+    /** Active downloads by model id — the service supports parallel downloads. */
+    private val activeDownloads = ConcurrentHashMap<String, DownloadHandle>()
+
+    /** Per-download notification ids so parallel downloads don't overwrite each other. */
+    private val notificationIds = ConcurrentHashMap<String, Int>()
+    private val notificationIdCounter = AtomicInteger(NOTIFICATION_ID)
+
+    private fun notificationIdFor(id: String): Int =
+        notificationIds.getOrPut(id) { notificationIdCounter.incrementAndGet() }
 
     private lateinit var modelManager: LocalModelManager
     private lateinit var settingsRepo: SettingsRepository
@@ -165,52 +186,83 @@ class ModelDownloadService : Service() {
     ): Int {
         when (intent?.action) {
             ACTION_CANCEL -> {
-                isCancelled = true
-                currentCall?.cancel()
                 val id = intent.getStringExtra(EXTRA_ID) ?: ""
-                LocalModelDownloader.getInstance(this).onServiceCancelled(id)
-                stopForegroundNotification()
-                stopSelf()
+                // Signal only this download; its coroutine performs the actual
+                // cleanup and state update when it observes the flag.
+                activeDownloads[id]?.let { handle ->
+                    handle.cancelled.set(true)
+                    handle.call.get()?.cancel()
+                }
+                stopIfIdle()
             }
             ACTION_START -> {
                 val id =
                     intent.getStringExtra(EXTRA_ID) ?: run {
-                        stopSelf()
+                        stopIfIdle()
                         return START_NOT_STICKY
                     }
                 val name = intent.getStringExtra(EXTRA_NAME) ?: id
                 val fileName = intent.getStringExtra(EXTRA_FILE_NAME) ?: "$id.litertlm"
                 val url =
                     intent.getStringExtra(EXTRA_URL) ?: run {
-                        stopSelf()
+                        stopIfIdle()
                         return START_NOT_STICKY
                     }
                 val sizeBytes = intent.getLongExtra(EXTRA_SIZE_BYTES, 0L)
+                val expectedSha256 = intent.getStringExtra(EXTRA_SHA256)?.ifBlank { null }
+
+                // Restart semantics: a new START for an already-running id
+                // cancels the previous attempt first.
+                activeDownloads[id]?.let { old ->
+                    old.cancelled.set(true)
+                    old.call.get()?.cancel()
+                }
+                val handle = DownloadHandle()
+                activeDownloads[id] = handle
 
                 ensureNotificationChannel(this)
-                val initialNotification = buildNotification(name, 0f, 0L, sizeBytes, 0L)
-                try {
-                    ServiceCompat.startForeground(
-                        this,
-                        NOTIFICATION_ID,
-                        initialNotification,
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
-                        } else {
-                            0
-                        },
-                    )
-                } catch (e: Exception) {
-                    Log.e("ModelDownloadService", "startForeground failed", e)
+                val notifId = notificationIdFor(id)
+                val initialNotification = buildNotification(id, name, 0f, 0L, sizeBytes, 0L)
+                // Only the first concurrent download needs to promote the service
+                // to foreground; the rest just post their own notifications.
+                if (activeDownloads.size == 1) {
+                    try {
+                        ServiceCompat.startForeground(
+                            this,
+                            notifId,
+                            initialNotification,
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                ServiceInfo.FOREGROUND_SERVICE_TYPE_DATA_SYNC
+                            } else {
+                                0
+                            },
+                        )
+                    } catch (e: Exception) {
+                        Log.e("ModelDownloadService", "startForeground failed", e)
+                    }
+                } else {
+                    updateNotification(notifId, id, name, 0f, 0L, sizeBytes, 0L)
                 }
 
                 scope.launch {
-                    runDownload(id, name, fileName, url, sizeBytes)
+                    runDownload(id, name, fileName, url, sizeBytes, expectedSha256, handle)
                 }
             }
-            else -> stopSelf()
+            else -> stopIfIdle()
         }
         return START_NOT_STICKY
+    }
+
+    /**
+     * Stops the foreground state and the service itself, but only when no
+     * downloads are still active. Never call stopSelf() unconditionally while
+     * other downloads may be running.
+     */
+    private fun stopIfIdle() {
+        if (activeDownloads.isEmpty()) {
+            stopForegroundNotification()
+            stopSelf()
+        }
     }
 
     private suspend fun runDownload(
@@ -219,16 +271,37 @@ class ModelDownloadService : Service() {
         fileName: String,
         url: String,
         expectedSizeBytes: Long,
+        expectedSha256: String?,
+        handle: DownloadHandle,
     ) {
         val downloader = LocalModelDownloader.getInstance(this)
         val modelsDir = modelManager.modelsDir
         modelsDir.mkdirs()
+        val notifId = notificationIdFor(id)
 
-        val cleanFileName = File(fileName).name.ifBlank { "custom_model.litertlm" }
+        val cleanFileName = LocalModelManager.sanitizeModelFileName(fileName)
         val targetFile = File(modelsDir, cleanFileName)
-        val tempFile = File(modelsDir, "$cleanFileName.tmp")
+        // B10: key the resume temp file per download URL so resuming a
+        // different URL that happens to share the basename can never append
+        // foreign bytes to a stale .tmp.
+        val urlKey = sha256Hex(url).take(16)
+        val tempFile = File(modelsDir, "$cleanFileName.$urlKey.tmp")
+        // Drop stale resume files from other URLs (and the legacy unkeyed name).
+        modelsDir.listFiles { f ->
+            f.isFile && f.name.startsWith("$cleanFileName.") && f.name.endsWith(".tmp") && f != tempFile
+        }?.forEach { runCatching { it.delete() } }
+        runCatching { File(modelsDir, "$cleanFileName.tmp").takeIf { it.exists() }?.delete() }
+
+        // Validate the checksum format up front so we fail fast instead of
+        // downloading gigabytes before discovering the hash is unusable.
+        // (The throw itself lives inside the try below so a malformed checksum
+        // is routed to onServiceError instead of crashing the service.)
+        val normalizedSha256 = expectedSha256?.trim()?.lowercase()?.ifEmpty { null }
 
         val existingBytes = if (tempFile.exists()) tempFile.length() else 0L
+        // Tracks whether a terminal (completion/error) notification was already
+        // posted, so the finally block doesn't cancel it.
+        var terminalNotificationPosted = false
         downloader.onServiceDownloading(
             id,
             if (expectedSizeBytes > 0) (existingBytes.toFloat() / expectedSizeBytes.toFloat()).coerceIn(0f, 1f) else 0f,
@@ -240,12 +313,18 @@ class ModelDownloadService : Service() {
         )
 
         try {
+            if (normalizedSha256 != null && !normalizedSha256.matches(Regex("[0-9a-f]{64}"))) {
+                throw IllegalArgumentException(
+                    "Invalid expected SHA-256 checksum for $name: must be 64 hex characters.",
+                )
+            }
+
             val hfToken =
                 settingsRepo.settingsFlow
                     .first()
                     .huggingFaceToken
                     .trim()
-            val response = executeRequestWithAuthAndRedirects(url, hfToken, existingBytes)
+            val response = executeRequestWithAuthAndRedirects(url, hfToken, existingBytes, handle)
 
             if (!response.isSuccessful) {
                 val errorMsg =
@@ -288,7 +367,7 @@ class ModelDownloadService : Service() {
                     val buffer = ByteArray(256 * 1024)
                     var read: Int
                     while (input.read(buffer).also { read = it } != -1) {
-                        if (isCancelled) break
+                        if (handle.cancelled.get()) break
                         output.write(buffer, 0, read)
                         downloaded += read
                         bytesSinceLastUpdate += read
@@ -308,59 +387,167 @@ class ModelDownloadService : Service() {
 
                             val progress = (downloaded.toFloat() / totalBytes.toFloat()).coerceIn(0f, 1f)
                             downloader.onServiceDownloading(id, progress, downloaded, totalBytes, currentSpeed, cleanFileName, name)
-                            updateNotification(name, progress, downloaded, totalBytes, currentSpeed)
+                            updateNotification(notifId, id, name, progress, downloaded, totalBytes, currentSpeed)
                         }
                     }
                     output.flush()
                 }
             }
 
-            if (isCancelled) {
+            if (handle.cancelled.get()) {
                 if (tempFile.exists()) tempFile.delete()
                 downloader.onServiceCancelled(id)
             } else {
                 if (targetFile.exists()) targetFile.delete()
                 val renameSuccess = tempFile.renameTo(targetFile)
-                if (renameSuccess || (targetFile.exists() && targetFile.length() > 0)) {
-                    downloader.onServiceCompleted(id)
-                    showCompletionNotification(name)
-                } else {
-                    try {
-                        tempFile.copyTo(targetFile, overwrite = true)
-                        tempFile.delete()
-                        downloader.onServiceCompleted(id)
-                        showCompletionNotification(name)
-                    } catch (e: Exception) {
-                        Log.e("ModelDownloadService", "Failed to copy temp file to target", e)
-                        throw IllegalStateException("Failed to save downloaded model file: ${e.localizedMessage}")
+                val saved =
+                    when {
+                        renameSuccess -> true
+                        targetFile.exists() && targetFile.length() > 0 -> true
+                        else -> {
+                            try {
+                                tempFile.copyTo(targetFile, overwrite = true)
+                                tempFile.delete()
+                                true
+                            } catch (e: Exception) {
+                                Log.e("ModelDownloadService", "Failed to copy temp file to target", e)
+                                throw IllegalStateException("Failed to save downloaded model file: ${e.localizedMessage}")
+                            }
+                        }
+                    }
+                if (!saved) throw IllegalStateException("Failed to save downloaded model file.")
+
+                // B22: never mark a 0-byte or truncated file as Completed.
+                val finalSize = targetFile.length()
+                if (finalSize <= 0L) {
+                    targetFile.delete()
+                    throw IllegalStateException("Downloaded file is empty; deleted.")
+                }
+                if (expectedSizeBytes > 0 && finalSize < expectedSizeBytes) {
+                    targetFile.delete()
+                    throw IllegalStateException(
+                        "Download incomplete: received $finalSize of $expectedSizeBytes expected bytes; deleted.",
+                    )
+                }
+
+                // Optional integrity check: delete the file loudly on mismatch.
+                if (normalizedSha256 != null) {
+                    downloader.onServiceDownloading(id, 1f, downloaded, totalBytes, 0L, cleanFileName, "$name (verifying…)")
+                    updateNotification(notifId, id, name, 1f, downloaded, totalBytes, 0L)
+                    if (!verifySha256(targetFile, normalizedSha256)) {
+                        targetFile.delete()
+                        throw IllegalStateException(
+                            "Checksum mismatch: the downloaded file failed SHA-256 verification and was deleted. " +
+                                "It may be corrupted or from an unexpected source.",
+                        )
                     }
                 }
+
+                downloader.onServiceCompleted(id)
+                terminalNotificationPosted = true
+                showCompletionNotification(notifId, name)
             }
         } catch (e: CancellationException) {
             if (tempFile.exists()) tempFile.delete()
             downloader.onServiceCancelled(id)
         } catch (e: Exception) {
-            Log.e("ModelDownloadService", "Download error for $id", e)
-            val msg = e.localizedMessage ?: "Download failed"
-            downloader.onServiceError(id, msg, cleanFileName)
-            showErrorNotification(name, msg)
+            if (handle.cancelled.get()) {
+                // call.cancel() surfaces as IOException; report as cancellation,
+                // not as a download error.
+                if (tempFile.exists()) tempFile.delete()
+                downloader.onServiceCancelled(id)
+            } else {
+                Log.e("ModelDownloadService", "Download error for $id", e)
+                val msg = e.localizedMessage ?: "Download failed"
+                downloader.onServiceError(id, msg, cleanFileName)
+                terminalNotificationPosted = true
+                showErrorNotification(notifId, name, msg)
+            }
         } finally {
-            stopForegroundNotification()
-            stopSelf()
+            activeDownloads.remove(id)
+            if (!terminalNotificationPosted) {
+                // Progress notification only: remove it. Completion/error
+                // notifications posted above must stay visible.
+                notificationIds.remove(id)?.let { finishedId ->
+                    (getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager)?.cancel(finishedId)
+                }
+            } else {
+                notificationIds.remove(id)
+            }
+            stopIfIdle()
         }
     }
+
+    /** Short SHA-256 hex of a string (used to key temp files per URL). */
+    private fun sha256Hex(input: String): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        return digest.digest(input.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
+    }
+
+    /**
+     * Parses [url], requiring the https scheme and a publicly-routable host.
+     * Called on the initial URL and on every redirect hop, so a redirect can
+     * neither downgrade to http nor bounce to an internal address (B11/SSRF).
+     */
+    private fun requirePublicHttpsUrl(url: String): HttpUrl {
+        val httpUrl = url.toHttpUrlOrNull() ?: throw IllegalArgumentException("Invalid download URL")
+        if (!httpUrl.isHttps) {
+            throw IllegalArgumentException("Only HTTPS download URLs are allowed")
+        }
+        assertPublicHost(httpUrl.host)
+        return httpUrl
+    }
+
+    /** Rejects hosts that resolve to loopback / private / link-local / multicast IPs. */
+    private fun assertPublicHost(host: String) {
+        val addresses =
+            try {
+                InetAddress.getAllByName(host)
+            } catch (e: UnknownHostException) {
+                throw IllegalArgumentException("Cannot resolve download host: $host")
+            }
+        for (addr in addresses) {
+            if (addr.isLoopbackAddress || addr.isLinkLocalAddress || addr.isSiteLocalAddress ||
+                addr.isMulticastAddress || addr.isAnyLocalAddress
+            ) {
+                throw IllegalArgumentException("Download host resolves to a non-public IP address: $host")
+            }
+        }
+    }
+
+    /** Computes the SHA-256 hex digest of [file] and compares it to [expectedHex]. */
+    private fun verifySha256(
+        file: File,
+        expectedHex: String,
+    ): Boolean =
+        try {
+            val digest = MessageDigest.getInstance("SHA-256")
+            file.inputStream().buffered(256 * 1024).use { input ->
+                val buffer = ByteArray(256 * 1024)
+                var read: Int
+                while (input.read(buffer).also { read = it } != -1) {
+                    digest.update(buffer, 0, read)
+                }
+            }
+            val actual = digest.digest().joinToString("") { "%02x".format(it) }
+            actual.equals(expectedHex.trim().lowercase(), ignoreCase = false)
+        } catch (e: Exception) {
+            Log.e("ModelDownloadService", "SHA-256 verification failed", e)
+            false
+        }
 
     private fun executeRequestWithAuthAndRedirects(
         initialUrl: String,
         hfToken: String,
         rangeStart: Long = 0L,
+        handle: DownloadHandle,
     ): Response {
         var currentUrl = initialUrl
         var attempts = 0
         while (attempts < 8) {
             attempts++
-            val httpUrl = currentUrl.toHttpUrlOrNull()
-                ?: throw IllegalArgumentException("Invalid URL: $currentUrl")
+            // Re-validated on every hop: https-only, public-IP-only (B11).
+            val httpUrl = requirePublicHttpsUrl(currentUrl)
             val host = httpUrl.host
             val isHfHost = host.equals("huggingface.co", ignoreCase = true) ||
                 host.equals("hf.co", ignoreCase = true) ||
@@ -386,7 +573,7 @@ class ModelDownloadService : Service() {
             reqBuilder.header("User-Agent", "LiteChat-App/0.1.0 (Android; LiteRT-Downloader)")
 
             val call = client.newCall(reqBuilder.build())
-            currentCall = call
+            handle.call.set(call)
             val response = call.execute()
             if (response.isRedirect) {
                 val location = response.header("Location")
@@ -403,6 +590,7 @@ class ModelDownloadService : Service() {
     }
 
     private fun buildNotification(
+        id: String,
         name: String,
         progress: Float,
         downloadedBytes: Long,
@@ -428,11 +616,13 @@ class ModelDownloadService : Service() {
         val cancelIntent =
             Intent(this, ModelDownloadService::class.java).apply {
                 action = ACTION_CANCEL
+                putExtra(EXTRA_ID, id)
             }
         val cancelPendingIntent =
             PendingIntent.getService(
                 this,
-                1,
+                // Unique per download so parallel downloads get independent cancel buttons.
+                notificationIdFor(id),
                 cancelIntent,
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
             )
@@ -453,6 +643,8 @@ class ModelDownloadService : Service() {
     }
 
     private fun updateNotification(
+        notifId: Int,
+        id: String,
         name: String,
         progress: Float,
         downloadedBytes: Long,
@@ -461,15 +653,18 @@ class ModelDownloadService : Service() {
     ) {
         try {
             if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
-            val notif = buildNotification(name, progress, downloadedBytes, totalBytes, speedBps)
+            val notif = buildNotification(id, name, progress, downloadedBytes, totalBytes, speedBps)
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            manager?.notify(NOTIFICATION_ID, notif)
+            manager?.notify(notifId, notif)
         } catch (e: Exception) {
             Log.e("ModelDownloadService", "Failed to update notification", e)
         }
     }
 
-    private fun showCompletionNotification(name: String) {
+    private fun showCompletionNotification(
+        notifId: Int,
+        name: String,
+    ) {
         try {
             if (!NotificationManagerCompat.from(this).areNotificationsEnabled()) return
             val openIntent = Intent(this, MainActivity::class.java).apply { flags = Intent.FLAG_ACTIVITY_SINGLE_TOP }
@@ -493,13 +688,14 @@ class ModelDownloadService : Service() {
                     .build()
 
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            manager?.notify(NOTIFICATION_ID + 1, notif)
+            manager?.notify(notifId, notif)
         } catch (e: Exception) {
             Log.e("ModelDownloadService", "Failed to show completion notification", e)
         }
     }
 
     private fun showErrorNotification(
+        notifId: Int,
         name: String,
         errorMsg: String,
     ) {
@@ -516,7 +712,7 @@ class ModelDownloadService : Service() {
                     .build()
 
             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
-            manager?.notify(NOTIFICATION_ID + 2, notif)
+            manager?.notify(notifId, notif)
         } catch (e: Exception) {
             Log.e("ModelDownloadService", "Failed to show error notification", e)
         }
@@ -531,6 +727,13 @@ class ModelDownloadService : Service() {
     }
 
     override fun onDestroy() {
+        activeDownloads.values.forEach { handle ->
+            handle.cancelled.set(true)
+            try {
+                handle.call.get()?.cancel()
+            } catch (_: Exception) {
+            }
+        }
         super.onDestroy()
         scope.cancel()
     }

@@ -33,6 +33,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
+import com.localgpt.app.ui.theme.success
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
@@ -59,6 +60,9 @@ import com.localgpt.app.localai.LocalAiModel
 import com.localgpt.app.localai.LocalModelDownloader
 import kotlinx.coroutines.launch
 import java.util.Locale
+
+/** Matches a 64-character lowercase hex SHA-256 checksum. */
+private val SHA256_HEX_REGEX = Regex("^[0-9a-f]{64}$")
 
 /**
  * Storage header card displaying available disk space.
@@ -335,21 +339,21 @@ fun InstalledModelCard(
 
                 if (isActive && isLoaded) {
                     Surface(
-                        color = Color(0xFF43A047).copy(alpha = 0.15f),
+                        color = MaterialTheme.colorScheme.success.copy(alpha = 0.15f),
                         shape = RoundedCornerShape(50),
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            Surface(color = Color(0xFF43A047), shape = RoundedCornerShape(50)) {
+                            Surface(color = MaterialTheme.colorScheme.success, shape = RoundedCornerShape(50)) {
                                 Spacer(Modifier.size(6.dp))
                             }
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 "Loaded (${activeBackend ?: "RAM"})",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = Color(0xFF2E7D32),
+                                color = MaterialTheme.colorScheme.success,
                             )
                         }
                     }
@@ -636,11 +640,12 @@ fun CustomUrlDownloadCard(
     urlInput: String,
     onUrlInputChange: (String) -> Unit,
     hfToken: String,
-    onStartDownload: (url: String, fileName: String, sizeBytes: Long) -> Unit,
+    onStartDownload: (url: String, fileName: String, sizeBytes: Long, sha256: String) -> Unit,
     modifier: Modifier = Modifier,
 ) {
     var isResolving by remember { mutableStateOf(false) }
     var resolveError by remember { mutableStateOf<String?>(null) }
+    var sha256Input by remember { mutableStateOf("") }
     var multiFileResult by remember { mutableStateOf<HuggingFaceModelResolver.ResolveResult.MultipleFiles?>(null) }
     val coroutineScope = rememberCoroutineScope()
     val clipboardManager = LocalClipboardManager.current
@@ -721,6 +726,22 @@ fun CustomUrlDownloadCard(
                 shape = RoundedCornerShape(12.dp),
             )
 
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Optional SHA-256 checksum for verifying the downloaded model file.
+            OutlinedTextField(
+                value = sha256Input,
+                onValueChange = {
+                    sha256Input = it.trim().lowercase()
+                    resolveError = null
+                },
+                label = { Text("SHA-256 checksum (optional)", style = MaterialTheme.typography.bodySmall) },
+                placeholder = { Text("64 hex characters…", style = MaterialTheme.typography.bodySmall) },
+                singleLine = true,
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(12.dp),
+            )
+
             val currentError = resolveError
             if (currentError != null) {
                 Spacer(modifier = Modifier.height(8.dp))
@@ -753,14 +774,20 @@ fun CustomUrlDownloadCard(
                     Button(
                         onClick = {
                             if (urlInput.isNotBlank()) {
+                                val checksum = sha256Input.trim().lowercase()
+                                if (checksum.isNotEmpty() && !SHA256_HEX_REGEX.matches(checksum)) {
+                                    resolveError = "SHA-256 must be 64 hexadecimal characters."
+                                    return@Button
+                                }
                                 isResolving = true
                                 resolveError = null
                                 coroutineScope.launch {
                                     when (val result = HuggingFaceModelResolver.resolve(urlInput, hfToken)) {
                                         is HuggingFaceModelResolver.ResolveResult.SingleFile -> {
                                             isResolving = false
-                                            onStartDownload(result.file.downloadUrl, result.file.fileName, result.file.sizeBytes)
+                                            onStartDownload(result.file.downloadUrl, result.file.fileName, result.file.sizeBytes, checksum)
                                             onUrlInputChange("")
+                                            sha256Input = ""
                                         }
                                         is HuggingFaceModelResolver.ResolveResult.MultipleFiles -> {
                                             isResolving = false
@@ -804,8 +831,9 @@ fun CustomUrlDownloadCard(
                                     .padding(vertical = 4.dp)
                                     .clickable {
                                         multiFileResult = null
-                                        onStartDownload(file.downloadUrl, file.fileName, file.sizeBytes)
+                                        onStartDownload(file.downloadUrl, file.fileName, file.sizeBytes, sha256Input.trim().lowercase())
                                         onUrlInputChange("")
+                                        sha256Input = ""
                                     },
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.5f),
