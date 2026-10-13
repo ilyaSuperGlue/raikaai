@@ -518,18 +518,22 @@ fun ChatScreen(
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
                             val inputTokens = viewModel.estimateTokens(input)
-                            Text(
-                                text =
-                                    when {
-                                        isCompressing -> "Compressing memory…"
-                                        input.isNotBlank() -> "+$inputTokens tokens"
-                                        else -> activePersona.name
-                                    },
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontSize = 10.sp,
-                                fontWeight = FontWeight.SemiBold,
-                            )
+                            if (isCompressing || input.isNotBlank()) {
+                                Text(
+                                    text =
+                                        if (isCompressing) {
+                                            "Compressing memory…"
+                                        } else {
+                                            "+$inputTokens tokens"
+                                        },
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                )
+                            } else {
+                                Spacer(Modifier.weight(1f))
+                            }
                             Text(
                                 text = "Context: $totalContextTokens / $maxTokens tok (${ratio.toInt()}%)",
                                 style = MaterialTheme.typography.labelSmall,

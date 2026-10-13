@@ -809,7 +809,6 @@ class ChatViewModel(
                 ChatMessageEntry(
                     role = ChatConstants.ROLE_ASSISTANT,
                     content = p.greeting,
-                    stats = p.name,
                 ),
             )
         }

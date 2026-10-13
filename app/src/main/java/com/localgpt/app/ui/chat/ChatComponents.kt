@@ -459,7 +459,9 @@ internal fun MessageBubble(
                 }
             }
 
-            // Footer Row: Telemetry Stats + Swipes Pagination + Quick Actions
+            // Footer Row: Telemetry Stats + Swipes Pagination + Quick Actions.
+            // Hidden for greeting messages (no stats, single variant, not regenerable).
+            if (!message.stats.isNullOrBlank() || message.variants.size > 1 || (isLastMessage && !isGenerating)) {
             Row(
                 modifier =
                     Modifier
@@ -601,6 +603,7 @@ internal fun MessageBubble(
                         }
                     }
                 }
+            }
             }
         }
 
