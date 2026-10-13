@@ -432,7 +432,7 @@ class ChatViewModel(
             return
         }
         viewModelScope.launch {
-            urlFetchState.value = "Mengambil halaman…"
+            urlFetchState.value = "Fetching page…"
             val page =
                 try {
                     UrlSummarizer.fetchReadableText(app, rawUrl)

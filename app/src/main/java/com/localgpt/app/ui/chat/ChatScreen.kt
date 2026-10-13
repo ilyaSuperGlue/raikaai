@@ -252,7 +252,6 @@ fun ChatScreen(
             input = p
         }
     }
-    var showOptionsMenu by remember { mutableStateOf(false) }
     var showRagSheet by remember { mutableStateOf(false) }
     var showSkillsSheet by remember { mutableStateOf(false) }
     var showCompareDialog by remember { mutableStateOf(false) }
@@ -529,71 +528,12 @@ fun ChatScreen(
                         }
                     },
                     actions = {
-                        // Options Overflow Menu
-                        Box {
-                            IconButton(onClick = { showOptionsMenu = true }) {
-                                Icon(
-                                    Icons.Default.MoreVert,
-                                    contentDescription = "Options",
-                                    tint = MaterialTheme.colorScheme.onSurface,
-                                )
-                            }
-
-                            DropdownMenu(
-                                expanded = showOptionsMenu,
-                                onDismissRequest = { showOptionsMenu = false },
-                            ) {
-                                DropdownMenuItem(
-                                    text = { Text("New Conversation") },
-                                    leadingIcon = { Icon(Icons.Default.Add, contentDescription = null) },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        viewModel.newChat()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Change Character") },
-                                    leadingIcon = { Icon(Icons.Outlined.Person, contentDescription = null) },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        onNavigateToCharacters()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Switch Model") },
-                                    leadingIcon = { Icon(Icons.Outlined.Memory, contentDescription = null) },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        onNavigateToModels()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("AI Skills Hub") },
-                                    leadingIcon = { Icon(Icons.Outlined.AutoAwesome, contentDescription = null) },
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        showSkillsSheet = true
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Regenerate Response") },
-                                    leadingIcon = { Icon(Icons.Outlined.Refresh, contentDescription = null) },
-                                    enabled = viewModel.messages.isNotEmpty() && !isGenerating,
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        viewModel.regenerateLastResponse()
-                                    },
-                                )
-                                DropdownMenuItem(
-                                    text = { Text("Clear All Messages") },
-                                    leadingIcon = { Icon(Icons.Outlined.Delete, contentDescription = null, tint = MaterialTheme.colorScheme.error) },
-                                    enabled = viewModel.messages.isNotEmpty(),
-                                    onClick = {
-                                        showOptionsMenu = false
-                                        viewModel.clearCurrentChat()
-                                    },
-                                )
-                            }
+                        IconButton(onClick = { viewModel.newChat() }) {
+                            Icon(
+                                Icons.Default.Add,
+                                contentDescription = "New chat",
+                                tint = MaterialTheme.colorScheme.onSurface,
+                            )
                         }
                     },
                     colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
@@ -1163,26 +1103,6 @@ fun ChatScreen(
                                             },
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Attach Audio (Multimodal)", style = MaterialTheme.typography.bodySmall) },
-                                            leadingIcon = {
-                                                Icon(Icons.Outlined.AudioFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                                            },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                audioPickerLauncher.launch("audio/*")
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("Record Voice Note (WAV)", style = MaterialTheme.typography.bodySmall) },
-                                            leadingIcon = {
-                                                Icon(Icons.Outlined.GraphicEq, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                                            },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                startVoiceRecordingSafely()
-                                            },
-                                        )
-                                        DropdownMenuItem(
                                             text = { Text("Knowledge Base (RAG Docs)", style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
                                                 Icon(Icons.Outlined.AttachFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
@@ -1206,32 +1126,6 @@ fun ChatScreen(
                                             onClick = {
                                                 showAttachmentMenu = false
                                                 showRagSheet = true
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text("AI Skills Hub", style = MaterialTheme.typography.bodySmall) },
-                                            leadingIcon = {
-                                                Icon(Icons.Outlined.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
-                                            },
-                                            trailingIcon = {
-                                                if (activeSkillsCount > 0) {
-                                                    Surface(
-                                                        shape = RoundedCornerShape(50),
-                                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                                    ) {
-                                                        Text(
-                                                            "$activeSkillsCount ON",
-                                                            modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
-                                                            style = MaterialTheme.typography.labelSmall,
-                                                            fontSize = 10.sp,
-                                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        )
-                                                    }
-                                                }
-                                            },
-                                            onClick = {
-                                                showAttachmentMenu = false
-                                                showSkillsSheet = true
                                             },
                                         )
                                     }
