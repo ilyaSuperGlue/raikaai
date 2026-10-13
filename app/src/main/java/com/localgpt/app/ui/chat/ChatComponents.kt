@@ -8,7 +8,6 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
-import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -276,7 +275,10 @@ internal fun MessageList(
 }
 
 /**
- * Individual ChatterUI Chat Bubble with Speaker Header, Stats, Variants, and Action Buttons.
+ * Minimal chat message layout (Claude-style): assistant replies render flat
+ * directly on the background (no Surface, border, or header), user messages
+ * use a thin neutral bubble. All actions (edit, copy, TTS, regenerate,
+ * branch nav) are preserved in a small action row below the message.
  */
 @Composable
 internal fun MessageBubble(
@@ -306,364 +308,297 @@ internal fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
-        Row(
-            Modifier.fillMaxWidth(),
-            horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
-        ) {
-        Surface(
-            shape =
-                RoundedCornerShape(
-                    topStart = if (isUser) 18.dp else 4.dp,
-                    topEnd = if (isUser) 4.dp else 18.dp,
-                    bottomStart = 18.dp,
-                    bottomEnd = 18.dp,
-                ),
-            color =
-                if (isUser) {
-                    MaterialTheme.colorScheme.primaryContainer
-                } else {
-                    MaterialTheme.colorScheme.surfaceContainerLow
-                },
-            border =
-                if (!isUser) {
-                    BorderStroke(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
-                    )
-                } else {
+        // Attached Image if present (above the message body)
+        if (!message.imagePath.isNullOrBlank()) {
+            val imgFile = remember(message.imagePath) { File(message.imagePath) }
+            val bitmap = remember(message.imagePath) {
+                try {
+                    if (imgFile.exists()) {
+                        val opts = BitmapFactory.Options().apply {
+                            inPreferredConfig = Bitmap.Config.RGB_565
+                        }
+                        BitmapFactory.decodeFile(imgFile.absolutePath, opts)
+                    } else null
+                } catch (_: Throwable) {
                     null
-                },
-            tonalElevation = if (isUser) 1.dp else 2.dp,
-            modifier = Modifier.fillMaxWidth(if (isUser) 0.86f else 0.95f),
-        ) {
-            Column {
-                // Speaker Header Row
-                Row(
-                    modifier =
-                        Modifier
-                            .fillMaxWidth()
-                            .padding(start = 14.dp, end = 10.dp, top = 10.dp, bottom = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                }
+            }
+            // Recycle bitmap when imagePath changes or composable leaves composition
+            DisposableEffect(bitmap) {
+                onDispose { bitmap?.recycle() }
+            }
+            if (bitmap != null) {
+                Image(
+                    bitmap = bitmap.asImageBitmap(),
+                    contentDescription = "Attached Image",
+                    modifier = Modifier
+                        .fillMaxWidth(if (isUser) 0.85f else 1f)
+                        .padding(bottom = 6.dp)
+                        .clip(RoundedCornerShape(12.dp)),
+                    contentScale = ContentScale.FillWidth,
+                )
+            }
+        }
+
+        // Attached Audio if present (Native multimodal voice note)
+        if (!message.audioPath.isNullOrBlank()) {
+            AudioMessagePlayer(
+                audioPath = message.audioPath,
+                audioPlayerHelper = audioPlayerHelper,
+                isUser = isUser,
+                modifier = Modifier
+                    .fillMaxWidth(if (isUser) 0.85f else 1f)
+                    .padding(vertical = 6.dp),
+            )
+        }
+
+        // Message Text Content
+        if (isUser) {
+            Row(
+                Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.End,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(16.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                    modifier = Modifier.fillMaxWidth(0.85f),
                 ) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color =
-                                if (isUser) {
-                                    MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
-                                } else {
-                                    MaterialTheme.colorScheme.secondary.copy(alpha = 0.12f)
-                                },
-                            modifier = Modifier.size(22.dp),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = if (isUser) Icons.Default.Person else getIconVector(activePersona.iconType),
-                                    contentDescription = null,
-                                    tint = if (isUser) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.secondary,
-                                    modifier = Modifier.size(13.dp),
-                                )
-                            }
-                        }
-                        Spacer(Modifier.width(7.dp))
-                        Text(
-                            text = if (isUser) "You" else activePersona.name,
-                            style = MaterialTheme.typography.labelMedium,
-                            fontWeight = FontWeight.Bold,
-                            color =
-                                if (isUser) {
-                                    MaterialTheme.colorScheme.onPrimaryContainer
-                                } else {
-                                    MaterialTheme.colorScheme.onSurface
-                                },
-                        )
-                    }
-
-                    if (isUser && !isGenerating) {
-                        Surface(
-                            shape = CircleShape,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.08f),
-                            modifier = Modifier.size(26.dp),
-                        ) {
-                            IconButton(
-                                onClick = { showEditDialog = true },
-                                modifier = Modifier.size(26.dp),
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Edit message",
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
-                                    modifier = Modifier.size(13.dp),
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Attached Image if present
-                if (!message.imagePath.isNullOrBlank()) {
-                    val imgFile = remember(message.imagePath) { File(message.imagePath) }
-                    val bitmap = remember(message.imagePath) {
-                        try {
-                            if (imgFile.exists()) {
-                                val opts = BitmapFactory.Options().apply {
-                                    inPreferredConfig = Bitmap.Config.RGB_565
-                                }
-                                BitmapFactory.decodeFile(imgFile.absolutePath, opts)
-                            } else null
-                        } catch (_: Throwable) {
-                            null
-                        }
-                    }
-                    // Recycle bitmap when imagePath changes or composable leaves composition
-                    DisposableEffect(bitmap) {
-                        onDispose { bitmap?.recycle() }
-                    }
-                    if (bitmap != null) {
-                        Image(
-                            bitmap = bitmap.asImageBitmap(),
-                            contentDescription = "Attached Image",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(start = 10.dp, end = 10.dp, bottom = 6.dp)
-                                .clip(RoundedCornerShape(12.dp)),
-                            contentScale = ContentScale.FillWidth,
-                        )
-                    }
-                }
-
-                // Attached Audio if present (Native multimodal voice note)
-                if (!message.audioPath.isNullOrBlank()) {
-                    AudioMessagePlayer(
-                        audioPath = message.audioPath,
-                        audioPlayerHelper = audioPlayerHelper,
-                        isUser = isUser,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 6.dp),
-                    )
-                }
-
-                // Message Text Content
-                if (isUser) {
                     Text(
                         message.content,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = MaterialTheme.colorScheme.onPrimaryContainer,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
                     )
-                } else {
-                    MarkdownText(
-                        markdown = message.content.ifBlank { "…" },
-                        enableThinking = enableThinking,
-                        onPreviewHtml = onPreviewHtml,
-                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
-                    )
+                }
+            }
 
-                    // Web Search Clickable & Collapsible Sources Card
-                    val webCitations = remember(message.sources) {
-                        message.sources.orEmpty().mapNotNull { raw ->
-                            WebSourceCitation.parse(raw)
-                        }
-                    }
-                    if (webCitations.isNotEmpty()) {
-                        SearchSourcesCard(
-                            sources = webCitations,
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+            // Edit action below the bubble
+            if (!isGenerating) {
+                Row(
+                    Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    IconButton(
+                        onClick = { showEditDialog = true },
+                        modifier = Modifier.size(28.dp),
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit message",
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(14.dp),
                         )
                     }
+                }
+            }
+        } else {
+            MarkdownText(
+                markdown = message.content.ifBlank { "…" },
+                enableThinking = enableThinking,
+                onPreviewHtml = onPreviewHtml,
+                modifier = Modifier.padding(horizontal = 4.dp, vertical = 4.dp),
+            )
 
-                    // Local Document RAG citation chips (if non-web)
-                    val docSources = remember(message.sources, webCitations) {
-                        if (webCitations.isNotEmpty()) {
-                            message.sources.orEmpty().filter { raw ->
-                                WebSourceCitation.parse(raw) == null
-                            }
-                        } else {
-                            message.sources.orEmpty()
-                        }
+            // Web Search Clickable & Collapsible Sources Card
+            val webCitations = remember(message.sources) {
+                message.sources.orEmpty().mapNotNull { raw ->
+                    WebSourceCitation.parse(raw)
+                }
+            }
+            if (webCitations.isNotEmpty()) {
+                SearchSourcesCard(
+                    sources = webCitations,
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                )
+            }
+
+            // Local Document RAG citation chips (if non-web)
+            val docSources = remember(message.sources, webCitations) {
+                if (webCitations.isNotEmpty()) {
+                    message.sources.orEmpty().filter { raw ->
+                        WebSourceCitation.parse(raw) == null
                     }
-                    if (docSources.isNotEmpty()) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(6.dp),
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 2.dp),
+                } else {
+                    message.sources.orEmpty()
+                }
+            }
+            if (docSources.isNotEmpty()) {
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp),
+                ) {
+                    docSources.take(3).forEach { label ->
+                        Surface(
+                            shape = RoundedCornerShape(50),
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
                         ) {
-                            docSources.take(3).forEach { label ->
-                                Surface(
-                                    shape = RoundedCornerShape(50),
-                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
-                                    ) {
-                                        Icon(
-                                            Icons.Default.Description,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(11.dp),
-                                        )
-                                        Spacer(Modifier.width(4.dp))
-                                        Text(
-                                            text = label,
-                                            fontSize = 9.sp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis,
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // Footer Row: Telemetry Stats + Swipes Pagination + Quick Actions
-                    Row(
-                        modifier =
-                            Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                    ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            if (!message.stats.isNullOrBlank()) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp),
+                            ) {
+                                Icon(
+                                    Icons.Default.Description,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(11.dp),
+                                )
+                                Spacer(Modifier.width(4.dp))
                                 Text(
-                                    text = message.stats,
-                                    fontSize = 10.sp,
+                                    text = label,
+                                    fontSize = 9.sp,
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontWeight = FontWeight.SemiBold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                 )
-                            }
-                            if (message.variants.size > 1) {
-                                Spacer(Modifier.width(6.dp))
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 4.dp),
-                                ) {
-                                    IconButton(
-                                        onClick = {
-                                            if (message.selectedVariant > 0) {
-                                                onSelectVariant(message.selectedVariant - 1)
-                                            }
-                                        },
-                                        enabled = message.selectedVariant > 0,
-                                        modifier = Modifier.size(18.dp),
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.NavigateBefore,
-                                            contentDescription = "Previous variant",
-                                            modifier = Modifier.size(14.dp),
-                                        )
-                                    }
-                                    Text(
-                                        text = "${message.selectedVariant + 1}/${message.variants.size}",
-                                        fontSize = 10.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        modifier = Modifier.padding(horizontal = 2.dp),
-                                    )
-                                    IconButton(
-                                        onClick = {
-                                            if (message.selectedVariant < message.variants.lastIndex) {
-                                                onSelectVariant(message.selectedVariant + 1)
-                                            }
-                                        },
-                                        enabled = message.selectedVariant < message.variants.lastIndex,
-                                        modifier = Modifier.size(18.dp),
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.NavigateNext,
-                                            contentDescription = "Next variant",
-                                            modifier = Modifier.size(14.dp),
-                                        )
-                                    }
-                                }
-                            }
-                        }
-
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            // Copy Action
-                            IconButton(
-                                onClick = {
-                                    clipboard.setText(AnnotatedString(message.content))
-                                    copied = true
-                                    scope.launch {
-                                        delay(2000)
-                                        copied = false
-                                    }
-                                },
-                                modifier = Modifier.size(26.dp),
-                            ) {
-                                Icon(
-                                    if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
-                                    contentDescription = "Copy message",
-                                    modifier = Modifier.size(13.dp),
-                                    tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-
-                            // Read Aloud / TTS Action
-                            val isSpeaking = (ttsHelper.currentlySpeakingId.value == (message.id ?: "msg_$messageIndex"))
-                            IconButton(
-                                onClick = {
-                                    val msgId = message.id ?: "msg_$messageIndex"
-                                    if (isSpeaking) {
-                                        ttsHelper.stop()
-                                    } else {
-                                        ttsHelper.speak(msgId, message.content)
-                                    }
-                                },
-                                modifier = Modifier.size(26.dp),
-                            ) {
-                                Icon(
-                                    imageVector = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
-                                    contentDescription = if (isSpeaking) "Stop reading" else "Read aloud",
-                                    modifier = Modifier.size(14.dp),
-                                    tint = if (isSpeaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-
-                            // Share Action
-                            IconButton(
-                                onClick = {
-                                    val sendIntent =
-                                        Intent().apply {
-                                            action = Intent.ACTION_SEND
-                                            putExtra(Intent.EXTRA_TEXT, message.content)
-                                            type = "text/plain"
-                                        }
-                                    context.startActivity(Intent.createChooser(sendIntent, "Share Message"))
-                                },
-                                modifier = Modifier.size(26.dp),
-                            ) {
-                                Icon(
-                                    Icons.Default.Share,
-                                    contentDescription = "Share message",
-                                    modifier = Modifier.size(13.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-
-                            // Regenerate Action (only on last assistant message when not generating)
-                            if (isLastMessage && !isGenerating) {
-                                IconButton(
-                                    onClick = onRegenerate,
-                                    modifier = Modifier.size(26.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Refresh,
-                                        contentDescription = "Regenerate Response",
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.primary,
-                                    )
-                                }
                             }
                         }
                     }
                 }
             }
-        }
+
+            // Footer Row: Telemetry Stats + Swipes Pagination + Quick Actions
+            Row(
+                modifier =
+                    Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween,
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (!message.stats.isNullOrBlank()) {
+                        Text(
+                            text = message.stats,
+                            fontSize = 10.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                    if (message.variants.size > 1) {
+                        Spacer(Modifier.width(6.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.clip(RoundedCornerShape(50)).background(MaterialTheme.colorScheme.surfaceContainerHigh).padding(horizontal = 4.dp),
+                        ) {
+                            IconButton(
+                                onClick = {
+                                    if (message.selectedVariant > 0) {
+                                        onSelectVariant(message.selectedVariant - 1)
+                                    }
+                                },
+                                enabled = message.selectedVariant > 0,
+                                modifier = Modifier.size(18.dp),
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.NavigateBefore,
+                                    contentDescription = "Previous variant",
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                            Text(
+                                text = "${message.selectedVariant + 1}/${message.variants.size}",
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.Bold,
+                                modifier = Modifier.padding(horizontal = 2.dp),
+                            )
+                            IconButton(
+                                onClick = {
+                                    if (message.selectedVariant < message.variants.lastIndex) {
+                                        onSelectVariant(message.selectedVariant + 1)
+                                    }
+                                },
+                                enabled = message.selectedVariant < message.variants.lastIndex,
+                                modifier = Modifier.size(18.dp),
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.NavigateNext,
+                                    contentDescription = "Next variant",
+                                    modifier = Modifier.size(14.dp),
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // Copy Action
+                    IconButton(
+                        onClick = {
+                            clipboard.setText(AnnotatedString(message.content))
+                            copied = true
+                            scope.launch {
+                                delay(2000)
+                                copied = false
+                            }
+                        },
+                        modifier = Modifier.size(26.dp),
+                    ) {
+                        Icon(
+                            if (copied) Icons.Default.Check else Icons.Default.ContentCopy,
+                            contentDescription = "Copy message",
+                            modifier = Modifier.size(13.dp),
+                            tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    // Read Aloud / TTS Action
+                    val isSpeaking = (ttsHelper.currentlySpeakingId.value == (message.id ?: "msg_$messageIndex"))
+                    IconButton(
+                        onClick = {
+                            val msgId = message.id ?: "msg_$messageIndex"
+                            if (isSpeaking) {
+                                ttsHelper.stop()
+                            } else {
+                                ttsHelper.speak(msgId, message.content)
+                            }
+                        },
+                        modifier = Modifier.size(26.dp),
+                    ) {
+                        Icon(
+                            imageVector = if (isSpeaking) Icons.AutoMirrored.Filled.VolumeOff else Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = if (isSpeaking) "Stop reading" else "Read aloud",
+                            modifier = Modifier.size(14.dp),
+                            tint = if (isSpeaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    // Share Action
+                    IconButton(
+                        onClick = {
+                            val sendIntent =
+                                Intent().apply {
+                                    action = Intent.ACTION_SEND
+                                    putExtra(Intent.EXTRA_TEXT, message.content)
+                                    type = "text/plain"
+                                }
+                            context.startActivity(Intent.createChooser(sendIntent, "Share Message"))
+                        },
+                        modifier = Modifier.size(26.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Share,
+                            contentDescription = "Share message",
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
+                    // Regenerate Action (only on last assistant message when not generating)
+                    if (isLastMessage && !isGenerating) {
+                        IconButton(
+                            onClick = onRegenerate,
+                            modifier = Modifier.size(26.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Refresh,
+                                contentDescription = "Regenerate Response",
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.primary,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         if (branchInfo != null) {
