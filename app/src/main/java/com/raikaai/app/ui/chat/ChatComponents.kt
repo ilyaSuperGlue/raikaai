@@ -229,7 +229,7 @@ internal fun MessageList(
             reverseLayout = true,
             modifier = Modifier.fillMaxSize(),
             contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             items(
                 count = messageCount,
@@ -480,15 +480,21 @@ internal fun MessageBubble(
                 }
             }
 
-            // Edit action below the bubble
+            // Edit action below the bubble (compact: plain clickable Box, not
+            // IconButton, which would enforce a 48.dp min touch target and
+            // leave a large gap under user messages).
             if (!isGenerating) {
                 Row(
                     Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.End,
                 ) {
-                    IconButton(
-                        onClick = { showEditDialog = true },
-                        modifier = Modifier.size(28.dp),
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier =
+                            Modifier
+                                .size(28.dp)
+                                .clip(RoundedCornerShape(8.dp))
+                                .clickable { showEditDialog = true },
                     ) {
                         Icon(
                             imageVector = Icons.Outlined.Edit,

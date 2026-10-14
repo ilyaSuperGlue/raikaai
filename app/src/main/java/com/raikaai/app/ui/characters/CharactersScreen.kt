@@ -939,27 +939,37 @@ private fun CharacterEditorDialog(
                         }
                         Column(
                             modifier = Modifier.weight(1f),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
                         ) {
-                            OutlinedButton(
-                                onClick = { avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
-                                enabled = !isSavingAvatar,
-                                shape = RoundedCornerShape(10.dp),
-                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
                             ) {
-                                Text(
-                                    if (isSavingAvatar) "Saving…" else if (avatarPath.isBlank()) "Choose photo" else "Change photo",
-                                    style = MaterialTheme.typography.labelMedium,
-                                )
-                            }
-                            if (avatarPath.isNotBlank()) {
-                                TextButton(
-                                    onClick = { avatarPath = "" },
-                                    contentPadding = PaddingValues(horizontal = 4.dp),
+                                OutlinedButton(
+                                    onClick = { avatarPicker.launch(PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)) },
+                                    enabled = !isSavingAvatar,
+                                    shape = RoundedCornerShape(10.dp),
+                                    contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
                                 ) {
-                                    Text("Remove photo", style = MaterialTheme.typography.labelSmall)
+                                    Text(
+                                        if (isSavingAvatar) "Saving…" else if (avatarPath.isBlank()) "Choose photo" else "Change photo",
+                                        style = MaterialTheme.typography.labelMedium,
+                                    )
+                                }
+                                if (avatarPath.isNotBlank()) {
+                                    TextButton(
+                                        onClick = { avatarPath = "" },
+                                        contentPadding = PaddingValues(horizontal = 4.dp),
+                                    ) {
+                                        Text("Remove", style = MaterialTheme.typography.labelMedium)
+                                    }
                                 }
                             }
+                            Text(
+                                "Square photos work best",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
                         }
                     }
                 }
