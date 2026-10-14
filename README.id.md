@@ -30,11 +30,11 @@ Selain antarmuka obrolan, RaikaAI menyematkan **server HTTP kompatibel OpenAI (`
       <td align="center" width="20%"><b>Riwayat&nbsp;Chat</b></td>
     </tr>
     <tr>
-      <td align="center" valign="top"><img src="docs/screenshots/chat.png" width="180" alt="Layar Obrolan"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/models.png" width="180" alt="Hub Model"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/characters.png" width="180" alt="Karakter"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/skills.png" width="180" alt="Skills & Tools"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/history.png" width="180" alt="Riwayat Chat"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/chat.png" width="220" alt="Layar Obrolan"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/models.png" width="220" alt="Hub Model"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/characters.png" width="220" alt="Karakter"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/skills.png" width="220" alt="Skills & Tools"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/history.png" width="220" alt="Riwayat Chat"></td>
     </tr>
   </table>
 </div>
@@ -65,8 +65,7 @@ Unduh file APK rilis resmi terbaru langsung dari **[GitHub Releases](https://git
 
 | Varian APK | Perangkat yang Disarankan |
 |---|---|
-| **`RaikaAI-arm64-v8a-*.apk`** | **Sangat disarankan untuk smartphone modern** (Snapdragon, Dimensity, Tensor, Exynos 64-bit). Ukuran file paling hemat (~24 MB) dengan pustaka native teroptimasi penuh. |
-| **`RaikaAI-universal-*.apk`** | Paket universal yang memaketkan semua ABI Android (ukuran file lebih besar). |
+| **`RaikaAI-v0.1.0-arm64-v8a.apk`** | **Untuk semua smartphone 64-bit modern** (Snapdragon, Dimensity, Tensor, Exynos). Membutuhkan Android 8.0+ (API 26) dengan ABI `arm64-v8a`. LiteRT-LM tidak menyediakan pustaka native 32-bit, sehingga perangkat 32-bit (`armeabi-v7a`) tidak didukung. |
 
 ---
 

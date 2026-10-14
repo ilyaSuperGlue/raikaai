@@ -30,11 +30,11 @@ RaikaAI also features an embedded **OpenAI-compatible HTTP server (`/v1`)** buil
       <td align="center" width="20%"><b>Chat&nbsp;History</b></td>
     </tr>
     <tr>
-      <td align="center" valign="top"><img src="docs/screenshots/chat.png" width="180" alt="Chat Screen"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/models.png" width="180" alt="Models Hub"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/characters.png" width="180" alt="Characters"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/skills.png" width="180" alt="Skills & Tools"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/history.png" width="180" alt="Chat History"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/chat.png" width="220" alt="Chat Screen"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/models.png" width="220" alt="Models Hub"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/characters.png" width="220" alt="Characters"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/skills.png" width="220" alt="Skills & Tools"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/history.png" width="220" alt="Chat History"></td>
     </tr>
   </table>
 </div>
@@ -65,8 +65,7 @@ Download the latest signed release APK directly from **[GitHub Releases](https:/
 
 | APK Variant | Recommended Device |
 |---|---|
-| **`RaikaAI-arm64-v8a-*.apk`** | **Recommended for all modern smartphones** (Snapdragon, Dimensity, Tensor, Exynos 64-bit). Smallest download size (~24 MB) with optimized native libraries. |
-| **`RaikaAI-universal-*.apk`** | Universal package containing all Android ABIs (larger file size). |
+| **`RaikaAI-v0.1.0-arm64-v8a.apk`** | **For all modern 64-bit smartphones** (Snapdragon, Dimensity, Tensor, Exynos). Requires Android 8.0+ (API 26) on `arm64-v8a`. LiteRT-LM ships no 32-bit native library, so 32-bit (`armeabi-v7a`) devices are not supported. |
 
 ---
 
