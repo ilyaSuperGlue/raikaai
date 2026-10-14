@@ -6,10 +6,10 @@ import java.time.LocalTime
 import java.time.ZoneId
 
 /**
- * Hasil parsing perintah pengingat.
+ * Parsed reminder command.
  *
- * @property triggerAtMillis waktu pemicu pengingat dalam epoch millis.
- * @property note isi catatan pengingat yang akan ditampilkan di notifikasi.
+ * @property triggerAtMillis trigger time in epoch millis.
+ * @property note note content shown in the notification.
  */
 data class ReminderSpec(
     val triggerAtMillis: Long,
@@ -17,17 +17,17 @@ data class ReminderSpec(
 )
 
 /**
- * Parser murni (tanpa dependensi Android, unit-testable) untuk perintah
- * pengingat dalam Bahasa Indonesia dan Inggris.
+ * Pure parser (no Android dependencies, unit-testable) for reminder commands
+ * in Indonesian and English.
  *
- * Pola yang didukung:
+ * Supported patterns (examples are literal match inputs, not UI copy):
  * - "ingatkan saya dalam 10 menit untuk minum obat"
  * - "remind me in 2 hours to call mom"
- * - "ingatkan saya jam 15:30 untuk meeting" (jam sudah lewat hari ini -> besok)
+ * - "ingatkan saya jam 15:30 untuk meeting" (past time today rolls to tomorrow)
  * - "ingatkan saya besok jam 9 untuk lari pagi"
  * - "remind me tomorrow at 9am to join standup"
  *
- * Mengembalikan null jika teks tidak cocok dengan pola mana pun.
+ * Returns null when the text matches no pattern.
  */
 object ReminderParser {
 
@@ -53,9 +53,9 @@ object ReminderParser {
     )
 
     /**
-     * @param input teks perintah mentah dari pengguna.
-     * @param nowMillis "sekarang" dalam epoch millis; bisa di-inject agar deterministik di test.
-     * @return [ReminderSpec] bila cocok, null bila tidak.
+     * @param input raw command text from the user.
+     * @param nowMillis "now" in epoch millis; injectable for deterministic tests.
+     * @return [ReminderSpec] on match, null otherwise.
      */
     fun parse(input: String, nowMillis: Long = System.currentTimeMillis()): ReminderSpec? {
         val text = input.trim()
@@ -108,7 +108,7 @@ object ReminderParser {
         val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
         val time = LocalTime.of(hour, minute)
         var trigger = LocalDateTime.of(today, time).atZone(zone).toInstant().toEpochMilli()
-        // Jam sudah lewat hari ini -> jadwalkan besok.
+        // Past time today rolls over to tomorrow.
         if (trigger <= nowMillis) {
             trigger = LocalDateTime.of(today.plusDays(1), time).atZone(zone).toInstant().toEpochMilli()
         }

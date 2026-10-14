@@ -38,8 +38,8 @@ class RaikaAIWidgetProvider : AppWidgetProvider() {
 
     companion object {
         /**
-         * Nama extra Intent (String) yang dikirim ke MainActivity berisi teks
-         * prefill untuk kolom chat. Nilai: "prefill_prompt".
+         * Intent extra name (String) sent to MainActivity carrying the
+         * prefill text for the chat box. Value: "prefill_prompt".
          */
         const val EXTRA_PREFILL_PROMPT = "prefill_prompt"
 

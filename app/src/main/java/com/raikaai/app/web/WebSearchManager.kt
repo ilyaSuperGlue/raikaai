@@ -332,6 +332,14 @@ class WebSearchManager private constructor(private val context: Context) {
     }
 
     private fun fetchUrlContent(targetUrl: String): WebSearchItem? {
+        // SSRF guard: user-supplied URL must be publicly routable before any
+        // fetch (Jina attempt or direct). Throws on violation -> caught below.
+        try {
+            com.raikaai.app.util.NetworkUtils.requirePublicHttpUrl(targetUrl)
+        } catch (e: IllegalArgumentException) {
+            KLog.w("WebSearch", "Blocked non-public URL: ${e.message}")
+            return null
+        }
         // Attempt 1: Jina AI Reader
         try {
             val jinaUrl = "https://r.jina.ai/$targetUrl"
@@ -354,16 +362,18 @@ class WebSearchManager private constructor(private val context: Context) {
             KLog.e("WebSearch", "Jina AI Reader failed for $targetUrl", e)
         }
 
-        // Attempt 2: Direct HTTP fetch with HTML text extraction
+        // Attempt 2: Direct HTTP fetch with HTML stripping, manual
+        // redirect hops re-validated per hop (SSRF-safe).
         try {
-            val request = Request.Builder()
-                .url(targetUrl)
-                .header("User-Agent", USER_AGENT)
-                .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                .build()
-            val rawHtml: String = client.newCall(request).execute().use { response ->
-                if (response.isSuccessful) response.body?.string() else null
-            }.orEmpty()
+            val rawHtml: String =
+                com.raikaai.app.util.NetworkUtils.fetchBodyStringValidated(
+                    url = targetUrl,
+                    headers = mapOf(
+                        "User-Agent" to USER_AGENT,
+                        "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                    ),
+                    maxChars = 60_000,
+                ) ?: return null
             if (rawHtml.isNotBlank()) {
                 val titleMatcher = Pattern.compile("<title>([\\s\\S]*?)</title>", Pattern.CASE_INSENSITIVE).matcher(rawHtml)
                 val title = if (titleMatcher.find()) stripHtml(titleMatcher.group(1).orEmpty()) else targetUrl

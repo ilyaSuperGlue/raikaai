@@ -464,7 +464,7 @@ private fun SheetPromptSkillCard(
                         Text(
                             text = skill.category,
                             style = MaterialTheme.typography.labelSmall,
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
@@ -480,7 +480,7 @@ private fun SheetPromptSkillCard(
                             Text(
                                 text = "Preset",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontSize = 9.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer,
                                 maxLines = 1,

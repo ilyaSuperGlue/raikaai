@@ -392,8 +392,8 @@ object RemoteAiClient {
         apiKey: String = "",
         model: String,
         messages: List<RemoteChatMessage>,
-        temperature: Float = 0.7f,
-        topP: Float = 0.9f,
+        temperature: Float = com.raikaai.app.data.SamplingDefaults.REMOTE_TEMPERATURE,
+        topP: Float = com.raikaai.app.data.SamplingDefaults.TOP_P,
         maxTokens: Int = 2048,
         onUsageTokens: ((completionTokens: Int) -> Unit)? = null,
     ): Flow<String> =

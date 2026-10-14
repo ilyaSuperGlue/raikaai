@@ -667,7 +667,7 @@ private fun PromptSkillCard(
                             Text(
                                 text = skill.category,
                                 style = MaterialTheme.typography.labelSmall,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
@@ -683,7 +683,7 @@ private fun PromptSkillCard(
                                 Text(
                                     text = "Built-in Preset",
                                     style = MaterialTheme.typography.labelSmall,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,

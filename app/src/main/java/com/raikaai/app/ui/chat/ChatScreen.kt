@@ -331,10 +331,13 @@ fun ChatScreen(
             }
         }
 
-    val ttsHelper = remember { TtsHelper(context) }
-    val speechHelper = remember { SpeechRecognizerHelper(context) }
-    val audioPlayerHelper = remember { AudioPlayerHelper(context) }
-    val audioRecorderHelper = remember { AudioRecorderHelper(context) }
+    // Helpers hold no Activity reference: applicationContext avoids leaking
+    // the Activity across rotations (helpers survive in remember).
+    val appContext = remember(context) { context.applicationContext }
+    val ttsHelper = remember(appContext) { TtsHelper(appContext) }
+    val speechHelper = remember(appContext) { SpeechRecognizerHelper(appContext) }
+    val audioPlayerHelper = remember(appContext) { AudioPlayerHelper(appContext) }
+    val audioRecorderHelper = remember(appContext) { AudioRecorderHelper(appContext) }
     val isRecordingAudio by audioRecorderHelper.isRecording.collectAsState()
     val recordingDurationMs by audioRecorderHelper.durationMs.collectAsState()
 
@@ -343,7 +346,7 @@ fun ChatScreen(
             speechHelper.destroy()
             ttsHelper.destroy()
             audioPlayerHelper.stop()
-            audioRecorderHelper.cancelRecording()
+            audioRecorderHelper.destroy()
             // B40: stop an in-flight generation when leaving the chat screen,
             // but NOT on configuration change (rotation) — the VM survives it.
             if ((context as? Activity)?.isChangingConfigurations != true) {
@@ -526,14 +529,16 @@ fun ChatScreen(
                         .padding(horizontal = 10.dp, vertical = 4.dp),
             ) {
                 // Token Context indicator (Subtle status with dynamic progress line)
-                if (viewModel.messages.isNotEmpty() || input.isNotBlank()) {
+                if (hasMessages || input.isNotBlank()) {
                     val maxTokens = settings.contextWindowTokens
                     val ratio = if (maxTokens > 0) (totalContextTokens.toFloat() / maxTokens.toFloat()) * 100f else 0f
                     val progressFraction = (ratio / 100f).coerceIn(0.01f, 1f)
 
                     val progressColor = when {
                         ratio >= 80f -> MaterialTheme.colorScheme.error
-                        ratio >= 60f -> Color(0xFFF59E0B) // Warm Amber Warning
+                        // Fixed amber: intentional semantic warning color, legible
+                        // on both dark and light themes (tertiary would be green).
+                        ratio >= 60f -> Color(0xFFB26A00)
                         else -> MaterialTheme.colorScheme.primary
                     }
 
@@ -558,7 +563,7 @@ fun ChatScreen(
                                         },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.sp,
                                     fontWeight = FontWeight.SemiBold,
                                 )
                             } else {
@@ -568,7 +573,7 @@ fun ChatScreen(
                                 text = "Context: $totalContextTokens / $maxTokens tok (${ratio.toInt()}%)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (ratio >= 60f) progressColor else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = if (ratio >= 80f) FontWeight.Bold else FontWeight.Normal,
                             )
                         }
@@ -644,7 +649,7 @@ fun ChatScreen(
                                                 cmd.description,
                                                 style = MaterialTheme.typography.labelSmall,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontSize = 10.sp,
+                                                fontSize = 11.sp,
                                             )
                                         }
                                     }
@@ -896,7 +901,7 @@ fun ChatScreen(
                                             containerColor = MaterialTheme.colorScheme.error,
                                         ),
                                     ) {
-                                        Text("Done", style = MaterialTheme.typography.labelSmall, color = Color.White)
+                                        Text("Done", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onError)
                                     }
                                 }
                             }
@@ -1092,7 +1097,7 @@ fun ChatScreen(
                                                             "${ragDocuments.size}",
                                                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp),
                                                             style = MaterialTheme.typography.labelSmall,
-                                                            fontSize = 10.sp,
+                                                            fontSize = 11.sp,
                                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                         )
                                                     }
@@ -1121,7 +1126,7 @@ fun ChatScreen(
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
                                         ) {
                                             if (modelPin != null) {
                                                 Icon(
@@ -1170,7 +1175,7 @@ fun ChatScreen(
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
+                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 6.dp),
                                         ) {
                                             Icon(
                                                 Icons.Outlined.AttachFile,
@@ -1181,7 +1186,7 @@ fun ChatScreen(
                                                                     Text(
                                                 "Docs (${ragDocuments.size})",
                                                 style = MaterialTheme.typography.labelSmall,
-                                                fontSize = 10.sp,
+                                                fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
@@ -1249,7 +1254,7 @@ fun ChatScreen(
                                         Icon(
                                             imageVector = if (isListening) Icons.Outlined.MicOff else Icons.Outlined.Mic,
                                             contentDescription = if (isListening) "Stop recording" else "Voice input",
-                                            tint = if (isListening) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            tint = if (isListening) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(17.dp),
                                         )
                                     }
@@ -1284,7 +1289,7 @@ fun ChatScreen(
                                         Icon(
                                             imageVector = if (isGenerating) Icons.Default.Stop else Icons.Default.ArrowUpward,
                                             contentDescription = if (isGenerating) "Stop" else "Send",
-                                            tint = if (isGenerating || canSend) Color.White else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
+                                            tint = if (isGenerating || canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                             modifier = Modifier.size(16.dp),
                                         )
                                     }
@@ -1302,7 +1307,7 @@ fun ChatScreen(
                     .fillMaxSize()
                     .padding(innerPadding),
         ) {
-            if (viewModel.messages.isEmpty()) {
+            if (!hasMessages) {
                 // ── Welcome Empty State Hero ──
                 EmptyChatHero(
                     persona = activePersona,
@@ -1882,7 +1887,7 @@ fun ChatScreen(
                                                 Text(
                                                     text = subtitle,
                                                     style = MaterialTheme.typography.labelSmall,
-                                                    fontSize = 10.sp,
+                                                    fontSize = 11.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     maxLines = 2,
                                                     overflow = TextOverflow.Ellipsis,
@@ -1890,7 +1895,7 @@ fun ChatScreen(
                                                 Text(
                                                     text = dateStr,
                                                     style = MaterialTheme.typography.labelSmall,
-                                                    fontSize = 10.sp,
+                                                    fontSize = 11.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 )
                                             }
@@ -1993,14 +1998,36 @@ fun ChatScreen(
                         val web = WebView(ctx)
                         web.settings.javaScriptEnabled = true
                         web.settings.domStorageEnabled = true
+                        // Sandboxed preview: the HTML comes from model output
+                        // (untrusted). Block ALL network/file access except the
+                        // in-memory project files served below.
+                        web.settings.allowFileAccess = false
+                        web.settings.allowContentAccess = false
                         web.webViewClient =
                             object : WebViewClient() {
+                                override fun shouldOverrideUrlLoading(
+                                    view: WebView,
+                                    request: WebResourceRequest,
+                                ): Boolean = true // never leave the preview
+
                                 override fun shouldInterceptRequest(
                                     view: WebView,
                                     request: WebResourceRequest,
                                 ): WebResourceResponse? {
-                                    val host = request.url.host ?: return null
-                                    if (host != "appassets.raikaai.local") return null
+                                    val host = request.url.host
+                                    if (host != "appassets.raikaai.local") {
+                                        // Foreign host (exfil via <img>/fetch):
+                                        // answer with an empty body instead of
+                                        // letting the WebView fetch it.
+                                        return WebResourceResponse(
+                                            "text/plain",
+                                            "utf-8",
+                                            403,
+                                            "Blocked",
+                                            emptyMap(),
+                                            ByteArray(0).inputStream(),
+                                        )
+                                    }
                                     val path = Uri.decode(request.url.path.orEmpty()).trimStart('/')
                                     val content = fileMap[path]
                                         ?: fileMap.entries.firstOrNull { it.key.equals(path, ignoreCase = true) }?.value

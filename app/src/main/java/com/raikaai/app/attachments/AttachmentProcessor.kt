@@ -10,6 +10,7 @@ import com.raikaai.app.data.ChatAttachment
 import com.raikaai.app.util.KLog
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import java.io.ByteArrayOutputStream
 import java.io.File
 
 /**
@@ -210,9 +211,26 @@ object AttachmentProcessor {
     }
 
     private fun readTextCapped(context: Context, uri: Uri, maxChars: Int): String? {
+        // Bounded read: never pull more than ~maxChars (+ one buffer) from the
+        // provider into memory. A multi-GB mislabeled file must not OOM first
+        // and get truncated after (previous code called readBytes() unbounded).
+        val maxBytes = maxChars + com.raikaai.app.data.AppLimits.TEXT_FILE_BUFFER
         return try {
             context.contentResolver.openInputStream(uri)?.use { input ->
-                val bytes = input.readBytes()
+                val out = ByteArrayOutputStream()
+                val buf = ByteArray(com.raikaai.app.data.AppLimits.TEXT_FILE_BUFFER)
+                var total = 0
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    total += n
+                    if (total > maxBytes) {
+                        KLog.w("Attachments", "Text file exceeds cap; truncating")
+                        break
+                    }
+                    out.write(buf, 0, n)
+                }
+                val bytes = out.toByteArray()
                 // Cheap charset handling: try UTF-8, fall back to ISO-8859-1.
                 val text =
                     try {
@@ -230,7 +248,7 @@ object AttachmentProcessor {
     }
 
     private fun copyToFilesDir(context: Context, p: PendingAttachment): File {
-        val safeName = p.name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(80).ifBlank { "file" }
+        val safeName = p.name.replace(Regex("[^A-Za-z0-9._-]"), "_").take(com.raikaai.app.data.AppLimits.SAFE_FILENAME_CHARS).ifBlank { "file" }
         val dest = File(filesDir(context), "${System.currentTimeMillis()}_$safeName")
         context.contentResolver.openInputStream(p.uri)?.use { input ->
             dest.outputStream().use { input.copyTo(it) }

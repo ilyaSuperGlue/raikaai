@@ -14,6 +14,7 @@ import androidx.datastore.preferences.preferencesDataStore
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKeys
 import com.raikaai.app.util.KLog
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -21,6 +22,7 @@ import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import org.json.JSONObject
 import kotlinx.coroutines.sync.withLock
@@ -41,10 +43,10 @@ data class Settings(
     // LiteRT engine parameters
     val activeModelId: String = "",
     val customModelPath: String = "",
-    val temperature: Float = 0.2f,
-    val topK: Int = 40,
-    val topP: Float = 0.90f,
-    val maxTokens: Int = 512,
+    val temperature: Float = SamplingDefaults.LOCAL_TEMPERATURE,
+    val topK: Int = SamplingDefaults.TOP_K,
+    val topP: Float = SamplingDefaults.TOP_P,
+    val maxTokens: Int = SamplingDefaults.LOCAL_MAX_TOKENS,
     val contextWindowTokens: Int = 2048, // 1024 | 2048 | 4096
     val promptTemplateFormat: String = "auto", // "auto" | "gemma" | "chatml" | "llama3" | "raw"
     val backend: String = ChatConstants.BACKEND_GPU, // "GPU" | "CPU"
@@ -371,11 +373,16 @@ class SettingsRepository(
     /**
      * One-time migration: copy any tokens still sitting in plaintext DataStore
      * into the encrypted store, then delete them from DataStore.
+     *
+     * Runs eagerly via [runMigrationsEagerly], NEVER from inside a
+     * `dataStore.data` collector: calling `edit()` while collecting is
+     * re-entrant and can stall DataStore.
      */
-    private suspend fun migrateTokensIfNeeded(prefs: Preferences) {
+    private suspend fun migrateTokensIfNeeded() {
         // Opportunistically recover from the plaintext fallback first (B17/S5).
         tryUpgradeFallbackStore()
         tokenMigration.runIfNeeded {
+            val prefs = context.dataStore.data.first()
             // NOTE: use the Pair() constructor, not the `to` infix — DataStore
             // defines its own `Key<T>.to(value)` returning Preferences.Pair,
             // which mapOf() cannot infer K,V from.
@@ -415,20 +422,32 @@ class SettingsRepository(
         }
     }
 
+    /**
+     * Runs the one-time token migrations eagerly on a background thread.
+     * Call once at startup (before the settings flows are collected) — the
+     * flows themselves must never trigger `edit()`, which would re-enter
+     * DataStore collection and risk stalling it.
+     */
+    fun runMigrationsEagerly(scope: CoroutineScope) {
+        scope.launch(Dispatchers.IO) {
+            migrateTokensIfNeeded()
+            mcpTokenMigration.runIfNeeded { migrateMcpTokensFromJson() }
+        }
+    }
+
     val settingsFlow: Flow<Settings> =
         combine(context.dataStore.data, tokenBump) { prefs, _ ->
             withContext(Dispatchers.IO) {
-                migrateTokensIfNeeded(prefs)
                 Settings(
                     themeMode = prefs[Keys.THEME_MODE] ?: ChatConstants.THEME_SYSTEM,
                     themeColor = prefs[Keys.THEME_COLOR] ?: 0xFF00897BL,
                     pureBlack = prefs[Keys.PURE_BLACK] ?: false,
                     activeModelId = prefs[Keys.ACTIVE_MODEL_ID] ?: "",
                     customModelPath = prefs[Keys.CUSTOM_MODEL_PATH] ?: "",
-                    temperature = (prefs[Keys.TEMPERATURE] ?: 0.2f).coerceIn(0f, 2f),
-                    topK = prefs[Keys.TOP_K] ?: 40,
-                    topP = prefs[Keys.TOP_P] ?: 0.90f,
-                    maxTokens = prefs[Keys.MAX_TOKENS] ?: 512,
+                    temperature = (prefs[Keys.TEMPERATURE] ?: SamplingDefaults.LOCAL_TEMPERATURE).coerceIn(0f, 2f),
+                    topK = prefs[Keys.TOP_K] ?: SamplingDefaults.TOP_K,
+                    topP = prefs[Keys.TOP_P] ?: SamplingDefaults.TOP_P,
+                    maxTokens = prefs[Keys.MAX_TOKENS] ?: SamplingDefaults.LOCAL_MAX_TOKENS,
                     contextWindowTokens = prefs[Keys.CONTEXT_WINDOW_TOKENS] ?: 2048,
                     promptTemplateFormat = prefs[Keys.PROMPT_TEMPLATE_FORMAT] ?: "auto",
                     backend = prefs[Keys.BACKEND] ?: ChatConstants.BACKEND_GPU,
@@ -653,7 +672,6 @@ class SettingsRepository(
      */
     val mcpServersFlow: Flow<List<com.raikaai.app.mcp.McpServerConfig>> =
         combine(context.dataStore.data, tokenBump) { prefs, _ ->
-            mcpTokenMigration.runIfNeeded { migrateMcpTokensFromJson() }
             val json = prefs[Keys.MCP_SERVERS_JSON] ?: "[]"
             com.raikaai.app.mcp.McpManager.serversFromJson(json).map { server ->
                 val token =

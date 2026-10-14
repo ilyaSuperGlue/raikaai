@@ -757,7 +757,7 @@ fun ModelsScreen(
                                                         text = item.id,
                                                         style = MaterialTheme.typography.labelSmall,
                                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        fontSize = 10.sp,
+                                                        fontSize = 11.sp,
                                                     )
                                                     pricingMap[item.id]?.let { pricing ->
                                                         Text(
@@ -767,7 +767,7 @@ fun ModelsScreen(
                                                             ),
                                                             style = MaterialTheme.typography.labelSmall,
                                                             color = MaterialTheme.colorScheme.tertiary,
-                                                            fontSize = 10.sp,
+                                                            fontSize = 11.sp,
                                                         )
                                                     }
                                                 }
@@ -777,7 +777,7 @@ fun ModelsScreen(
                                                             "Active",
                                                             style = MaterialTheme.typography.labelSmall,
                                                             color = MaterialTheme.colorScheme.onPrimary,
-                                                            fontSize = 10.sp,
+                                                            fontSize = 11.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                                         )

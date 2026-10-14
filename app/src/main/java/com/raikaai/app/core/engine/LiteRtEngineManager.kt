@@ -49,6 +49,35 @@ class LiteRtEngineManager private constructor(
                 instance ?: LiteRtEngineManager(context.applicationContext).also { instance = it }
             }
 
+        /**
+         * Builds generation params from settings in one place, so the nine
+         * call sites can't drift (temperature/topK/topP/maxTokens used to be
+         * re-typed at each site with slightly different values).
+         */
+        fun engineParamsFromSettings(
+            s: com.raikaai.app.data.Settings,
+            modelPath: String,
+            systemPrompt: String = "",
+            enableThinking: Boolean = false,
+            temperature: Float = s.temperature,
+            topK: Int = s.topK,
+            topP: Float = s.topP,
+            maxTokens: Int = com.raikaai.app.data.SamplingDefaults.LOCAL_MAX_TOKENS,
+            contextWindow: Int = s.contextWindowTokens,
+            backend: String = s.backend,
+        ): EngineParams =
+            EngineParams(
+                modelPath = modelPath,
+                temperature = temperature,
+                topK = topK,
+                topP = topP,
+                maxTokens = maxTokens,
+                contextWindow = contextWindow,
+                backend = backend,
+                systemPrompt = systemPrompt,
+                enableThinking = enableThinking,
+            )
+
         private val _engineLogs = MutableStateFlow<List<String>>(emptyList())
         val engineLogs: StateFlow<List<String>> = _engineLogs
 

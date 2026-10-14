@@ -502,7 +502,7 @@ private fun ServerLogsCard(viewModel: ChatViewModel) {
                                     text = "${log.status} · ${log.durationMs}ms",
                                     style = MaterialTheme.typography.labelSmall,
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 10.sp,
+                                    fontSize = 11.sp,
                                     color = statusColor,
                                     fontWeight = FontWeight.Bold,
                                 )

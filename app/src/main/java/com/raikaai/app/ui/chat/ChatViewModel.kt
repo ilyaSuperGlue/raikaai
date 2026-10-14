@@ -31,6 +31,8 @@ import com.raikaai.app.data.ChatRepository
 import com.raikaai.app.data.Conversation
 import com.raikaai.app.data.ConversationHeader
 import com.raikaai.app.data.DEFAULT_SYSTEM_PROMPT
+import com.raikaai.app.data.AppLimits
+import com.raikaai.app.data.SamplingDefaults
 import com.raikaai.app.data.Settings
 import com.raikaai.app.data.SettingsRepository
 import com.raikaai.app.data.effectiveRemoteContextWindow
@@ -48,6 +50,7 @@ import com.raikaai.app.rag.RagManager
 import com.raikaai.app.util.CodeArtifacts
 import com.raikaai.app.util.FileSaver
 import com.raikaai.app.util.KLog
+import com.raikaai.app.util.orFallback
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.Dispatchers
@@ -134,11 +137,10 @@ val PERSONA_PRESETS =
  */
 @Suppress("SENSELESS_COMPARISON")
 internal fun PersonaPreset.normalize(): PersonaPreset {
-    fun str(v: String?, fallback: String): String = if (v.isNullOrBlank()) fallback else v
     return PersonaPreset(
-        id = str(id as String?, "custom_" + System.currentTimeMillis()),
-        name = str(name as String?, "Custom Persona"),
-        iconType = str(iconType as String?, "custom"),
+        id = (id as String?).orFallback("custom_" + System.currentTimeMillis()),
+        name = (name as String?).orFallback("Custom Persona"),
+        iconType = (iconType as String?).orFallback("custom"),
         description = (description as String?).orEmpty(),
         greeting = (greeting as String?).orEmpty(),
         systemPrompt = (systemPrompt as String?).orEmpty(),
@@ -299,20 +301,11 @@ class ChatViewModel(
         }
     }
 
-    fun setSelectedImage(uri: Uri?) {
-        // Legacy single-image API: route through the multi-attachment list.
-        if (uri == null) {
-            selectedAttachments.value = selectedAttachments.value.filterNot { it.isImage }
-        } else {
-            addAttachments(listOf(uri), forceImage = true)
-        }
-    }
-
     fun removeAttachment(uri: Uri) {
         selectedAttachments.value = selectedAttachments.value.filterNot { it.uri == uri }
     }
 
-    fun clearSelectedImage() {
+    private fun clearSelectedImage() {
         selectedAttachments.value = emptyList()
     }
 
@@ -774,16 +767,14 @@ class ChatViewModel(
                     appendLine("Write ONE updated compact summary paragraph (max 180 words) preserving key facts, names, decisions, code/file topics, and open questions. Output ONLY the summary text.")
                 }
             val params =
-                LiteRtEngineManager.EngineParams(
+                LiteRtEngineManager.engineParamsFromSettings(
+                    s = s,
                     modelPath = modelPath,
-                    temperature = 0.2f,
-                    topK = 40,
-                    topP = 0.90f,
-                    maxTokens = 256,
+                    temperature = SamplingDefaults.LOCAL_TEMPERATURE,
+                    topK = SamplingDefaults.TOP_K,
+                    topP = SamplingDefaults.TOP_P,
+                    maxTokens = SamplingDefaults.SUMMARY_MAX_TOKENS,
                     contextWindow = maxOf(1024, windowTokens),
-                    backend = s.backend,
-                    systemPrompt = "",
-                    enableThinking = false,
                 )
             val generated =
                 try {
@@ -866,6 +857,9 @@ class ChatViewModel(
     }
 
     init {
+        // Token migrations run eagerly (outside flow collection) so
+        // settings/mcp collectors never re-enter DataStore.
+        settingsRepo.runMigrationsEagerly(viewModelScope)
         viewModelScope.launch {
             settingsRepo.settingsFlow.collect { s ->
                 settings.value = s
@@ -1198,8 +1192,6 @@ class ChatViewModel(
         return chatRepo.exportToMarkdown(conv)
     }
 
-    fun exportCurrentChat(): String = exportCurrentChatMarkdown()
-
     fun stopGeneration() {
         genJob?.cancel()
         genJob = null
@@ -1215,8 +1207,6 @@ class ChatViewModel(
         }
         persist()
     }
-
-    fun stopGenerating() = stopGeneration()
 
     // ── Autonomous Tool Calling Loop (Google AI Edge Architecture) ────
 
@@ -1386,17 +1376,15 @@ class ChatViewModel(
                 engine.streamResponse(
                     prompt = followUpPrompt,
                     params =
-                        LiteRtEngineManager.EngineParams(
+                        LiteRtEngineManager.engineParamsFromSettings(
+                            s = s,
                             modelPath = modelPath,
-                            temperature = effectiveTemperature(s),
-                            topK = effectiveTopK(s),
-                            topP = s.topP,
-                            maxTokens = s.maxTokens,
-                            contextWindow = s.contextWindowTokens,
-                            backend = s.backend,
                             systemPrompt = effectiveSystem,
                             enableThinking = s.enableThinking,
-                        ),
+                            temperature = effectiveTemperature(s),
+                            topK = effectiveTopK(s),
+                            maxTokens = s.maxTokens,
+                            ),
                     onMetrics = { onMetricsUpdate(it) },
                 ),
             targetChatId = targetChatId,
@@ -1512,17 +1500,15 @@ class ChatViewModel(
                 engine.streamResponse(
                     prompt = followUpPrompt,
                     params =
-                        LiteRtEngineManager.EngineParams(
+                        LiteRtEngineManager.engineParamsFromSettings(
+                            s = s,
                             modelPath = modelPath,
-                            temperature = effectiveTemperature(s),
-                            topK = effectiveTopK(s),
-                            topP = s.topP,
-                            maxTokens = s.maxTokens,
-                            contextWindow = s.contextWindowTokens,
-                            backend = s.backend,
                             systemPrompt = effectiveSystem,
                             enableThinking = s.enableThinking,
-                        ),
+                            temperature = effectiveTemperature(s),
+                            topK = effectiveTopK(s),
+                            maxTokens = s.maxTokens,
+                            ),
                     onMetrics = { onMetricsUpdate(it) },
                 ),
             targetChatId = targetChatId,
@@ -1569,8 +1555,8 @@ class ChatViewModel(
 
     /**
      * Handles explicit slash commands "/image <prompt>" or "/img <prompt>".
-     * Natural language image requests (e.g. "buat gambar...", "jadikan kucing biru")
-     * are handled organically by the model calling the `generate_image` tool.
+     * Natural-language image requests are handled organically by the model
+     * calling the `generate_image` tool (works in any user language).
      */
     private fun tryHandleImageCommand(body: String): Boolean {
         val trimmed = body.trim()
@@ -1794,17 +1780,15 @@ class ChatViewModel(
                                     engine.streamResponse(
                                         prompt = prompt,
                                         params =
-                                            LiteRtEngineManager.EngineParams(
+                                            LiteRtEngineManager.engineParamsFromSettings(
+                                                s = s,
                                                 modelPath = modelPath,
-                                                temperature = effectiveTemperature(s),
-                                                topK = effectiveTopK(s),
-                                                topP = s.topP,
-                                                maxTokens = s.maxTokens,
-                                                contextWindow = s.contextWindowTokens,
-                                                backend = s.backend,
                                                 systemPrompt = effectiveSystem,
                                                 enableThinking = useThinking,
-                                            ),
+                                                temperature = effectiveTemperature(s),
+                                                topK = effectiveTopK(s),
+                                                maxTokens = s.maxTokens,
+                                                ),
                                         imagePath = imagePaths.firstOrNull(),
                                         imageBytes = firstImageBytes,
                                         audioPath = savedAudioFile?.absolutePath,
@@ -1838,7 +1822,7 @@ class ChatViewModel(
                                 stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
                             ) {
                                 localBlankFailed = true
-                                errorMessage.value = "Model tidak memberikan jawaban. Coba matikan Thinking atau ulangi pertanyaan."
+                                errorMessage.value = "The model returned no answer. Try turning off Thinking or rephrasing."
                             }
                         }
 
@@ -1933,7 +1917,7 @@ class ChatViewModel(
             if (imagePath.isNullOrBlank()) return@withContext null
             try {
                 val file = File(imagePath)
-                if (!file.exists() || file.length() == 0L || file.length() > 8_000_000L) return@withContext null
+                if (!file.exists() || file.length() == 0L || file.length() > AppLimits.REMOTE_IMAGE_MAX_BYTES) return@withContext null
                 "data:image/jpeg;base64," + Base64.encodeToString(file.readBytes(), Base64.NO_WRAP)
             } catch (t: Throwable) {
                 KLog.w("ChatVM", "Failed to encode image for remote: ${t.message}")
@@ -2227,17 +2211,15 @@ class ChatViewModel(
                                 engine.streamResponse(
                                     prompt = prompt,
                                     params =
-                                        LiteRtEngineManager.EngineParams(
+                                        LiteRtEngineManager.engineParamsFromSettings(
+                                            s = s,
                                             modelPath = modelPath,
-                                            temperature = effectiveTemperature(s),
-                                            topK = effectiveTopK(s),
-                                            topP = s.topP,
-                                            maxTokens = s.maxTokens,
-                                            contextWindow = s.contextWindowTokens,
-                                            backend = s.backend,
                                             systemPrompt = effectiveSystem,
                                             enableThinking = s.enableThinking,
-                                        ),
+                                            temperature = effectiveTemperature(s),
+                                            topK = effectiveTopK(s),
+                                            maxTokens = s.maxTokens,
+                                            ),
                                     imagePath = oldMsg.imagePath,
                                     imageBytes = imageBytes,
                                     audioPath = oldMsg.audioPath,
@@ -2379,17 +2361,15 @@ class ChatViewModel(
                                 engine.streamResponse(
                                     prompt = prompt,
                                     params =
-                                        LiteRtEngineManager.EngineParams(
+                                        LiteRtEngineManager.engineParamsFromSettings(
+                                            s = s,
                                             modelPath = modelPath,
-                                            temperature = effectiveTemperature(s),
-                                            topK = effectiveTopK(s),
-                                            topP = s.topP,
-                                            maxTokens = s.maxTokens,
-                                            contextWindow = s.contextWindowTokens,
-                                            backend = s.backend,
                                             systemPrompt = effectiveSystem,
                                             enableThinking = s.enableThinking,
-                                        ),
+                                            temperature = effectiveTemperature(s),
+                                            topK = effectiveTopK(s),
+                                            maxTokens = s.maxTokens,
+                                            ),
                                     imagePath = lastUser.imagePath,
                                     imageBytes = imageBytes,
                                     audioPath = lastUser.audioPath,
@@ -2424,17 +2404,15 @@ class ChatViewModel(
                                 engine.streamResponse(
                                     prompt = retryPrompt,
                                     params =
-                                        LiteRtEngineManager.EngineParams(
+                                        LiteRtEngineManager.engineParamsFromSettings(
+                                            s = s,
                                             modelPath = modelPath,
-                                            temperature = effectiveTemperature(s),
-                                            topK = effectiveTopK(s),
-                                            topP = s.topP,
-                                            maxTokens = s.maxTokens,
-                                            contextWindow = s.contextWindowTokens,
-                                            backend = s.backend,
                                             systemPrompt = effectiveSystem,
                                             enableThinking = false,
-                                        ),
+                                            temperature = effectiveTemperature(s),
+                                            topK = effectiveTopK(s),
+                                            maxTokens = s.maxTokens,
+                                            ),
                                     imagePath = lastUser.imagePath,
                                     imageBytes = imageBytes,
                                     audioPath = lastUser.audioPath,
@@ -2447,7 +2425,7 @@ class ChatViewModel(
                             stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
                         ) {
                             regenBlankFailed = true
-                            errorMessage.value = "Model tidak memberikan jawaban. Coba matikan Thinking atau ulangi pertanyaan."
+                            errorMessage.value = "The model returned no answer. Try turning off Thinking or rephrasing."
                         }
                     }
 
@@ -2520,10 +2498,28 @@ class ChatViewModel(
 
     private fun persist() {
         val conv = conversation ?: return
+        // O(n) merge by id (was: indexOfFirst per message = O(n^2)).
+        val byId = nodes.associateBy { it.id }.toMutableMap()
         messages.forEach { m ->
             val id = m.id ?: return@forEach
-            val i = nodes.indexOfFirst { it.id == id }
-            if (i >= 0) nodes[i] = m else nodes.add(m)
+            byId[id] = m
+        }
+        nodes = byId.values.toMutableList()
+        // Prune unreachable nodes: keep the active path plus their siblings
+        // (branch-switchable). Anything else can never be reached by
+        // resolveActivePath/siblingsOf and would bloat the file forever.
+        // Skipped while messages is empty — with no active path every node
+        // would look unreachable.
+        if (messages.isNotEmpty()) {
+            val activeIds = messages.mapNotNull { it.id }.toSet()
+            val activeParents = messages.map { it.parentId ?: ChatRepository.ROOT_KEY }.toSet()
+            val pruned = nodes.filter { node ->
+                val id = node.id
+                id != null && (id in activeIds || (node.parentId ?: ChatRepository.ROOT_KEY) in activeParents)
+            }
+            if (pruned.size != nodes.size) {
+                nodes = pruned.toMutableList()
+            }
         }
         conv.messages = nodes.toList()
         // Lazy persistence: a brand-new session is only written to disk once it
@@ -2927,8 +2923,8 @@ class ChatViewModel(
                     ),
                 )
             } catch (e: Exception) {
-                // Jangan biarkan exception tak tertangkap membunuh proses (force close),
-                // mis. file model tidak ada. Tampilkan sebagai pesan error biasa.
+                // Never let an uncaught exception kill the process (force close),
+                // e.g. missing model file. Surface it as a regular error message.
                 KLog.e("ChatViewModel", "loadActiveModel failed", e)
                 withContext(Dispatchers.Main) {
                     errorMessage.value = "Failed to load model: ${e.message}"
@@ -3118,15 +3114,25 @@ class ChatViewModel(
     }
 
     fun importPersonaJson(jsonString: String): Boolean {
+        // Bound untrusted clipboard input before parsing/serializing (mirrors
+        // the skill import caps): one giant paste must not bloat DataStore or
+        // the per-emission settings payload.
+        if (jsonString.isBlank() || jsonString.length > AppLimits.PERSONA_IMPORT_MAX_CHARS) return false
         return try {
-            val persona = Gson().fromJson(jsonString, PersonaPreset::class.java)?.normalize()
-            if (persona != null && persona.name.isNotBlank()) {
-                val newP = persona.copy(id = "imported_" + System.currentTimeMillis())
-                saveCustomPersonas(customPersonas.toList() + newP)
-                true
-            } else {
-                false
-            }
+            val parsed = Gson().fromJson(jsonString, PersonaPreset::class.java)?.normalize() ?: return false
+            if (parsed.name.isBlank()) return false
+            val persona = parsed.copy(
+                id = "imported_" + System.currentTimeMillis(),
+                name = parsed.name.take(80),
+                description = parsed.description.take(500),
+                greeting = parsed.greeting.take(2_000),
+                systemPrompt = parsed.systemPrompt.take(20_000),
+                personality = parsed.personality.take(2_000),
+                scenario = parsed.scenario.take(2_000),
+                exampleDialogues = parsed.exampleDialogues.take(8_000),
+            )
+            saveCustomPersonas(customPersonas.toList() + persona)
+            true
         } catch (_: Exception) {
             false
         }
@@ -3187,14 +3193,15 @@ class ChatViewModel(
                 var totalTokens = 0
 
                 val params =
-                    LiteRtEngineManager.EngineParams(
+                    LiteRtEngineManager.engineParamsFromSettings(
+                        s = s,
                         modelPath = modelPath,
+                        systemPrompt = "You are a concise AI benchmark responder.",
                         temperature = 0.1f,
                         topK = 20,
-                        topP = 0.90f,
-                        maxTokens = 64,
+                        maxTokens = SamplingDefaults.BENCHMARK_MAX_TOKENS,
+                        contextWindow = 2048,
                         backend = chosenBackend,
-                        systemPrompt = "You are a concise AI benchmark responder.",
                     )
 
                 engine.streamResponse(

@@ -27,6 +27,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.raikaai.app.core.server.OpenAiServer
+import com.raikaai.app.ui.theme.success
 import java.io.File
 
 /**
@@ -146,8 +147,8 @@ fun ServerStatusBadge(
             StatusChip(
                 icon = Icons.Default.Dns,
                 text = "Server :${serverStatus.port}",
-                container = Color(0xFF2E7D32).copy(alpha = 0.20f),
-                content = Color(0xFF4CAF50),
+                container = MaterialTheme.colorScheme.success.copy(alpha = 0.20f),
+                content = MaterialTheme.colorScheme.success,
                 modifier = modifier,
                 onClick = onClick,
             )

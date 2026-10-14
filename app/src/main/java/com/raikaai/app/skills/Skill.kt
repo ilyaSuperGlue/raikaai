@@ -1,5 +1,7 @@
 package com.raikaai.app.skills
 
+import com.raikaai.app.util.orFallback
+
 data class Skill(
     val id: String,
     val name: String,
@@ -20,16 +22,15 @@ data class Skill(
  */
 @Suppress("SENSELESS_COMPARISON")
 internal fun Skill.normalize(): Skill {
-    fun str(v: String?, fallback: String): String = if (v.isNullOrBlank()) fallback else v
     return Skill(
-        id = str(id as String?, "skill_" + System.currentTimeMillis()),
-        name = str(name as String?, "Custom Skill"),
+        id = (id as String?).orFallback("skill_" + System.currentTimeMillis()),
+        name = (name as String?).orFallback("Custom Skill"),
         description = (description as String?).orEmpty(),
         instructions = (instructions as String?).orEmpty(),
-        iconCategory = str(iconCategory as String?, "code"),
+        iconCategory = (iconCategory as String?).orFallback("code"),
         isEnabled = (isEnabled as Boolean?) ?: false,
         isBuiltIn = (isBuiltIn as Boolean?) ?: false,
-        category = str(category as String?, "General"),
+        category = (category as String?).orFallback("General"),
         createdAt = (createdAt as Long?)?.takeIf { it > 0 } ?: System.currentTimeMillis(),
     )
 }

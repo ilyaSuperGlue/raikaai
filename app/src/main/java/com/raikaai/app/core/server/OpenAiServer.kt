@@ -25,6 +25,7 @@ import io.ktor.utils.io.cancel
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import java.security.MessageDigest
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import java.io.ByteArrayOutputStream
@@ -147,12 +148,13 @@ object OpenAiServer {
     /**
      * Shared bearer-token check; true when the request may proceed.
      * No token configured = open access (unchanged legacy behavior).
+     * Uses constant-time comparison so the token can't be probed byte-wise.
      */
     private suspend fun ApplicationCall.checkAuth(config: Config): Boolean {
         val token = config.authToken
         if (token.isNotBlank()) {
-            val provided = request.header("Authorization")?.removePrefix("Bearer ")?.trim()
-            if (provided != token) {
+            val provided = request.header("Authorization")?.removePrefix("Bearer ")?.trim().orEmpty()
+            if (!MessageDigest.isEqual(provided.toByteArray(), token.toByteArray())) {
                 respondText(
                     errorJson("invalid_api_key", "Invalid or missing API key"),
                     ContentType.Application.Json,
@@ -162,6 +164,42 @@ object OpenAiServer {
             }
         }
         return true
+    }
+
+    /**
+     * Browser cross-origin guard: a request carrying an `Origin` header comes
+     * from a web page, which means ANY website the user visits could drive
+     * this phone's AI server (compute abuse). Browser clients must present
+     * the API token: when no token is configured, cross-origin browser
+     * requests are rejected with instructions. Non-browser clients
+     * (curl, Python, desktop apps) send no Origin header and are unaffected.
+     */
+    private suspend fun ApplicationCall.checkBrowserOrigin(config: Config): Boolean {
+        val origin = request.header("Origin") ?: return true
+        if (origin.isBlank()) return true
+        if (config.authToken.isBlank()) {
+            KLog.w("OpenAiServer", "Blocked cross-origin browser request from $origin (no API token configured)")
+            respondText(
+                errorJson(
+                    "origin_blocked",
+                    "Cross-origin browser requests require an API token. Set one in Server settings and send it as Authorization: Bearer.",
+                ),
+                ContentType.Application.Json,
+                HttpStatusCode.Forbidden,
+            )
+            return false
+        }
+        return true
+    }
+
+    /**
+     * Appends the permissive CORS header required by browser-based API
+     * clients (OpenWebUI etc.). Browser abuse is handled separately by
+     * [checkBrowserOrigin], which requires an API token for cross-origin
+     * calls when none is configured server-side.
+     */
+    private fun ApplicationCall.appendCors() {
+        response.headers.append("Access-Control-Allow-Origin", "*")
     }
 
     /**
@@ -278,33 +316,35 @@ object OpenAiServer {
                         routing {
                             // Global CORS preflight handler
                             options("{...}") {
-                                call.response.headers.append("Access-Control-Allow-Origin", "*")
+                                call.appendCors()
                                 call.response.headers.append("Access-Control-Allow-Methods", "GET, POST, OPTIONS, PUT, DELETE")
                                 call.response.headers.append("Access-Control-Allow-Headers", "*")
                                 call.respondText("")
                             }
                             get("/health") {
                                 if (!call.checkAuth(config)) return@get
-                                call.response.headers.append("Access-Control-Allow-Origin", "*")
+                                call.appendCors()
                                 call.respondText("ok")
                             }
                             get("/v1/models") {
                                 if (!call.checkAuth(config)) return@get
-                                call.response.headers.append("Access-Control-Allow-Origin", "*")
+                                call.appendCors()
                                 call.respondText(modelsJson(config.modelId()), ContentType.Application.Json)
                             }
                             get("/v1/models/{model}") {
                                 if (!call.checkAuth(config)) return@get
-                                call.response.headers.append("Access-Control-Allow-Origin", "*")
+                                call.appendCors()
                                 val requestedModel = call.parameters["model"] ?: config.modelId()
                                 call.respondText(modelDetailJson(requestedModel), ContentType.Application.Json)
                             }
                             post("/v1/chat/completions") {
-                                call.response.headers.append("Access-Control-Allow-Origin", "*")
+                                call.appendCors()
+                                if (!call.checkBrowserOrigin(config)) return@post
                                 call.handleChatCompletion(config, engineManager)
                             }
                             post("/v1/completions") {
-                                call.response.headers.append("Access-Control-Allow-Origin", "*")
+                                call.appendCors()
+                                if (!call.checkBrowserOrigin(config)) return@post
                                 call.handleRawCompletion(config, engineManager)
                             }
                         }

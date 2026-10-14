@@ -1,6 +1,7 @@
 package com.raikaai.app.mcp
 
 import com.google.gson.JsonObject
+import com.raikaai.app.util.orFallback
 import java.util.UUID
 import kotlin.jvm.Transient
 
@@ -46,11 +47,10 @@ data class McpServerConfig(
  */
 @Suppress("SENSELESS_COMPARISON")
 internal fun McpServerConfig.normalized(): McpServerConfig {
-    fun str(v: String?, fallback: String): String = if (v.isNullOrBlank()) fallback else v
     val safeUrl = (url as String?).orEmpty()
     return McpServerConfig(
-        id = str(id as String?, "mcp_" + System.currentTimeMillis()),
-        name = str(name as String?, safeUrl.ifBlank { "MCP Server" }),
+        id = (id as String?).orFallback("mcp_" + System.currentTimeMillis()),
+        name = (name as String?).orFallback(safeUrl.ifBlank { "MCP Server" }),
         url = safeUrl,
         authToken = (authToken as String?).orEmpty(),
         enabled = (enabled as Boolean?) ?: true,

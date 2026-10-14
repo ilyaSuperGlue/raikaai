@@ -454,7 +454,7 @@ fun SamplerScreen(
                                                             "Active",
                                                             style = MaterialTheme.typography.labelSmall,
                                                             color = MaterialTheme.colorScheme.onPrimary,
-                                                            fontSize = 10.sp,
+                                                            fontSize = 11.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
                                                         )
@@ -554,7 +554,7 @@ private fun SamplerPresetItem(
             Text(
                 text = sub,
                 style = MaterialTheme.typography.labelSmall,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         }

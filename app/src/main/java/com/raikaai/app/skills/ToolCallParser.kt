@@ -160,7 +160,7 @@ object ToolCallParser {
                 }
             }
             // Safety bound: a single tool call never needs more than this.
-            if (sb.length > 8192) return null
+            if (sb.length > com.raikaai.app.data.AppLimits.TOOL_JSON_MAX_CHARS) return null
         }
         return null
     }

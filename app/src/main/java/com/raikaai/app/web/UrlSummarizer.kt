@@ -68,18 +68,25 @@ object UrlSummarizer {
             } catch (e: Exception) {
                 KLog.e("UrlSummarizer", "Jina Reader failed for $url", e)
             }
-            // Attempt 2: direct fetch + HTML strip
+            // SSRF guard: refuse non-public hosts before any fetch.
             try {
-                val request =
-                    Request.Builder()
-                        .url(url)
-                        .header("User-Agent", USER_AGENT)
-                        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
-                        .build()
+                NetworkUtils.requirePublicHttpUrl(url)
+            } catch (e: IllegalArgumentException) {
+                KLog.w("UrlSummarizer", "Blocked non-public URL: ${e.message}")
+                return@withContext null
+            }
+            // Attempt 2: direct fetch + HTML strip, manual redirect hops
+            // re-validated per hop (SSRF-safe).
+            try {
                 val rawHtml: String =
-                    NetworkUtils.HttpClient.searchClient.newCall(request).execute().use { response ->
-                        if (response.isSuccessful) response.body?.string() else null
-                    }.orEmpty()
+                    NetworkUtils.fetchBodyStringValidated(
+                        url = url,
+                        headers = mapOf(
+                            "User-Agent" to USER_AGENT,
+                            "Accept" to "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                        ),
+                        maxChars = MAX_CHARS + 8_000,
+                    ) ?: return@withContext null
                 if (rawHtml.isNotBlank()) {
                     val titleMatcher =
                         Pattern.compile("<title>([\\s\\S]*?)</title>", Pattern.CASE_INSENSITIVE)

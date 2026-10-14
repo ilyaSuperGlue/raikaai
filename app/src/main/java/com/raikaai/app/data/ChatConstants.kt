@@ -26,3 +26,30 @@ object ChatConstants {
     const val THEME_DARK = "dark"
     const val THEME_LIGHT = "light"
 }
+
+/**
+ * Single source of truth for sampler defaults. Previously these drifted
+ * across files (local temp 0.2 vs remote 0.7, maxTokens 256 vs 512, ...).
+ */
+object SamplingDefaults {
+    const val LOCAL_TEMPERATURE = 0.2f
+    const val REMOTE_TEMPERATURE = 0.7f
+    const val TOP_K = 40
+    const val TOP_P = 0.90f
+    const val LOCAL_MAX_TOKENS = 512
+    const val BENCHMARK_MAX_TOKENS = 64
+    const val SUMMARY_MAX_TOKENS = 256
+
+    fun coerceTemperature(v: Float): Float = v.coerceIn(0f, 2f)
+}
+
+/** Single source of truth for size/count caps (DoS guards). */
+object AppLimits {
+    const val REMOTE_IMAGE_MAX_BYTES = 8_000_000L
+    const val TOOL_JSON_MAX_CHARS = 8192
+    const val SAFE_FILENAME_CHARS = 80
+    const val SUMMARY_MAX_WORDS = 180
+    const val PERSONA_IMPORT_MAX_CHARS = 200_000
+    const val SKILL_IMPORT_MAX_CHARS = 200_000
+    const val TEXT_FILE_BUFFER = 8192
+}

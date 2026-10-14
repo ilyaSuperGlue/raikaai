@@ -9,6 +9,7 @@ import com.raikaai.app.util.KLog
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -201,6 +202,16 @@ class AudioRecorderHelper(
         currentOutputFile = null
         _durationMs.value = 0L
         _amplitude.value = 0
+    }
+
+    /**
+     * Releases everything, including the internal coroutine scope. Call when
+     * the owning composable leaves the composition for good (otherwise the
+     * scope — and its captured Context — leaks across rotations).
+     */
+    fun destroy() {
+        cancelRecording()
+        scope.cancel()
     }
 
     /**

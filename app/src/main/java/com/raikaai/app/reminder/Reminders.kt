@@ -15,22 +15,23 @@ import com.raikaai.app.R
 import java.util.UUID
 import java.util.concurrent.TimeUnit
 
-/** ID notification channel untuk pengingat terjadwal. */
+/** Notification channel ID for scheduled reminders. */
 const val REMINDER_CHANNEL_ID = "reminders"
 
-/** Tag WorkManager untuk semua pekerjaan pengingat. */
+/** WorkManager tag for all reminder jobs. */
 const val REMINDER_WORK_TAG = "raikaai_reminder"
 
 internal const val KEY_NOTE = "note"
 
 /**
- * Menjadwalkan pengingat satu-kali yang menampilkan notifikasi saat
- * [ReminderSpec.triggerAtMillis] tiba.
+ * Schedules a one-shot reminder that posts a notification when
+ * [ReminderSpec.triggerAtMillis] arrives.
  *
- * Izin [android.Manifest.permission.POST_NOTIFICATIONS] (Android 13+) wajib
- * diminta & diberikan oleh pemanggil agar notifikasi tampil.
+ * The [android.Manifest.permission.POST_NOTIFICATIONS] permission (Android 13+)
+ * must be requested and granted by the caller, otherwise the notification
+ * is silently dropped by the system.
  *
- * @return UUID WorkRequest yang dibuat; untuk pembatalan individual via [cancelReminder].
+ * @return the created WorkRequest UUID; used for individual cancellation via [cancelReminder].
  */
 fun scheduleReminder(context: Context, spec: ReminderSpec): UUID {
     val appContext = context.applicationContext
@@ -45,14 +46,14 @@ fun scheduleReminder(context: Context, spec: ReminderSpec): UUID {
 }
 
 /**
- * Membatalkan satu pengingat terjadwal berdasarkan UUID yang dikembalikan
+ * Cancels a single scheduled reminder by the UUID returned from
  * [scheduleReminder].
  */
 fun cancelReminder(context: Context, id: UUID) {
     WorkManager.getInstance(context.applicationContext).cancelWorkById(id)
 }
 
-/** Membatalkan seluruh pengingat yang terjadwal. */
+/** Cancels all scheduled reminders. */
 fun cancelAllReminders(context: Context) {
     WorkManager.getInstance(context.applicationContext).cancelAllWorkByTag(REMINDER_WORK_TAG)
 }
@@ -87,7 +88,7 @@ internal fun showReminderNotification(context: Context, note: String) {
         .setContentIntent(openPendingIntent)
         .addAction(R.drawable.ic_reminder, "Open app", openPendingIntent)
         .build()
-    // ID unik per notifikasi agar beberapa pengingat tidak saling menimpa.
+    // Unique ID per notification so concurrent reminders don't overwrite each other.
     val notificationId = (System.currentTimeMillis() % Int.MAX_VALUE).toInt()
     notificationManager.notify(notificationId, notification)
 }

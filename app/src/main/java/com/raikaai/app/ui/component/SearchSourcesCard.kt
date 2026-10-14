@@ -95,7 +95,7 @@ fun SearchSourcesCard(
                         Text(
                             text = if (expanded) "Hide" else "View Sources",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Medium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -152,7 +152,7 @@ private fun SourceItemRow(
                 Text(
                     text = "[${citation.index}]",
                     modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp),
-                    fontSize = 10.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -183,7 +183,7 @@ private fun SourceItemRow(
                         Text(
                             text = citation.domain,
                             modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp),
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 1,
                         )
@@ -198,7 +198,7 @@ private fun SourceItemRow(
                         color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                     )
                 }
             }

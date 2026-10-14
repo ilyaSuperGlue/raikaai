@@ -14,7 +14,7 @@ data class WebSourceCitation(
     val index: Int = 1,
 ) {
     /**
-     * Extracts a clean domain hostname (e.g. "wikipedia.org", "detik.com") for badge display.
+     * Extracts a clean domain hostname (e.g. "wikipedia.org", "bbc.com") for badge display.
      */
     val domain: String
         get() = try {

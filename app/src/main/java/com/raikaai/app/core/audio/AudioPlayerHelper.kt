@@ -32,19 +32,44 @@ class AudioPlayerHelper(private val context: Context) {
         }
 
         try {
-            mediaPlayer = MediaPlayer().apply {
-                setDataSource(context, Uri.fromFile(file))
-                prepare()
-                setOnCompletionListener {
+            val player = MediaPlayer()
+            player.setDataSource(context, Uri.fromFile(file))
+            // prepareAsync: prepare() blocks on disk I/O and must never run
+            // on the main thread (this is called from click handlers).
+            player.setOnPreparedListener { mp ->
+                try {
+                    mp.start()
+                    _currentlyPlayingPath.value = filePath
+                } catch (e: Exception) {
+                    KLog.e("AudioPlayer", "Error starting playback for $filePath", e)
+                    releasePlayer(mp)
                     _currentlyPlayingPath.value = null
-                    onCompletion?.invoke()
                 }
-                start()
             }
-            _currentlyPlayingPath.value = filePath
+            player.setOnCompletionListener {
+                _currentlyPlayingPath.value = null
+                onCompletion?.invoke()
+            }
+            player.setOnErrorListener { mp, what, extra ->
+                KLog.e("AudioPlayer", "Playback error for $filePath (what=$what extra=$extra)")
+                releasePlayer(mp)
+                _currentlyPlayingPath.value = null
+                true
+            }
+            mediaPlayer = player
+            player.prepareAsync()
         } catch (e: Exception) {
             KLog.e("AudioPlayer", "Error playing audio file $filePath", e)
             _currentlyPlayingPath.value = null
+        }
+    }
+
+    private fun releasePlayer(mp: MediaPlayer) {
+        try {
+            if (mediaPlayer === mp) mediaPlayer = null
+            mp.reset()
+            mp.release()
+        } catch (_: Exception) {
         }
     }
 

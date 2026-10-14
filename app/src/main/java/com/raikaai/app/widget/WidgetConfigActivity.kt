@@ -46,7 +46,9 @@ class WidgetConfigActivity : Activity() {
             prefs.edit()
                 .putString(
                     RaikaAIWidgetProvider.prefillKey(appWidgetId),
-                    input.text.toString().trim(),
+                    // Cap prefill text: unbounded intent extras risk
+                    // TransactionTooLargeException down the line.
+                    input.text.toString().trim().take(4_000),
                 )
                 .apply()
             RaikaAIWidgetProvider.updateWidget(

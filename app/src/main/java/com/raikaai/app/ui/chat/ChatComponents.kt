@@ -31,6 +31,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -105,6 +106,8 @@ import com.raikaai.app.ui.component.SearchSourcesCard
 import com.raikaai.app.web.WebSourceCitation
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
@@ -144,7 +147,7 @@ internal fun BranchNavRow(
         }
         Text(
             text = "$position/$total",
-            fontSize = 10.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             modifier = Modifier.padding(horizontal = 2.dp),
         )
@@ -187,6 +190,13 @@ internal fun EmptyChatHero(
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = "Tip: press and hold a message to edit it.",
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+            textAlign = TextAlign.Center,
+        )
     }
 }
 
@@ -209,12 +219,15 @@ internal fun MessageList(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val messageCount = viewModel.messages.size
-    val settings by viewModel.settings.collectAsState()
+    // Collect ONLY autoScroll (not the whole Settings): any other settings
+    // change must not recompose the entire message list.
+    val autoScroll by viewModel.settings.map { it.autoScroll }.distinctUntilChanged()
+        .collectAsState(initial = true)
 
     // Scroll to bottom (index 0 in reverseLayout) when a new message is sent or started.
     // Respects the "Auto-scroll" setting — when off, the list stays where the user left it.
-    LaunchedEffect(messageCount, settings.autoScroll) {
-        if (messageCount > 0 && settings.autoScroll) {
+    LaunchedEffect(messageCount, autoScroll) {
+        if (messageCount > 0 && autoScroll) {
             listState.animateScrollToItem(0)
         }
     }
@@ -239,6 +252,19 @@ internal fun MessageList(
                     val reversedIndex = messageCount - 1 - i
                     val msg = viewModel.messages.getOrNull(reversedIndex)
                     msg?.id ?: "msg_${reversedIndex}_$i"
+                },
+                // Distinct composition types per shape lets Compose recycle
+                // slots efficiently (text bubble vs image/audio variants).
+                contentType = { i ->
+                    val reversedIndex = messageCount - 1 - i
+                    val msg = viewModel.messages.getOrNull(reversedIndex)
+                    val kind = when {
+                        msg == null -> "null"
+                        msg.attachments.orEmpty().any { it.type == "image" } || !msg.imagePath.isNullOrBlank() -> "media"
+                        !msg.audioPath.isNullOrBlank() -> "audio"
+                        else -> "text"
+                    }
+                    "${msg?.role}_$kind"
                 },
             ) { i ->
                 val reversedIndex = messageCount - 1 - i
@@ -548,7 +574,7 @@ internal fun MessageBubble(
                                         Spacer(Modifier.width(4.dp))
                                         Text(
                                             text = label,
-                                            fontSize = 9.sp,
+                                            fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             maxLines = 1,
                                             overflow = TextOverflow.Ellipsis,
@@ -574,7 +600,7 @@ internal fun MessageBubble(
                     if (!message.stats.isNullOrBlank()) {
                         Text(
                             text = message.stats,
-                            fontSize = 10.sp,
+                            fontSize = 11.sp,
                             color = MaterialTheme.colorScheme.primary,
                             fontWeight = FontWeight.SemiBold,
                         )
@@ -602,7 +628,7 @@ internal fun MessageBubble(
                             }
                             Text(
                                 text = "${message.selectedVariant + 1}/${message.variants.size}",
-                                fontSize = 10.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 modifier = Modifier.padding(horizontal = 2.dp),
                             )

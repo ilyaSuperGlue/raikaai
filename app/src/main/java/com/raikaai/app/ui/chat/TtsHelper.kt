@@ -14,6 +14,13 @@ import java.util.Locale
  * Strips markdown formatting before speaking.
  */
 class TtsHelper(private val context: Context) : TextToSpeech.OnInitListener {
+    companion object {
+        private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```")
+        private val THINK_CLOSED_REGEX = Regex("<think>[\\s\\S]*?</think>")
+        private val THINK_OPEN_REGEX = Regex("<think>[\\s\\S]*")
+        private val INLINE_CODE_REGEX = Regex("`[^`]*`")
+        private val MARKDOWN_CHARS_REGEX = Regex("[#*_~>\\[\\]]")
+    }
     private var tts: TextToSpeech? = null
     var isInitialized = mutableStateOf(false)
     var currentlySpeakingId = mutableStateOf<String?>(null)
@@ -79,11 +86,11 @@ class TtsHelper(private val context: Context) : TextToSpeech.OnInitListener {
         // Strip markdown code blocks, tags, and formatting before speaking
         val cleanText =
             text
-                .replace(Regex("```[\\s\\S]*?```"), " Code block omitted. ")
-                .replace(Regex("<think>[\\s\\S]*?</think>"), "")
-                .replace(Regex("<think>[\\s\\S]*"), "")
-                .replace(Regex("`[^`]*`"), "")
-                .replace(Regex("[#*_~>\\[\\]]"), "")
+                .replace(CODE_BLOCK_REGEX, " Code block omitted. ")
+                .replace(THINK_CLOSED_REGEX, "")
+                .replace(THINK_OPEN_REGEX, "")
+                .replace(INLINE_CODE_REGEX, "")
+                .replace(MARKDOWN_CHARS_REGEX, "")
                 .trim()
 
         if (cleanText.isBlank()) return

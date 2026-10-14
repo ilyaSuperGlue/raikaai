@@ -5,9 +5,9 @@ import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
 
 /**
- * Worker yang menampilkan notifikasi pengingat ketika waktu pemicu tiba.
+ * Worker that posts the reminder notification when the trigger time arrives.
  *
- * Dijadwalkan melalui [scheduleReminder]; jangan di-enqueue langsung.
+ * Scheduled via [scheduleReminder]; never enqueue directly.
  */
 class ReminderWorker(
     appContext: Context,

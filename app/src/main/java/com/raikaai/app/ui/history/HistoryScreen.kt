@@ -516,7 +516,7 @@ fun HistoryScreen(
                                         Text(
                                             conv.folder,
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontSize = 10.sp,
+                                            fontSize = 11.sp,
                                             color = MaterialTheme.colorScheme.onSecondaryContainer,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                                             maxLines = 1,
@@ -537,7 +537,7 @@ fun HistoryScreen(
                                                 Text(
                                                     "#$tag",
                                                     style = MaterialTheme.typography.labelSmall,
-                                                    fontSize = 10.sp,
+                                                    fontSize = 11.sp,
                                                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                                                     modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
                                                     maxLines = 1,
@@ -548,7 +548,7 @@ fun HistoryScreen(
                                             Text(
                                                 "+${conv.tags.size - 3}",
                                                 style = MaterialTheme.typography.labelSmall,
-                                                fontSize = 10.sp,
+                                                fontSize = 11.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                             )
                                         }

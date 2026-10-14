@@ -92,7 +92,7 @@ DropdownMenu(
             Text(
                 text = if (settings.modelSource == ChatConstants.SOURCE_REMOTE) "Remote" else (activeBackend ?: ChatConstants.BACKEND_GPU),
                 style = MaterialTheme.typography.labelSmall,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = MaterialTheme.colorScheme.primary,
                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
@@ -135,7 +135,7 @@ DropdownMenu(
                             text = "${model.sizeDisplay} · ${if (isCurrentlyLoaded) "In RAM" else "Ready"}",
                             style = MaterialTheme.typography.labelSmall,
                             color = if (isCurrentlyLoaded) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                         )
                     }
                 },
@@ -232,7 +232,7 @@ DropdownMenu(
                         Text(
                             "ON",
                             style = MaterialTheme.typography.labelSmall,
-                            fontSize = 9.sp,
+                            fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.onPrimary,
                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 1.dp),
