@@ -7,19 +7,16 @@
 
     <!-- Monochrome layer is recolored by the launcher — black is the canonical tint. -->
     <path
-        android:pathData="M41,64 L33,79 L55,64 Z"
+        android:pathData="M59.45 63.07 52.11 51.06H44.34V63.07H37.72V31.43H53.52Q59.18 31.43 62.26 33.87Q65.34 36.3 65.34 40.86Q65.34 44.19 63.45 46.6Q61.56 49.01 58.35 49.78L66.91 63.07ZM58.67 41.13Q58.67 36.57 52.83 36.57H44.34V45.91H53.01Q55.79 45.91 57.23 44.66Q58.67 43.4 58.67 41.13Z"
         android:fillColor="#000000" />
 
     <path
-        android:pathData="M42,34 H66 A12,12 0 0 1 78,46 V54 A12,12 0 0 1 66,66 H42 A12,12 0 0 1 30,54 V46 A12,12 0 0 1 42,34 Z"
+        android:pathData="M40.08,73.40 H57.99"
         android:strokeColor="#000000"
         android:strokeWidth="7"
-        android:strokeLineJoin="round" />
+        android:strokeLineCap="round" />
 
     <path
-        android:pathData="M63,41 L50,57 L57,57 L53,62 L65,52 L58,52 Z"
-        android:fillColor="#000000"
-        android:strokeColor="#000000"
-        android:strokeWidth="2"
-        android:strokeLineJoin="round" />
+        android:pathData="M67.28 76.63 66.56 74.55H63.47L62.75 76.63H61.04L64.01 68.5H66.02L68.97 76.63ZM65.01 69.75 64.98 69.88Q64.92 70.09 64.84 70.35Q64.76 70.62 63.85 73.27H66.18L65.38 70.93L65.13 70.15Z M70.07 76.63V68.5H71.77V76.63Z"
+        android:fillColor="#000000" />
 </vector>
