@@ -19,7 +19,6 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -110,34 +109,27 @@ fun AboutScreen(
                         modifier = Modifier.padding(20.dp),
                         horizontalAlignment = Alignment.CenterHorizontally,
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.SmartToy,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(40.dp),
-                        )
-
-                        Spacer(Modifier.height(14.dp))
-
                         Text(
                             "LiteChat",
-                            style = MaterialTheme.typography.headlineSmall,
+                            style = MaterialTheme.typography.headlineMedium,
                             fontWeight = FontWeight.Bold,
                         )
+                        Spacer(Modifier.height(4.dp))
                         Text(
                             "100% On-Device AI & OpenAI API Bridge",
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
                         )
 
-                        Spacer(Modifier.height(10.dp))
+                        Spacer(Modifier.height(12.dp))
 
                         Text(
                             "LiteChat is an independent, privacy-first mobile AI assistant powered by Google AI Edge LiteRT-LM runtime. It executes large language models locally with OpenCL GPU acceleration and provides an embedded OpenAI-compatible HTTP server.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            lineHeight = 20.sp,
                         )
                     }
                 }
@@ -152,7 +144,7 @@ fun AboutScreen(
                 ) {
                     Column(
                         modifier = Modifier.padding(16.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
                         Text(
                             "Hardware Diagnostics",
@@ -160,25 +152,22 @@ fun AboutScreen(
                             fontWeight = FontWeight.Bold,
                         )
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Device", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(specs.deviceModel, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        }
+                        Spacer(Modifier.height(2.dp))
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Chipset / SoC", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text(specs.chipset, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        }
+                        DiagnosticRow("Device", specs.deviceModel)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("CPU Cores / ABI", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("${specs.cores} Cores · ${specs.abi}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
-                        }
+                        DiagnosticRow("Chipset / SoC", specs.chipset)
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
 
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("GPU Acceleration", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            Text("Qualcomm Adreno / OpenCL (Auto — fallback to CPU)", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                        }
+                        DiagnosticRow("CPU Cores / ABI", "${specs.cores} Cores · ${specs.abi}")
+                        HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f))
+
+                        DiagnosticRow(
+                            label = "GPU Acceleration",
+                            value = "Qualcomm Adreno / OpenCL (Auto — fallback to CPU)",
+                            valueColor = MaterialTheme.colorScheme.primary,
+                        )
                     }
                 }
             }
@@ -217,5 +206,34 @@ fun AboutScreen(
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun DiagnosticRow(
+    label: String,
+    value: String,
+    valueColor: androidx.compose.ui.graphics.Color = MaterialTheme.colorScheme.onSurface,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.Top,
+    ) {
+        Text(
+            text = label,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.weight(0.38f),
+        )
+        Spacer(Modifier.width(10.dp))
+        Text(
+            text = value,
+            style = MaterialTheme.typography.bodySmall,
+            fontWeight = FontWeight.SemiBold,
+            color = valueColor,
+            textAlign = androidx.compose.ui.text.style.TextAlign.End,
+            modifier = Modifier.weight(0.62f),
+        )
     }
 }

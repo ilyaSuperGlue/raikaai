@@ -78,17 +78,6 @@ internal fun ServerBenchmarkSection(viewModel: ChatViewModel) {
     var selectedTab by remember { mutableIntStateOf(0) }
 
     Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        Text(
-            "Local Server & Benchmark",
-            style = MaterialTheme.typography.titleMedium,
-            fontWeight = FontWeight.Bold,
-        )
-        Text(
-            "Host an OpenAI-compatible endpoint on your Wi-Fi network, or measure on-device inference speed.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
-
         SecondaryTabRow(
             selectedTabIndex = selectedTab,
             containerColor = MaterialTheme.colorScheme.background,
