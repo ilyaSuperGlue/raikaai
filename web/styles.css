@@ -772,6 +772,11 @@ code {
   padding: var(--space-lg);
 }
 
+/* Wajib: display:flex di atas mengalahkan atribut hidden bawaan browser */
+.drop-overlay[hidden] {
+  display: none;
+}
+
 .drop-overlay-box {
   display: flex;
   flex-direction: column;
@@ -1059,6 +1064,11 @@ code {
   opacity: 1;
 }
 
+/* Wajib: display:flex di bawah mengalahkan atribut hidden bawaan browser */
+.modal-backdrop[hidden] {
+  display: none;
+}
+
 .modal-card {
   width: 100%;
   max-width: 560px;
@@ -1149,6 +1159,10 @@ button.modal-avatar:hover {
 
 .avatar-menu button:hover {
   background-color: var(--bg-elevated);
+}
+
+.avatar-menu[hidden] {
+  display: none;
 }
 
 .modal-name {
