@@ -13,32 +13,28 @@ android {
     // uses no API 37+ calls; targetSdk stays 36.
     compileSdk = 37
 
-    // -PabiFilter=arm64-v8a -> single-ABI APK; without flag -> all ABIs + universal
+    // -PabiFilter=arm64-v8a (or comma-separated "arm64-v8a,armeabi-v7a")
+    // Without flag -> all ABIs + universal
     val abiFilter =
         (project.findProperty("abiFilter") as String?)?.takeIf {
             it.isNotBlank() && it != "all"
         }
+    val targetAbis = abiFilter?.split(",")?.map { it.trim() }?.filter { it.isNotBlank() }
 
     defaultConfig {
         applicationId = "com.raikaai.app"
         minSdk = 26
         targetSdk = 36
-        versionCode = 5
-        versionName = "0.2.0"
-
-        ndk {
-            if (abiFilter == null) {
-                abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
-            }
-        }
+        versionCode = 1
+        versionName = "0.1.0"
     }
 
     splits {
         abi {
             isEnable = true
             reset()
-            if (abiFilter != null) {
-                include(abiFilter)
+            if (targetAbis != null) {
+                targetAbis.forEach { include(it) }
                 isUniversalApk = false
             } else {
                 include("arm64-v8a", "armeabi-v7a", "x86", "x86_64")
@@ -50,6 +46,8 @@ android {
     signingConfigs {
         create("release") {
             storeFile = file("release.keystore")
+            enableV1Signing = true
+            enableV2Signing = true
             // Passwords are intentionally NOT hardcoded: read from environment first,
             // then gradle.properties / local.properties (never commit those files).
             // Falls back to the pre-rebrand LITECHAT_* / litechat.* names so the
