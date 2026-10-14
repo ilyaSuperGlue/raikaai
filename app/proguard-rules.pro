@@ -7,20 +7,20 @@
 -keepclassmembers class kotlinx.coroutines.** { volatile <fields>; }
 
 # Gson & serialization models: keep generic signatures and data classes serialized via reflection
--keep class com.localgpt.app.data.** { *; }
--keep class com.localgpt.app.localai.** { *; }
--keep class com.localgpt.app.core.server.** { *; }
--keep class com.localgpt.app.core.remote.** { *; }
--keep class com.localgpt.app.ui.chat.PersonaPreset { *; }
--keep class com.localgpt.app.ui.chat.BenchmarkResult { *; }
--keep class com.localgpt.app.skills.** { *; }
--keep class com.localgpt.app.web.** { *; }
--keep class com.localgpt.app.rag.** { *; }
--keep class com.localgpt.app.artifacts.** { *; }
--keep class com.localgpt.app.mcp.** { *; }
+-keep class com.raikaai.app.data.** { *; }
+-keep class com.raikaai.app.localai.** { *; }
+-keep class com.raikaai.app.core.server.** { *; }
+-keep class com.raikaai.app.core.remote.** { *; }
+-keep class com.raikaai.app.ui.chat.PersonaPreset { *; }
+-keep class com.raikaai.app.ui.chat.BenchmarkResult { *; }
+-keep class com.raikaai.app.skills.** { *; }
+-keep class com.raikaai.app.web.** { *; }
+-keep class com.raikaai.app.rag.** { *; }
+-keep class com.raikaai.app.artifacts.** { *; }
+-keep class com.raikaai.app.mcp.** { *; }
 -keep class com.materialkolor.** { *; }
 # WorkManager: ReminderWorker diinstansiasi via reflection oleh WorkerFactory bawaan
--keep class com.localgpt.app.reminder.ReminderWorker {
+-keep class com.raikaai.app.reminder.ReminderWorker {
     public <init>(android.content.Context, androidx.work.WorkerParameters);
 }
 # WorkManager: WorkDatabase_Impl diinstansiasi via reflection oleh Room saat

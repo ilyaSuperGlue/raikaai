@@ -4,7 +4,7 @@ plugins {
 }
 
 android {
-    namespace = "com.localgpt.app"
+    namespace = "com.raikaai.app"
     // compileSdk 37: required by the Compose 1.12.0-beta01 / material3
     // 1.5.0-alpha25 / material-kolor 5.0.0 artifacts' AAR metadata (AGP 9
     // enforces it). Google has not published the android-37 platform
@@ -20,7 +20,7 @@ android {
         }
 
     defaultConfig {
-        applicationId = "com.localgpt.app"
+        applicationId = "com.raikaai.app"
         minSdk = 26
         targetSdk = 36
         versionCode = 2
@@ -52,21 +52,29 @@ android {
             storeFile = file("release.keystore")
             // Passwords are intentionally NOT hardcoded: read from environment first,
             // then gradle.properties / local.properties (never commit those files).
-            val ksStorePw = System.getenv("LITECHAT_KEYSTORE_STORE_PASSWORD")
+            // Falls back to the pre-rebrand LITECHAT_* / litechat.* names so the
+            // existing release.keystore (alias "localgpt") keeps working.
+            val ksStorePw = System.getenv("RAIKAAI_KEYSTORE_STORE_PASSWORD")
+                ?: System.getenv("LITECHAT_KEYSTORE_STORE_PASSWORD")
+                ?: (project.findProperty("raikaai.keystore.storePassword") as String?)
                 ?: (project.findProperty("litechat.keystore.storePassword") as String?)
                 ?: "localgpt123"
-            val ksKeyPw = System.getenv("LITECHAT_KEYSTORE_KEY_PASSWORD")
+            val ksKeyPw = System.getenv("RAIKAAI_KEYSTORE_KEY_PASSWORD")
+                ?: System.getenv("LITECHAT_KEYSTORE_KEY_PASSWORD")
+                ?: (project.findProperty("raikaai.keystore.keyPassword") as String?)
                 ?: (project.findProperty("litechat.keystore.keyPassword") as String?)
                 ?: "localgpt123"
             if (ksStorePw.isNullOrEmpty() || ksKeyPw.isNullOrEmpty()) {
                 logger.warn(
-                    "Keystore passwords not set (LITECHAT_KEYSTORE_STORE_PASSWORD / " +
-                        "LITECHAT_KEYSTORE_KEY_PASSWORD env or litechat.keystore.* gradle properties). " +
+                    "Keystore passwords not set (RAIKAAI_KEYSTORE_STORE_PASSWORD / " +
+                        "RAIKAAI_KEYSTORE_KEY_PASSWORD env or raikaai.keystore.* gradle properties). " +
                         "Release signing will fail until they are provided."
                 )
             }
             storePassword = ksStorePw
-            keyAlias = System.getenv("LITECHAT_KEYSTORE_KEY_ALIAS")
+            keyAlias = System.getenv("RAIKAAI_KEYSTORE_KEY_ALIAS")
+                ?: System.getenv("LITECHAT_KEYSTORE_KEY_ALIAS")
+                ?: (project.findProperty("raikaai.keystore.keyAlias") as String?)
                 ?: (project.findProperty("litechat.keystore.keyAlias") as String?)
                 ?: "localgpt"
             keyPassword = ksKeyPw

@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "litechat"
+rootProject.name = "raikaai"
 include(":app")

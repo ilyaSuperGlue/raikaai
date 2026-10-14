@@ -3,7 +3,7 @@
 > Aplikasi Android "LM Studio mini": **chat AI on-device via LiteRT-LM** + **server OpenAI-compatible `/v1`**
 > yang bisa dipakai aplikasi lain (device sama via `127.0.0.1`, atau LAN via `0.0.0.0`).
 >
-> Nama project: **TBD placeholder "LiteChat"** — applicationId `com.localgpt.app` (mudah diganti).
+> Nama project: **TBD placeholder "RaikaAI"** — applicationId `com.raikaai.app` (mudah diganti).
 > Sumber inspirasi/porting: `/home/kouzen/Documents/Projects/kzkt`.
 
 ---
@@ -32,7 +32,7 @@
 ## 3. Struktur modul (single `:app`, gaya kzkt)
 
 ```
-app/src/main/java/com/localgpt/app/
+app/src/main/java/com/raikaai/app/
 ├── core/
 │   ├── engine/
 │   │   ├── LiteRtEngineManager.kt   # port LiteRtInferenceEngine.kt kzkt

@@ -1,6 +1,6 @@
 <div align="center">
-  <img src="docs/assets/app_icon.png" width="100" alt="LiteChat Logo" />
-  <h1>LiteChat</h1>
+  <img src="docs/assets/app_icon.png" width="100" alt="RaikaAI Logo" />
+  <h1>RaikaAI</h1>
 
   <p>
     <a href="https://github.com/kouzen-neo/litechat/actions/workflows/build-apk.yml"><img src="https://img.shields.io/github/actions/workflow/status/kouzen-neo/litechat/build-apk.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="Build"></a>
@@ -9,9 +9,9 @@
   </p>
 </div>
 
-LiteChat is a free and open-source Android AI client and local inference server powered by **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`). It runs large language models (such as Gemma 4, SmolLM, Llama, and Qwen) on smartphone hardware with GPU acceleration (OpenCL) and CPU fallback (Arm NEON / XNNPack).
+RaikaAI is a free and open-source Android AI client and local inference server powered by **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`). It runs large language models (such as Gemma 4, SmolLM, Llama, and Qwen) on smartphone hardware with GPU acceleration (OpenCL) and CPU fallback (Arm NEON / XNNPack).
 
-LiteChat also embeds an OpenAI-compatible HTTP server (`/v1`) using **Ktor CIO**, so your phone can act as a local LLM inference backend for desktop apps, web interfaces, and IDE extensions (e.g., VS Code Continue, OpenWebUI, SillyTavern) over Wi-Fi / LAN.
+RaikaAI also embeds an OpenAI-compatible HTTP server (`/v1`) using **Ktor CIO**, so your phone can act as a local LLM inference backend for desktop apps, web interfaces, and IDE extensions (e.g., VS Code Continue, OpenWebUI, SillyTavern) over Wi-Fi / LAN.
 
 ---
 
@@ -45,7 +45,7 @@ LiteChat also embeds an OpenAI-compatible HTTP server (`/v1`) using **Ktor CIO**
 ## Architecture & Structure
 
 ```
-app/src/main/java/com/localgpt/app/
+app/src/main/java/com/raikaai/app/
 ├── MainActivity.kt                      # Compose entry point and notification observer
 ├── core/
 │   ├── engine/

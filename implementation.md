@@ -1,4 +1,4 @@
-# LiteChat Implementation & Refactoring Log
+# RaikaAI Implementation & Refactoring Log
 
 ## 📊 Status Akhir
 
@@ -37,7 +37,7 @@
 | `OpenAiServer.kt` | Rate limiting (10 req/min/IP) |
 | `SseProtocol.kt` | Counter → AtomicLong |
 | `PromptBuilder.kt` | Constants migration |
-| `LiteChatApp.kt` | Dead routes + constants migration |
+| `RaikaAIApp.kt` | Dead routes + constants migration |
 | `ModelsScreen.kt` | Constants migration |
 | `NetworkUtils.kt` | Shared OkHttpClient singleton |
 | `WebSearchManager.kt` | Uses shared OkHttpClient |

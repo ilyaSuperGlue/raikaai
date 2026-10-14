@@ -1,21 +1,21 @@
-# AGENTS.md — Developer & AI Agent Guide for LiteChat (LocalGPT)
+# AGENTS.md — Developer & AI Agent Guide for RaikaAI
 
-Panduan arsitektur, standar pengembangan, alur kerja, dan instruksi operasional untuk AI Agent maupun pengembang manusia yang bekerja pada repositori **LiteChat** (`com.localgpt.app`).
+Panduan arsitektur, standar pengembangan, alur kerja, dan instruksi operasional untuk AI Agent maupun pengembang manusia yang bekerja pada repositori **RaikaAI** (`com.raikaai.app`).
 
 ---
 
 ## 📌 1. Ikhtisar Proyek (Project Overview)
 
-**LiteChat** (paket: `com.localgpt.app`) adalah aplikasi Android mandiri (*100% On-Device AI / LM Studio Mini*) yang memanfaatkan **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`) untuk menjalankan model bahasa besar (LLM seperti Gemma 4, SmolLM, Llama) secara lokal dengan akselerasi hardware GPU (Adreno / Mali via OpenCL) dan fallback CPU (Arm NEON / XNNPack).
+**RaikaAI** (paket: `com.raikaai.app`) adalah aplikasi Android mandiri (*100% On-Device AI / LM Studio Mini*) yang memanfaatkan **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`) untuk menjalankan model bahasa besar (LLM seperti Gemma 4, SmolLM, Llama) secara lokal dengan akselerasi hardware GPU (Adreno / Mali via OpenCL) dan fallback CPU (Arm NEON / XNNPack).
 
-Selain berfungsi sebagai antarmuka obrolan AI *offline*, LiteChat menyematkan server HTTP kompatibel OpenAI (`/v1`) berbasis **Ktor CIO** yang memungkinkan aplikasi desktop, web, atau IDE (seperti VS Code Continue, OpenWebUI, SillyTavern) menggunakan smartphone Android sebagai backend mesin inferensi LLM lokal melalui jaringan Wi-Fi/LAN.
+Selain berfungsi sebagai antarmuka obrolan AI *offline*, RaikaAI menyematkan server HTTP kompatibel OpenAI (`/v1`) berbasis **Ktor CIO** yang memungkinkan aplikasi desktop, web, atau IDE (seperti VS Code Continue, OpenWebUI, SillyTavern) menggunakan smartphone Android sebagai backend mesin inferensi LLM lokal melalui jaringan Wi-Fi/LAN.
 
 ---
 
 ## 🏗️ 2. Arsitektur & Struktur Direktori
 
 ```
-app/src/main/java/com/localgpt/app/
+app/src/main/java/com/raikaai/app/
 ├── MainActivity.kt                      # Entry point Compose & pemantau izin notifikasi
 ├── core/
 │   ├── engine/
@@ -56,7 +56,7 @@ app/src/main/java/com/localgpt/app/
 
 ## ⚙️ 3. Konsep Inti & Panduan Komponen
 
-### A. LiteRT-LM Engine Lifecycle ([`LiteRtEngineManager.kt`](file:///home/kouzen/Documents/Projects/newpj/app/src/main/java/com/localgpt/app/core/engine/LiteRtEngineManager.kt))
+### A. LiteRT-LM Engine Lifecycle ([`LiteRtEngineManager.kt`](file:///home/kouzen/Documents/Projects/litechat/app/src/main/java/com/raikaai/app/core/engine/LiteRtEngineManager.kt))
 - **Thread Safety**: Google AI Edge LiteRT `Engine` tidak mendukung eksekusi prompt secara konkuren. Seluruh proses inferensi disinkronkan melalui `kotlinx.coroutines.sync.Mutex`.
 - **Eksplisit Load / Unload**:
   - `load(params)`: Mengompilasi shader OpenCL / memuat model ke RAM/VRAM.
@@ -64,14 +64,14 @@ app/src/main/java/com/localgpt/app/
 - **Pembatalan Generasi**: Memanfaatkan `Conversation.cancelProcess()` untuk membatalkan proses generasi teks secara instan tanpa membuat native bridge *crash*.
 - **Metrik Inferensi**: Menghitung *Time to First Token (TTFT ms)*, *Tokens per second (tok/s)*, dan mencatat telemetry log ke disk cache.
 
-### B. Embedded OpenAI-Compatible Server ([`OpenAiServer.kt`](file:///home/kouzen/Documents/Projects/newpj/app/src/main/java/com/localgpt/app/core/server/OpenAiServer.kt))
+### B. Embedded OpenAI-Compatible Server ([`OpenAiServer.kt`](file:///home/kouzen/Documents/Projects/litechat/app/src/main/java/com/raikaai/app/core/server/OpenAiServer.kt))
 - **Endpoint yang Didukung**:
   - `POST /v1/chat/completions`: Streaming SSE (`stream: true`) atau single JSON response (`stream: false`).
   - `POST /v1/completions`: Raw text completion untuk extension IDE.
   - `GET /v1/models` & `GET /v1/models/{model}`: Metadata model aktif.
   - `GET /health`: Health check string.
 - **CORS Penuh**: Menyediakan penanganan preflight `OPTIONS` global dan header `Access-Control-Allow-Origin: *` agar Web App di browser laptop/komputer dapat memanggil server HP tanpa hambatan.
-- **Deteksi LAN IP**: Menggunakan [`NetworkUtils.kt`](file:///home/kouzen/Documents/Projects/newpj/app/src/main/java/com/localgpt/app/util/NetworkUtils.kt) untuk menampilkan URL lokal langsung (`http://192.168.x.x:8080/v1`).
+- **Deteksi LAN IP**: Menggunakan [`NetworkUtils.kt`](file:///home/kouzen/Documents/Projects/litechat/app/src/main/java/com/raikaai/app/util/NetworkUtils.kt) untuk menampilkan URL lokal langsung (`http://192.168.x.x:8080/v1`).
 
 ### C. Fitur Khas LM Studio di Antarmuka
 1. **Speed Benchmark Tool (`⚡`)**:
@@ -103,7 +103,7 @@ app/src/main/java/com/localgpt/app/
 ```bash
 ./gradlew assembleRelease -PabiFilter=arm64-v8a
 ```
-*Output: `app/build/outputs/apk/release/app-arm64-v8a-release.apk` (atau `./LiteChat-arm64-v8a-release.apk`)*
+*Output: `app/build/outputs/apk/release/app-arm64-v8a-release.apk` (atau `./RaikaAI-arm64-v8a-release.apk`)*
 
 > [!NOTE]
 > Parameter `-PabiFilter=arm64-v8a` memastikan APK hanya memaketkan pustaka *native* 64-bit ARM untuk menghasilkan ukuran file minimal (~24 MB) dengan performa maksimal.
@@ -114,17 +114,17 @@ app/src/main/java/com/localgpt/app/
 kdeconnect-cli -l
 
 # 2. Kirim berkas APK ke perangkat
-kdeconnect-cli --device <DEVICE_ID> --share ./LiteChat-arm64-v8a-release.apk
+kdeconnect-cli --device <DEVICE_ID> --share ./RaikaAI-arm64-v8a-release.apk
 ```
 
 ### Memasang APK via ADB (USB / Wireless)
 ```bash
 # Mode Kabel USB
-adb install -r LiteChat-arm64-v8a-release.apk
+adb install -r RaikaAI-arm64-v8a-release.apk
 
 # Mode Wireless Debugging (Android 11+)
 adb connect <IP-HP>:<PORT>
-adb install -r LiteChat-arm64-v8a-release.apk
+adb install -r RaikaAI-arm64-v8a-release.apk
 ```
 
 ---
@@ -139,4 +139,4 @@ adb install -r LiteChat-arm64-v8a-release.apk
    - Gunakan `StateFlow` dan `collectAsState()` untuk reaktivitas state asinkron dari repository/service.
    - Pastikan operasi IO berat (pembacaan berkas model, parsing JSON, download) selalu dijalankan pada `Dispatchers.IO`.
 3. **ProGuard & R8**:
-   - Setiap data class baru yang diserialisasi ke JSON (via Gson) atau berinteraksi dengan native JNI harus didaftarkan di [`proguard-rules.pro`](file:///home/kouzen/Documents/Projects/newpj/app/proguard-rules.pro) dengan tag `-keep class ...`.
+   - Setiap data class baru yang diserialisasi ke JSON (via Gson) atau berinteraksi dengan native JNI harus didaftarkan di [`proguard-rules.pro`](file:///home/kouzen/Documents/Projects/litechat/app/proguard-rules.pro) dengan tag `-keep class ...`.
