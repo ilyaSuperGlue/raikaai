@@ -3,8 +3,7 @@
   <h1>RaikaAI</h1>
 
   <p>
-    <a href="LICENSE"><img src="https://img.shields.io/badge/Lisensi-Apache_2.0-blue.svg?style=for-the-badge&logo=apache&logoColor=white" alt="Lisensi: Apache 2.0"></a>
-    <a href="https://github.com/kouzen-neo/raikaai/releases"><img src="https://img.shields.io/github/v/release/kouzen-neo/raikaai?style=for-the-badge&color=teal" alt="Rilis Terbaru"></a>
+    <a href="LICENSE"><img src="https://img.shields.io/badge/Lisensi-GPLv3-blue.svg?style=for-the-badge&logo=gnu&logoColor=white" alt="Lisensi: GPLv3"></a>
     <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Android-API%2026%2B-3DDC84.svg?style=for-the-badge&logo=android&logoColor=white" alt="Android SDK"></a>
     <a href="https://ai.google.dev/edge/litert"><img src="https://img.shields.io/badge/Google_LiteRT-Akselerasi_GPU-4285F4.svg?style=for-the-badge&logo=google&logoColor=white" alt="LiteRT"></a>
     <a href="https://ktor.io/"><img src="https://img.shields.io/badge/Ktor-Server_CIO-7F52FF.svg?style=for-the-badge&logo=ktor&logoColor=white" alt="Ktor"></a>
@@ -135,4 +134,4 @@ Pengembangan RaikaAI terwujud berkat ekosistem open-source yang luar biasa:
 
 ## Lisensi
 
-Proyek ini dilisensikan di bawah [Lisensi Apache 2.0](LICENSE).
+Proyek ini dilisensikan di bawah [GNU General Public License v3.0 (GPLv3)](LICENSE).
