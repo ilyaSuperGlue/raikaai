@@ -9,122 +9,29 @@
   </p>
 </div>
 
-RaikaAI is a free and open-source Android AI client and local inference server powered by **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`). It runs large language models (such as Gemma 4, SmolLM, Llama, and Qwen) on smartphone hardware with GPU acceleration (OpenCL) and CPU fallback (Arm NEON / XNNPack).
+100% on-device AI chat for Android, powered by **Google AI Edge LiteRT-LM**.
+Runs Gemma, SmolLM, Llama and Qwen locally with GPU acceleration — plus an
+embedded **OpenAI-compatible `/v1` server** so your phone works as an LLM
+backend for VS Code Continue, OpenWebUI and SillyTavern over Wi-Fi.
 
-RaikaAI also embeds an OpenAI-compatible HTTP server (`/v1`) using **Ktor CIO**, so your phone can act as a local LLM inference backend for desktop apps, web interfaces, and IDE extensions (e.g., VS Code Continue, OpenWebUI, SillyTavern) over Wi-Fi / LAN.
+## Features
 
----
+- Offline inference, no account — OpenCL GPU with CPU fallback
+- OpenAI-compatible server (`/v1/chat/completions` streaming, `/v1/models`, `/health`) — see [docs/API.md](docs/API.md)
+- Characters & personas (import/export, example dialogues), skills, MCP tools, RAG docs, reminders
+- Image generation via remote providers, TTS/STT, speed benchmark
+- Material 3 Expressive, OLED black theme, Hugging Face model manager
 
-## Key Features
-
-- **On-Device & Offline Inference**: No account or subscription needed. Models run locally on the device.
-- **Hardware Acceleration**: OpenCL GPU inference with automatic CPU fallback.
-- **Embedded OpenAI-Compatible HTTP Server**:
-  - `POST /v1/chat/completions` (Server-Sent Events streaming chunks and standard JSON)
-  - `POST /v1/completions` (Raw completion)
-  - `GET /v1/models` and `GET /v1/models/{model}`
-  - `GET /health`
-  - CORS support for browser and web app integration.
-- **Material 3 Expressive Design System**:
-  - Adaptive grouped cards and Material 3 controls.
-  - Light, Dark, and Pure Black (#000000 OLED) theme modes.
-  - Dynamic Material You tonal color palettes.
-- **Hugging Face Model Manager**:
-  - In-app repository scraper and model browser filtered for `.litertlm` binaries.
-  - Resumeable chunked background downloader via OkHttp and Android Foreground Services.
-  - SAF (Storage Access Framework) local file importer.
-- **Interactive AI Tools**:
-  - Inference benchmark tool (TTFT, decode tokens per second, CPU vs. GPU comparison).
-  - Custom AI Persona system with persistent system prompt templates.
-  - Context window token consumption monitor.
-  - Offline Text-to-Speech (TTS) and Voice Input (Speech-to-Text).
-  - RAG document and code snippet context attachment.
-
----
-
-## Architecture & Structure
-
-```
-app/src/main/java/com/raikaai/app/
-├── MainActivity.kt                      # Compose entry point and notification observer
-├── core/
-│   ├── engine/
-│   │   └── LiteRtEngineManager.kt       # JNI bridge to LiteRT-LM runtime, RAM lifecycle, telemetry
-│   └── server/
-│       ├── OpenAiServer.kt              # Ktor embedded server (/v1/chat/completions, CORS + browser guard)
-│       ├── ChatServerService.kt         # Foreground Service and sticky notification server
-│       ├── PromptBuilder.kt             # Multi-turn conversation and system prompt serializer
-│       └── SseProtocol.kt               # SSE chunk formatter for streaming tokens
-├── localai/
-│   ├── HuggingFaceModelResolver.kt      # HF repo scraper and .litertlm file filter
-│   ├── LocalAiCatalog.kt                # Built-in verified model catalog
-│   ├── LocalModelDownloader.kt          # Resumeable HTTP downloader
-│   └── LocalModelManager.kt             # Storage and SAF file import manager
-├── data/
-│   ├── ChatRepository.kt                # JSON conversation tree storage (+ AttachmentType)
-│   └── SettingsRepository.kt            # Jetpack DataStore preferences (+ SamplingDefaults/AppLimits)
-├── ui/
-│   ├── chat/                            # ChatScreen, ChatTopBar, ChatDialogsHost, MessageBubble,
-│   │                                    # PersonaStore, BenchmarkRunner, ServerControls, CharacterPrompt
-│   ├── characters/                      # Character cards, import/export, persona editor
-│   ├── models/                          # Model cards, parameters, downloader, SAF importer
-│   ├── component/                       # Material 3 reusable components and Markdown parser
-│   └── theme/                           # Dynamic theming and typography
-├── skills/                              # Built-in/custom skills + tool-call parser
-├── mcp/                                 # Model Context Protocol client
-├── reminder/                            # Scheduled reminders (WorkManager)
-└── util/
-    ├── KLog.kt                          # Release-safe logging
-    └── NetworkUtils.kt                  # LAN IP resolution + SSRF-safe HTTP helpers
-```
-
----
-
-## Build & Installation
-
-### Requirements
-
-- Android Studio Ladybug / Meerkat or later
-- JDK 17+
-- Android SDK 35 / 36 / 37
-- Android Device with ARM64 architecture (Android 8.0+ / API 26+)
-
-### Run Unit Tests
+## Quick start
 
 ```bash
 ./gradlew testDebugUnitTest
+./gradlew assembleDebug                      # debug APK
+./gradlew assembleRelease -PabiFilter=arm64-v8a   # optimized release APK
 ```
 
-### Build Debug APK
-
-```bash
-./gradlew assembleDebug
-```
-
-*Output: `app/build/outputs/apk/debug/app-debug.apk`*
-
-### Build Optimized Signed Release APK (arm64-v8a)
-
-```bash
-./gradlew assembleRelease -PabiFilter=arm64-v8a
-```
-
-*Output: `app/build/outputs/apk/release/app-arm64-v8a-release.apk`*
-
-> Release builds are signed with `app/release.keystore`, which is
-> **git-ignored and never committed**. Provide it locally plus one of:
-> `RAIKAAI_KEYSTORE_STORE_PASSWORD` / `RAIKAAI_KEYSTORE_KEY_PASSWORD`
-> environment variables (or `raikaai.keystore.*` Gradle properties).
-> Legacy `LITECHAT_*` / `litechat.*` names are accepted as fallback.
-
-### Install via ADB
-
-```bash
-adb install -r app/build/outputs/apk/release/app-arm64-v8a-release.apk
-```
-
----
+Docs: [Architecture](docs/ARCHITECTURE.md) · [Development & signing](docs/DEVELOPMENT.md) · [Embedded API](docs/API.md)
 
 ## License
 
-This project is licensed under the Apache License 2.0.
+Apache License 2.0 — see [LICENSE](LICENSE).
