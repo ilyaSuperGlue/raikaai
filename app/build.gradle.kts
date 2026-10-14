@@ -52,15 +52,15 @@ android {
             // then gradle.properties / local.properties (never commit those files).
             // Falls back to the pre-rebrand LITECHAT_* / litechat.* names so the
             // existing release.keystore (alias "localgpt") keeps working.
-            val ksStorePw = System.getenv("RAIKAAI_KEYSTORE_STORE_PASSWORD")
-                ?: System.getenv("LITECHAT_KEYSTORE_STORE_PASSWORD")
-                ?: (project.findProperty("raikaai.keystore.storePassword") as String?)
-                ?: (project.findProperty("litechat.keystore.storePassword") as String?)
+            val ksStorePw = System.getenv("RAIKAAI_KEYSTORE_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+                ?: System.getenv("LITECHAT_KEYSTORE_STORE_PASSWORD")?.takeIf { it.isNotBlank() }
+                ?: (project.findProperty("raikaai.keystore.storePassword") as String?)?.takeIf { it.isNotBlank() }
+                ?: (project.findProperty("litechat.keystore.storePassword") as String?)?.takeIf { it.isNotBlank() }
                 ?: "localgpt123"
-            val ksKeyPw = System.getenv("RAIKAAI_KEYSTORE_KEY_PASSWORD")
-                ?: System.getenv("LITECHAT_KEYSTORE_KEY_PASSWORD")
-                ?: (project.findProperty("raikaai.keystore.keyPassword") as String?)
-                ?: (project.findProperty("litechat.keystore.keyPassword") as String?)
+            val ksKeyPw = System.getenv("RAIKAAI_KEYSTORE_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+                ?: System.getenv("LITECHAT_KEYSTORE_KEY_PASSWORD")?.takeIf { it.isNotBlank() }
+                ?: (project.findProperty("raikaai.keystore.keyPassword") as String?)?.takeIf { it.isNotBlank() }
+                ?: (project.findProperty("litechat.keystore.keyPassword") as String?)?.takeIf { it.isNotBlank() }
                 ?: "localgpt123"
             if (ksStorePw.isNullOrEmpty() || ksKeyPw.isNullOrEmpty()) {
                 logger.warn(
