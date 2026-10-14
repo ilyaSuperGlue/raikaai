@@ -15,6 +15,8 @@ document.addEventListener('DOMContentLoaded', () => {
   initDynamicYear();
   initGallery();
   initCopySample();
+  initUploader();
+  initAvatarMenu();
 });
 
 /* iconType (aplikasi) -> glyph avatar (galeri) */
@@ -414,6 +416,11 @@ function initGallery() {
 
   let characters = [];
 
+  function renderRefilter() {
+    render(searchInput ? searchInput.value : '');
+  }
+  galleryListeners.push(renderRefilter);
+
   function paramText(c) {
     const parts = [];
     if (c.temperature !== null && c.temperature !== undefined) parts.push(`Temp ${c.temperature}`);
@@ -433,7 +440,8 @@ function initGallery() {
 
   function render(filter = '') {
     grid.innerHTML = '';
-    const visible = characters.filter(c => matchesQuery(c, filter.trim()));
+    const pool = allCharacters(characters);
+    const visible = pool.filter(c => matchesQuery(c, filter.trim()));
 
     visible.forEach((c, index) => {
       const card = document.createElement('button');
@@ -471,9 +479,11 @@ function initGallery() {
 
       const tags = document.createElement('div');
       tags.className = 'character-tags';
-      (c.tags || []).forEach(t => {
+      const shownTags = (c.tags || []).slice();
+      if (c._local && !shownTags.includes('lokal')) shownTags.push('lokal');
+      shownTags.forEach(t => {
         const tag = document.createElement('span');
-        tag.className = 'tag';
+        tag.className = 'tag' + (t === 'lokal' ? ' tag-local' : '');
         tag.textContent = t;
         tags.appendChild(tag);
       });
@@ -484,7 +494,7 @@ function initGallery() {
 
       card.appendChild(header);
       card.appendChild(desc);
-      if ((c.tags || []).length) card.appendChild(tags);
+      if (tags.childNodes.length) card.appendChild(tags);
       card.appendChild(meta);
 
       card.style.transitionDelay = `${Math.min(index, 5) * 60}ms`;
@@ -493,7 +503,7 @@ function initGallery() {
     });
 
     if (searchCount) {
-      searchCount.textContent = `${visible.length} dari ${characters.length} karakter`;
+      searchCount.textContent = `${visible.length} dari ${pool.length} karakter`;
     }
     if (emptyState) {
       emptyState.hidden = visible.length > 0;
@@ -533,10 +543,37 @@ function initGallery() {
     });
 }
 
+/* Karakter hasil unggah (hanya sesi ini, tidak masuk galeri). */
+const localCharacters = [];
+const galleryListeners = [];
+
+function notifyGallery() {
+  galleryListeners.forEach(fn => fn());
+}
+
+function allCharacters(gallery) {
+  return localCharacters.concat(gallery);
+}
+
 /* ==========================================================================
    CHARACTER DETAIL MODAL
    ========================================================================== */
 let modalCharacter = null;
+
+function renderModalAvatar(c) {
+  const avatarEl = document.getElementById('modal-avatar');
+  if (!avatarEl) return;
+  avatarEl.innerHTML = '';
+  const uri = (c.avatarUri || '').trim();
+  if (uri) {
+    const img = document.createElement('img');
+    img.src = uri;
+    img.alt = `Ikon ${c.name}`;
+    avatarEl.appendChild(img);
+  } else {
+    avatarEl.textContent = glyphFor(c.iconType);
+  }
+}
 
 function fieldRow(label, value) {
   if (value === null || value === undefined) return null;
@@ -558,7 +595,10 @@ function openModal(c) {
   const backdrop = document.getElementById('modal-backdrop');
   if (!backdrop) return;
 
-  document.getElementById('modal-avatar').textContent = glyphFor(c.iconType);
+  renderModalAvatar(c);
+
+  const previewBadge = document.getElementById('modal-preview-badge');
+  if (previewBadge) previewBadge.hidden = !c._local;
   document.getElementById('modal-name').textContent = c.name;
   document.getElementById('modal-author').textContent = `oleh ${c.author || 'Komunitas'} · v${c.schemaVersion || '?'}`;
 
@@ -607,16 +647,24 @@ function closeModal() {
 
 function downloadModalJson() {
   if (!modalCharacter) return;
-  const blob = new Blob([JSON.stringify(modalCharacter, null, 2)], { type: 'application/json' });
+  const payload = { ...modalCharacter };
+  delete payload._local;
+  const uri = (payload.avatarUri || '').trim();
+  if (uri.startsWith('data:')) {
+    // Aturan galeri: avatarUri harus kosong agar berkas layak di-PR-kan.
+    payload.avatarUri = '';
+    showToast('Avatar kustom tidak ikut terunduh (aturan galeri).');
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `${modalCharacter.id || 'character'}.json`;
+  a.download = `${payload.id || 'character'}.json`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
-  showToast(`${modalCharacter.name} diunduh.`);
+  showToast(`${payload.name} diunduh.`);
 }
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -637,7 +685,9 @@ document.addEventListener('DOMContentLoaded', () => {
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
       if (!modalCharacter) return;
-      copyText(JSON.stringify(modalCharacter, null, 2), 'JSON tersalin ke clipboard.');
+      const payload = { ...modalCharacter };
+      delete payload._local;
+      copyText(JSON.stringify(payload, null, 2), 'JSON tersalin ke clipboard.');
     });
   }
 
@@ -647,6 +697,223 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 });
 
+/* ==========================================================================
+   JSON UPLOAD (HERO DROPZONE) — pratinjau lokal, langsung bisa salin/unduh
+   ========================================================================== */
+function slugify(text) {
+  return (text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || `karakter-${Date.now()}`;
+}
+
+function normalizeUpload(data, fileName) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) {
+    throw new Error('Berkas bukan objek JSON karakter.');
+  }
+  if (!String(data.name || '').trim() || !String(data.systemPrompt || '').trim()) {
+    throw new Error('Field wajib: name dan systemPrompt.');
+  }
+  const tags = Array.isArray(data.tags) ? data.tags.map(String) : [];
+  return {
+    schemaVersion: 1,
+    id: String(data.id || slugify(data.name)).trim() || slugify(fileName),
+    name: String(data.name).trim(),
+    iconType: String(data.iconType || 'custom').trim() || 'custom',
+    description: String(data.description || ''),
+    greeting: String(data.greeting || ''),
+    systemPrompt: String(data.systemPrompt),
+    avatarUri: String(data.avatarUri || ''),
+    temperature: data.temperature ?? null,
+    topK: data.topK ?? null,
+    personality: String(data.personality || ''),
+    scenario: String(data.scenario || ''),
+    exampleDialogues: String(data.exampleDialogues || ''),
+    author: String(data.author || 'Perangkatmu'),
+    lang: String(data.lang || 'id'),
+    tags,
+    _local: true,
+  };
+}
+
+function initUploader() {
+  const dropzone = document.getElementById('upload-dropzone');
+  const input = document.getElementById('upload-input');
+  if (!dropzone || !input) return;
+
+  function handleFile(file) {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result);
+        const character = normalizeUpload(data, file.name.replace(/\.json$/i, ''));
+        const existing = localCharacters.findIndex(c => c.id === character.id);
+        if (existing >= 0) {
+          localCharacters[existing] = character;
+        } else {
+          localCharacters.unshift(character);
+        }
+        notifyGallery();
+        openModal(character);
+        showToast(`${character.name} siap dipratinjau.`);
+      } catch (err) {
+        console.warn('Upload JSON ditolak:', err);
+        showToast(err.message || 'JSON tidak valid.');
+      }
+    };
+    reader.onerror = () => showToast('Gagal membaca berkas.');
+    reader.readAsText(file);
+  }
+
+  dropzone.addEventListener('click', () => input.click());
+  dropzone.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      input.click();
+    }
+  });
+  input.addEventListener('change', () => {
+    handleFile(input.files[0]);
+    input.value = '';
+  });
+
+  ['dragenter', 'dragover'].forEach(evt => {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.add('dragover');
+    });
+  });
+  ['dragleave', 'drop'].forEach(evt => {
+    dropzone.addEventListener(evt, (e) => {
+      e.preventDefault();
+      dropzone.classList.remove('dragover');
+    });
+  });
+  dropzone.addEventListener('drop', (e) => {
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    handleFile(file);
+  });
+}
+
+/* ==========================================================================
+   AVATAR MENU — klik avatar di modal: unggah gambar / unduh ikon
+   ========================================================================== */
+function downscaleImage(file, maxSize = 192) {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const scale = Math.min(1, maxSize / Math.max(img.width, img.height));
+      const w = Math.max(1, Math.round(img.width * scale));
+      const h = Math.max(1, Math.round(img.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      URL.revokeObjectURL(url);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = () => {
+      URL.revokeObjectURL(url);
+      reject(new Error('Gambar tidak bisa dibaca.'));
+    };
+    img.src = url;
+  });
+}
+
+function downloadGlyphPng(glyph, fileName) {
+  const size = 512;
+  const canvas = document.createElement('canvas');
+  canvas.width = size;
+  canvas.height = size;
+  const ctx = canvas.getContext('2d');
+  ctx.font = `${Math.floor(size * 0.72)}px "Segoe UI Emoji", "Noto Color Emoji", "Apple Color Emoji", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(glyph, size / 2, size / 2 + size * 0.04);
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      showToast('Gagal membuat PNG.');
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = fileName;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    showToast('Ikon diunduh sebagai PNG.');
+  }, 'image/png');
+}
+
+function initAvatarMenu() {
+  const avatarBtn = document.getElementById('modal-avatar');
+  const menu = document.getElementById('avatar-menu');
+  const uploadBtn = document.getElementById('avatar-upload-btn');
+  const downloadBtn = document.getElementById('avatar-download-btn');
+  const fileInput = document.getElementById('avatar-input');
+  if (!avatarBtn || !menu || !uploadBtn || !downloadBtn || !fileInput) return;
+
+  function setMenu(open) {
+    menu.hidden = !open;
+  }
+
+  avatarBtn.addEventListener('click', (e) => {
+    e.stopPropagation();
+    setMenu(menu.hidden);
+  });
+
+  document.addEventListener('click', (e) => {
+    if (!menu.hidden && !menu.contains(e.target)) setMenu(false);
+  });
+
+  uploadBtn.addEventListener('click', () => {
+    setMenu(false);
+    fileInput.click();
+  });
+
+  fileInput.addEventListener('change', async () => {
+    const file = fileInput.files[0];
+    fileInput.value = '';
+    if (!file || !modalCharacter) return;
+    if (!file.type.startsWith('image/')) {
+      showToast('Pilih berkas gambar.');
+      return;
+    }
+    try {
+      modalCharacter.avatarUri = await downscaleImage(file);
+      renderModalAvatar(modalCharacter);
+      notifyGallery();
+      showToast('Ikon karakter diganti (hanya sesi ini).');
+    } catch (err) {
+      console.warn('Upload ikon gagal:', err);
+      showToast('Gambar tidak bisa dibaca.');
+    }
+  });
+
+  downloadBtn.addEventListener('click', () => {
+    setMenu(false);
+    if (!modalCharacter) return;
+    const base = modalCharacter.id || 'character';
+    const uri = (modalCharacter.avatarUri || '').trim();
+    if (uri.startsWith('data:image/')) {
+      const ext = uri.startsWith('data:image/jpeg') ? 'jpg' : 'png';
+      const a = document.createElement('a');
+      a.href = uri;
+      a.download = `${base}-icon.${ext}`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      showToast('Ikon diunduh.');
+    } else {
+      downloadGlyphPng(glyphFor(modalCharacter.iconType), `${base}-icon.png`);
+    }
+  });
+}
 /* ==========================================================================
    COPY FORMAT TEMPLATE
    ========================================================================== */

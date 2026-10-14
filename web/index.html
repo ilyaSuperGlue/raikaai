@@ -155,6 +155,15 @@
               Cara Berbagi
             </a>
           </div>
+
+          <div class="upload-dropzone" id="upload-dropzone" role="button" tabindex="0" aria-label="Unggah berkas JSON karakter untuk pratinjau">
+            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" x2="12" y1="3" y2="15"></line></svg>
+            <div class="upload-text">
+              <strong>Tarik JSON karakter ke sini</strong>
+              <span>atau klik untuk pilih berkas — langsung pratinjau, salin, dan unduh</span>
+            </div>
+            <input type="file" id="upload-input" accept=".json,application/json" hidden>
+          </div>
         </div>
 
         <!-- Hub Status Card -->
@@ -344,11 +353,19 @@
     <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-name">
       <div class="modal-header">
         <div class="modal-identity">
-          <div class="modal-avatar" id="modal-avatar">?</div>
+          <div class="modal-avatar-wrap">
+            <button class="modal-avatar" id="modal-avatar" type="button" aria-label="Ubah ikon karakter" title="Klik untuk unggah/unduh ikon">?</button>
+            <div class="avatar-menu" id="avatar-menu" hidden>
+              <button type="button" id="avatar-upload-btn">Unggah gambar...</button>
+              <button type="button" id="avatar-download-btn">Unduh ikon</button>
+            </div>
+            <input type="file" id="avatar-input" accept="image/*" hidden>
+          </div>
           <div>
             <h3 class="modal-name" id="modal-name">–</h3>
             <p class="modal-author" id="modal-author">–</p>
           </div>
+          <span class="preview-badge" id="modal-preview-badge" hidden>Pratinjau</span>
         </div>
         <button class="modal-close" id="modal-close" type="button" aria-label="Tutup detail">
           <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg>
