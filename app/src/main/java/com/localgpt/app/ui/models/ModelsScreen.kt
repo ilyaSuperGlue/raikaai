@@ -90,7 +90,6 @@ fun ModelsScreen(
     val downloadStates by viewModel.downloadStates.collectAsState()
     val isModelLoaded by viewModel.isModelLoaded.collectAsState()
     val isLoadingModel by viewModel.isLoadingModel.collectAsState()
-    val loadedModelPath by viewModel.loadedModelPath.collectAsState()
     val activeBackend by viewModel.activeBackendState.collectAsState()
 
     val remoteModels by viewModel.remoteModels
@@ -135,39 +134,30 @@ fun ModelsScreen(
             Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = onOpenDrawer,
-                        modifier = Modifier.size(36.dp),
-                    ) {
-                        Icon(
-                            Icons.Default.Menu,
-                            contentDescription = "Open Menu",
-                            tint = MaterialTheme.colorScheme.onSurface,
-                        )
-                    }
-                    Spacer(Modifier.width(10.dp))
-                    Column {
-                        Text(
-                            text = "Models Hub",
-                            style = MaterialTheme.typography.titleLarge,
-                            fontWeight = FontWeight.Bold,
-                        )
-                        Text(
-                            text = "On-Device LiteRT & Remote Endpoints",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
+                IconButton(
+                    onClick = onOpenDrawer,
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(
+                        Icons.Default.Menu,
+                        contentDescription = "Open Menu",
+                        tint = MaterialTheme.colorScheme.onSurface,
+                    )
                 }
-                com.localgpt.app.ui.component.EngineStatusBadge(
-                    isLoaded = isModelLoaded,
-                    modelPath = loadedModelPath,
-                    backend = activeBackend ?: "GPU",
-                    isLoading = isLoadingModel,
-                )
+                Spacer(Modifier.width(10.dp))
+                Column {
+                    Text(
+                        text = "Models Hub",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold,
+                    )
+                    Text(
+                        text = "On-Device LiteRT & Remote Endpoints",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
             }
 
             Spacer(Modifier.height(8.dp))

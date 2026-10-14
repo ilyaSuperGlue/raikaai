@@ -141,8 +141,9 @@ object ReminderParser {
         val note = m.groupValues[4].trim()
         if (note.isEmpty()) return null
         val zone = ZoneId.systemDefault()
-        val tomorrow = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate().plusDays(1)
-        val trigger = LocalDateTime.of(tomorrow, LocalTime.of(hour, minute))
+        val daysToAdd = if (hour == 0) 2L else 1L
+        val targetDate = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate().plusDays(daysToAdd)
+        val trigger = LocalDateTime.of(targetDate, LocalTime.of(hour, minute))
             .atZone(zone).toInstant().toEpochMilli()
         return ReminderSpec(triggerAtMillis = trigger, note = note)
     }
