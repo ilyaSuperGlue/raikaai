@@ -390,13 +390,13 @@ internal fun MessageBubble(
                 // Falls back to legacy single imagePath for old conversations.
                 val attachmentImages =
                     remember(message.attachments, message.imagePath) {
-                        val fromList = message.attachments.filter { it.type == "image" }.map { it.path }
+                        val fromList = message.attachments.orEmpty().filter { it.type == "image" }.map { it.path }
                         if (fromList.isNotEmpty()) fromList
                         else listOfNotNull(message.imagePath?.takeIf { it.isNotBlank() })
                     }
                 val attachmentFiles =
                     remember(message.attachments) {
-                        message.attachments.filter { it.type == "file" }
+                        message.attachments.orEmpty().filter { it.type == "file" }
                     }
                 attachmentImages.forEach { imagePath ->
                     // B38: decode off the main thread, downsampled to bubble

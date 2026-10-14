@@ -114,9 +114,9 @@ fun McpScreen(
                             fontWeight = FontWeight.Bold,
                         )
                         Text(
-                            text = "${servers.size} Servers",
+                            text = if (servers.isEmpty()) "Model Context Protocol & External Tools" else "${servers.size} Connected Servers",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.primary,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
                     }
                 }
@@ -152,27 +152,30 @@ fun McpScreen(
             item {
                 Card(
                     colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.4f),
+                        containerColor = MaterialTheme.colorScheme.surfaceContainerLow,
                     ),
+                    shape = RoundedCornerShape(16.dp),
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(12.dp),
+                            .padding(16.dp),
                     ) {
                         Column(Modifier.weight(1f)) {
                             Text(
-                                "MCP tools in chat",
-                                style = MaterialTheme.typography.titleSmall,
+                                "MCP Tools in Chat",
+                                style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold,
                             )
+                            Spacer(Modifier.height(2.dp))
                             Text(
                                 "When on, the assistant may propose tool calls — each one needs your explicit approval.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
                         }
+                        Spacer(Modifier.width(8.dp))
                         Switch(
                             checked = settings.mcpEnabled,
                             onCheckedChange = { viewModel.setMcpEnabled(it) },

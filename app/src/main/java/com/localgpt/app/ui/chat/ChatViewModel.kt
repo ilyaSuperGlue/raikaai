@@ -1933,7 +1933,7 @@ class ChatViewModel(
             if (imagePaths.isNotEmpty()) {
                 imagePaths
             } else {
-                userEntry.attachments.filter { it.type == "image" }.map { it.path }
+                userEntry.attachments.orEmpty().filter { it.type == "image" }.map { it.path }
                     .ifEmpty { listOfNotNull(userEntry.imagePath) }
             }
 

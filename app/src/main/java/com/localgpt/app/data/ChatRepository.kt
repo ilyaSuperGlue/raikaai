@@ -436,11 +436,12 @@ class ChatRepository(
                 // Rebuild via the constructor (not copy()): legacy JSON parsed by
                 // Gson bypasses the Kotlin constructor and leaves non-null fields
                 // like `variants` as JVM nulls, which copy()'s intrinsic checks reject.
-                if (id.isNullOrBlank() || m.variants == null) changed = true
+                if (id.isNullOrBlank() || m.variants == null || m.attachments == null) changed = true
                 val needsSanitize =
                     id != m.id ||
                         parent != m.parentId ||
-                        m.variants == null
+                        m.variants == null ||
+                        m.attachments == null
                 out.add(
                     if (needsSanitize) {
                         ChatMessageEntry(
