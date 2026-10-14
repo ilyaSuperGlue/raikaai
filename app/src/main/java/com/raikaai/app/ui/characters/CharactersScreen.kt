@@ -114,6 +114,9 @@ fun CharactersScreen(
     var newIconType by remember { mutableStateOf("robot") }
     var newGreeting by remember { mutableStateOf("") }
     var newPrompt by remember { mutableStateOf("") }
+    var newPersonality by remember { mutableStateOf("") }
+    var newScenario by remember { mutableStateOf("") }
+    var newExamples by remember { mutableStateOf("") }
     var newTemp by remember { mutableFloatStateOf(0.7f) }
     var newTopK by remember { mutableFloatStateOf(40f) }
     var newAvatarPath by remember { mutableStateOf("") }
@@ -393,6 +396,39 @@ fun CharactersScreen(
                                     modifier = Modifier.fillMaxWidth(),
                                 )
 
+                                OutlinedTextField(
+                                    value = newPersonality,
+                                    onValueChange = { newPersonality = it },
+                                    label = { Text("Personality (Optional)") },
+                                    placeholder = { Text("e.g. Gentle, soft-spoken, warm, slightly shy...") },
+                                    shape = RoundedCornerShape(12.dp),
+                                    minLines = 2,
+                                    maxLines = 4,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+
+                                OutlinedTextField(
+                                    value = newScenario,
+                                    onValueChange = { newScenario = it },
+                                    label = { Text("Scenario (Optional)") },
+                                    placeholder = { Text("e.g. A quiet night in Penacony's dreamscape...") },
+                                    shape = RoundedCornerShape(12.dp),
+                                    minLines = 2,
+                                    maxLines = 4,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+
+                                OutlinedTextField(
+                                    value = newExamples,
+                                    onValueChange = { newExamples = it },
+                                    label = { Text("Example Dialogues (Optional)") },
+                                    placeholder = { Text("{{user}}: Hi!\n{{char}}: Eh? You can see me...?") },
+                                    shape = RoundedCornerShape(12.dp),
+                                    minLines = 3,
+                                    maxLines = 6,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     verticalAlignment = Alignment.CenterVertically,
@@ -457,11 +493,17 @@ fun CharactersScreen(
                                                 avatarUri = newAvatarPath.trim(),
                                                 temperature = newTemp,
                                                 topK = newTopK.toInt(),
+                                                personality = newPersonality.trim(),
+                                                scenario = newScenario.trim(),
+                                                exampleDialogues = newExamples.trim(),
                                             )
                                             Toast.makeText(context, "Persona '$newName' created!", Toast.LENGTH_SHORT).show()
                                             newName = ""
                                             newGreeting = ""
                                             newPrompt = ""
+                                            newPersonality = ""
+                                            newScenario = ""
+                                            newExamples = ""
                                             newAvatarPath = ""
                                             selectedTab = 0
                                         }
@@ -546,7 +588,7 @@ fun CharactersScreen(
             viewModel = viewModel,
             initialPersona = persona,
             onDismiss = { editingPersona = null },
-            onSave = { name, iconType, prompt, greeting, temp, topK, avatar ->
+            onSave = { name, iconType, prompt, greeting, temp, topK, avatar, personality, scenario, examples ->
                 // Edit = update in place. Builtin presets (unknown id) are
                 // still saved as a new custom copy with a fresh id.
                 val isCustom = viewModel.customPersonas.any { it.id == persona.id }
@@ -561,6 +603,9 @@ fun CharactersScreen(
                         avatarUri = avatar,
                         temperature = temp,
                         topK = topK,
+                        personality = personality,
+                        scenario = scenario,
+                        exampleDialogues = examples,
                     ),
                 )
                 editingPersona = null
@@ -809,11 +854,14 @@ private fun CharacterEditorDialog(
     viewModel: ChatViewModel,
     initialPersona: PersonaPreset?,
     onDismiss: () -> Unit,
-    onSave: (name: String, iconType: String, prompt: String, greeting: String, temp: Float?, topK: Int?, avatar: String) -> Unit,
+    onSave: (name: String, iconType: String, prompt: String, greeting: String, temp: Float?, topK: Int?, avatar: String, personality: String, scenario: String, examples: String) -> Unit,
 ) {
     var name by remember { mutableStateOf(initialPersona?.name ?: "") }
     var prompt by remember { mutableStateOf(initialPersona?.systemPrompt ?: "") }
     var greeting by remember { mutableStateOf(initialPersona?.greeting ?: "") }
+    var personality by remember { mutableStateOf(initialPersona?.personality ?: "") }
+    var scenario by remember { mutableStateOf(initialPersona?.scenario ?: "") }
+    var examples by remember { mutableStateOf(initialPersona?.exampleDialogues ?: "") }
     var iconType by remember { mutableStateOf(initialPersona?.iconType ?: "custom") }
     var tempSlider by remember { mutableFloatStateOf((initialPersona?.temperature ?: 0.7f).coerceIn(0f, 2f)) }
     var useSpecificSampler by remember { mutableStateOf(initialPersona?.temperature != null) }
@@ -973,6 +1021,45 @@ private fun CharacterEditorDialog(
                 }
 
                 item {
+                    OutlinedTextField(
+                        value = personality,
+                        onValueChange = { personality = it },
+                        label = { Text("Personality (Optional)") },
+                        placeholder = { Text("e.g. Gentle, soft-spoken, warm, slightly shy...") },
+                        minLines = 2,
+                        maxLines = 4,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                item {
+                    OutlinedTextField(
+                        value = scenario,
+                        onValueChange = { scenario = it },
+                        label = { Text("Scenario (Optional)") },
+                        placeholder = { Text("e.g. A quiet night in Penacony's dreamscape...") },
+                        minLines = 2,
+                        maxLines = 4,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                item {
+                    OutlinedTextField(
+                        value = examples,
+                        onValueChange = { examples = it },
+                        label = { Text("Example Dialogues (Optional)") },
+                        placeholder = { Text("{{user}}: Hi!\n{{char}}: Eh? You can see me...?") },
+                        minLines = 3,
+                        maxLines = 6,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+
+                item {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         verticalAlignment = Alignment.CenterVertically,
@@ -1007,6 +1094,9 @@ private fun CharacterEditorDialog(
                             if (useSpecificSampler) tempSlider else null,
                             if (useSpecificSampler) 40 else null,
                             avatarPath.trim(),
+                            personality.trim(),
+                            scenario.trim(),
+                            examples.trim(),
                         )
                     }
                 },

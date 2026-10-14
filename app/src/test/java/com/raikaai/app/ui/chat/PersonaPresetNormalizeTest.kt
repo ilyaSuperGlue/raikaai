@@ -25,6 +25,9 @@ class PersonaPresetNormalizeTest {
         assertEquals("Hai", parsed.systemPrompt)
         assertEquals("", parsed.description)
         assertEquals("", parsed.greeting)
+        assertEquals("", parsed.personality)
+        assertEquals("", parsed.scenario)
+        assertEquals("", parsed.exampleDialogues)
         assertEquals("custom", parsed.iconType)
         assertEquals("", parsed.avatarUri)
         assertTrue(parsed.id.isNotBlank())
@@ -58,6 +61,9 @@ class PersonaPresetNormalizeTest {
             avatarUri = "u",
             temperature = 0.5f,
             topK = 20,
+            personality = "p",
+            scenario = "sc",
+            exampleDialogues = "ex",
         )
         val parsed = gson.fromJson(gson.toJson(full), PersonaPreset::class.java).normalize()
 

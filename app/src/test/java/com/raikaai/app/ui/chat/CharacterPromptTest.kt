@@ -35,4 +35,33 @@ class CharacterPromptTest {
 
         assertEquals(prompt, CharacterPrompt.build(persona(prompt)))
     }
+
+    @Test
+    fun `blank optional sections are skipped`() {
+        val out = CharacterPrompt.build(persona("Base instructions."))
+
+        assertEquals("Base instructions.", out)
+    }
+
+    @Test
+    fun `personality scenario and examples are appended as sections`() {
+        val p =
+            PersonaPreset(
+                id = "custom_2",
+                name = "Firefly",
+                systemPrompt = "You are {{char}}.",
+                personality = "Gentle, soft-spoken, warm.",
+                scenario = "A quiet night in Penacony.",
+                exampleDialogues = "{{user}}: Hi!\n{{char}}: Eh? You can see me...?",
+            )
+        val out = CharacterPrompt.build(p)
+
+        assertEquals(
+            "You are Firefly.\n\n[PERSONALITY]\nGentle, soft-spoken, warm.\n\n" +
+                "[SCENARIO]\nA quiet night in Penacony.\n\n" +
+                "[EXAMPLE DIALOGUE]\nMatch the voice, rhythm, and mannerisms shown below " +
+                "(do not repeat these lines verbatim):\n{{user}}: Hi!\n{{char}}: Eh? You can see me...?",
+            out,
+        )
+    }
 }

@@ -72,6 +72,9 @@ data class PersonaPreset(
     val avatarUri: String = "",
     val temperature: Float? = null,
     val topK: Int? = null,
+    val personality: String = "",
+    val scenario: String = "",
+    val exampleDialogues: String = "",
 ) {
     companion object {
         val DEFAULT_PRESETS: List<PersonaPreset> get() = PERSONA_PRESETS
@@ -142,6 +145,9 @@ internal fun PersonaPreset.normalize(): PersonaPreset {
         avatarUri = (avatarUri as String?).orEmpty(),
         temperature = (temperature as Float?)?.coerceIn(0f, 2f),
         topK = (topK as Int?)?.takeIf { it > 0 },
+        personality = (personality as String?).orEmpty(),
+        scenario = (scenario as String?).orEmpty(),
+        exampleDialogues = (exampleDialogues as String?).orEmpty(),
     )
 }
 
@@ -2885,6 +2891,9 @@ class ChatViewModel(
         avatarUri: String = "",
         temperature: Float? = null,
         topK: Int? = null,
+        personality: String = "",
+        scenario: String = "",
+        exampleDialogues: String = "",
     ) {
         val newP =
             PersonaPreset(
@@ -2897,6 +2906,9 @@ class ChatViewModel(
                 avatarUri = avatarUri.trim(),
                 temperature = temperature,
                 topK = topK,
+                personality = personality.trim(),
+                scenario = scenario.trim(),
+                exampleDialogues = exampleDialogues.trim(),
             )
         val updated = customPersonas.toList() + newP
         saveCustomPersonas(updated)
