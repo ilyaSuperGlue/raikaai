@@ -1247,6 +1247,129 @@ class ChatViewModel(
         }
     }
 
+    // ── Local generation pipeline (shared by send / edit-regen / regen) ──
+
+    /**
+     * Inputs for one on-device generation pass. The three local entry points
+     * differ only in these values; the streaming procedure itself is identical,
+     * so it lives in [runGenerationPipeline].
+     */
+    private data class GenerationCtx(
+        val s: Settings,
+        val modelPath: String,
+        val ragQuery: String,
+        val imagePath: String?,
+        val imageBytes: ByteArray?,
+        val audioPath: String?,
+        val audioBytes: ByteArray?,
+        val targetChatId: String?,
+        val onMetrics: (LiteRtEngineManager.InferenceMetrics) -> Unit,
+        /**
+         * Receives RAG sources before streaming starts. Eager delivery (rather
+         * than only via the return value) preserves the original inline
+         * assignment timing, so the finally-block still stamps sources when
+         * the stream throws or is stopped mid-flight.
+         */
+        val onRagSources: (List<String>?) -> Unit,
+    )
+
+    /**
+     * Result of [streamWithThinkingFallback]. [blankFailed] is true only when
+     * the output is still blank after the no-thinking retry; the caller maps
+     * it to its prune flag. The user-facing error is already set by the helper.
+     */
+    private data class LocalPipelineOutcome(
+        val effectiveSystem: String,
+        val history: List<PromptBuilder.ChatMessage>,
+        val ragSources: List<String>?,
+        val blankFailed: Boolean,
+    )
+
+    /**
+     * Single local streaming pass: fit context, resolve the RAG-augmented
+     * system prompt, build the templated prompt, and collect the token stream
+     * into the trailing assistant message.
+     * Returns (effectiveSystem, history, ragSources).
+     */
+    private suspend fun runGenerationPipeline(
+        ctx: GenerationCtx,
+        useThinking: Boolean,
+    ): Triple<String, List<PromptBuilder.ChatMessage>, List<String>?> {
+        val activeSummary = runCatching { ensureContextFit(ctx.s, ctx.modelPath) }.getOrNull()
+        val appliedWindow = activeSummary != null
+        val windowed = promptWindowMessages()
+        val (ragSystem, sources) = withRagSystem(resolveSystemPrompt(ctx.s), ctx.ragQuery, ctx.s)
+        ctx.onRagSources(sources)
+        val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
+        val history =
+            windowed
+                .dropLast(1)
+                .map { PromptBuilder.ChatMessage(it.role, it.content) }
+        val prompt =
+            PromptBuilder.build(
+                messages = history,
+                systemPrompt = effectiveSystem,
+                templateFormat = ctx.s.promptTemplateFormat,
+                modelPath = ctx.modelPath,
+                enableThinking = useThinking,
+                contextWindow = ctx.s.contextWindowTokens,
+            )
+        collectStreamIntoMessage(
+            deltas =
+                engine.streamResponse(
+                    prompt = prompt,
+                    params =
+                        LiteRtEngineManager.engineParamsFromSettings(
+                            s = ctx.s,
+                            modelPath = ctx.modelPath,
+                            systemPrompt = effectiveSystem,
+                            enableThinking = useThinking,
+                            temperature = effectiveTemperature(ctx.s),
+                            topK = effectiveTopK(ctx.s),
+                            maxTokens = ctx.s.maxTokens,
+                        ),
+                    imagePath = ctx.imagePath,
+                    imageBytes = ctx.imageBytes,
+                    audioPath = ctx.audioPath,
+                    audioBytes = ctx.audioBytes,
+                    onMetrics = ctx.onMetrics,
+                ),
+            targetChatId = ctx.targetChatId,
+        )
+        return Triple(effectiveSystem, history, sources)
+    }
+
+    /**
+     * Runs the pipeline with thinking as configured. Small on-device thinking
+     * models sometimes end the turn inside the thinking channel, producing zero
+     * answer text — retry once with thinking disabled instead of showing a
+     * blank bubble. Local-only by design; the remote path has its own guard.
+     */
+    private suspend fun streamWithThinkingFallback(ctx: GenerationCtx): LocalPipelineOutcome {
+        var (effectiveSystem, history, ragSources) = runGenerationPipeline(ctx, ctx.s.enableThinking)
+        if (ctx.s.enableThinking &&
+            currentConversationId == ctx.targetChatId &&
+            stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
+        ) {
+            KLog.w("ChatVM", "Local pass produced thinking-only output; retrying once without thinking")
+            val idx = messages.lastIndex
+            if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                messages[idx] = messages[idx].copy(content = "")
+            }
+            val retry = runGenerationPipeline(ctx, false)
+            effectiveSystem = retry.first
+            history = retry.second
+            ragSources = retry.third
+            if (currentConversationId == ctx.targetChatId &&
+                stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
+            ) {
+                errorMessage.value = "The model returned no answer. Try turning off Thinking or rephrasing."
+                return LocalPipelineOutcome(effectiveSystem, history, ragSources, blankFailed = true)
+            }
+        }
+        return LocalPipelineOutcome(effectiveSystem, history, ragSources, blankFailed = false)
+    }
+
     private suspend fun handleAutonomousToolCall(
         modelPath: String,
         s: Settings,
@@ -1753,88 +1876,33 @@ class ChatViewModel(
             // could miss the outer job.
             var localBlankFailed = false
             try {
-                        // Single local generation pass. Returns the effective system
-                        // prompt used (needed by the post-pass tool-call check).
-                        suspend fun runLocalPass(useThinking: Boolean): Pair<String, List<PromptBuilder.ChatMessage>> {
-                            val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
-                            val appliedWindow = activeSummary != null
-                            val windowed = promptWindowMessages()
-                            val (ragSystem, sources1) = withRagSystem(resolveSystemPrompt(s), promptText, s)
-                            ragSources = sources1
-                            val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
-                            val history =
-                                windowed
-                                    .dropLast(1)
-                                    .map { PromptBuilder.ChatMessage(it.role, it.content) }
-                            val prompt =
-                                PromptBuilder.build(
-                                    messages = history,
-                                    systemPrompt = effectiveSystem,
-                                    templateFormat = s.promptTemplateFormat,
-                                    modelPath = modelPath,
-                                    enableThinking = useThinking,
-                                    contextWindow = s.contextWindowTokens,
-                                )
-                            collectStreamIntoMessage(
-                                deltas =
-                                    engine.streamResponse(
-                                        prompt = prompt,
-                                        params =
-                                            LiteRtEngineManager.engineParamsFromSettings(
-                                                s = s,
-                                                modelPath = modelPath,
-                                                systemPrompt = effectiveSystem,
-                                                enableThinking = useThinking,
-                                                temperature = effectiveTemperature(s),
-                                                topK = effectiveTopK(s),
-                                                maxTokens = s.maxTokens,
-                                                ),
-                                        imagePath = imagePaths.firstOrNull(),
-                                        imageBytes = firstImageBytes,
-                                        audioPath = savedAudioFile?.absolutePath,
-                                        audioBytes = audioBytes,
-                                        onMetrics = { lastMetrics = it },
-                                    ),
-                                targetChatId = targetChatId,
-                            )
-                            return effectiveSystem to history
-                        }
+                val pipelineCtx =
+                    GenerationCtx(
+                        s = s,
+                        modelPath = modelPath,
+                        ragQuery = promptText,
+                        imagePath = imagePaths.firstOrNull(),
+                        imageBytes = firstImageBytes,
+                        audioPath = savedAudioFile?.absolutePath,
+                        audioBytes = audioBytes,
+                        targetChatId = targetChatId,
+                        onMetrics = { lastMetrics = it },
+                        onRagSources = { ragSources = it },
+                    )
+                val outcome = streamWithThinkingFallback(pipelineCtx)
+                localBlankFailed = outcome.blankFailed
+                val effectiveSystem = outcome.effectiveSystem
+                val history = outcome.history
 
-                        var (effectiveSystem, history) = runLocalPass(s.enableThinking)
-
-                        // Small on-device thinking models sometimes end the turn
-                        // inside the thinking channel (thoughts but zero answer
-                        // text). Retry once with thinking disabled so the user
-                        // gets a visible reply instead of a blank bubble.
-                        if (s.enableThinking &&
-                            currentConversationId == targetChatId &&
-                            stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
-                        ) {
-                            KLog.w("ChatVM", "Local pass produced thinking-only output; retrying once without thinking")
-                            val idx = messages.lastIndex
-                            if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                                messages[idx] = messages[idx].copy(content = "")
-                            }
-                            val retry = runLocalPass(false)
-                            effectiveSystem = retry.first
-                            history = retry.second
-                            if (currentConversationId == targetChatId &&
-                                stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
-                            ) {
-                                localBlankFailed = true
-                                errorMessage.value = "The model returned no answer. Try turning off Thinking or rephrasing."
-                            }
-                        }
-
-                        ragSources = handleAutonomousToolCall(
-                            modelPath = modelPath,
-                            s = s,
-                            targetChatId = targetChatId,
-                            history = history,
-                            effectiveSystem = effectiveSystem,
-                            currentSources = ragSources,
-                            onMetricsUpdate = { lastMetrics = it },
-                        )
+                ragSources = handleAutonomousToolCall(
+                    modelPath = modelPath,
+                    s = s,
+                    targetChatId = targetChatId,
+                    history = history,
+                    effectiveSystem = effectiveSystem,
+                    currentSources = ragSources,
+                    onMetricsUpdate = { lastMetrics = it },
+                )
                     } catch (e: Exception) {
                         // Drop compare state: a failed/cancelled/switched pass 1 must not chain pass 2.
                         pendingComparePass = null
@@ -2189,45 +2257,20 @@ class ChatViewModel(
                     }
                 }
                 try {
-                    val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
-                    val appliedWindow = activeSummary != null
-                    val windowed = promptWindowMessages()
-                    val (ragSystem, sources2) = withRagSystem(resolveSystemPrompt(s), newText.trim(), s)
-                    ragSources = sources2
-                    val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
-                    val history =
-                        windowed.dropLast(1).map { PromptBuilder.ChatMessage(it.role, it.content) }
-                    val prompt =
-                        PromptBuilder.build(
-                            messages = history,
-                            systemPrompt = effectiveSystem,
-                            templateFormat = s.promptTemplateFormat,
+                    val pipelineCtx =
+                        GenerationCtx(
+                            s = s,
                             modelPath = modelPath,
-                            enableThinking = s.enableThinking,
-                            contextWindow = s.contextWindowTokens,
-                        )
-                        collectStreamIntoMessage(
-                            deltas =
-                                engine.streamResponse(
-                                    prompt = prompt,
-                                    params =
-                                        LiteRtEngineManager.engineParamsFromSettings(
-                                            s = s,
-                                            modelPath = modelPath,
-                                            systemPrompt = effectiveSystem,
-                                            enableThinking = s.enableThinking,
-                                            temperature = effectiveTemperature(s),
-                                            topK = effectiveTopK(s),
-                                            maxTokens = s.maxTokens,
-                                            ),
-                                    imagePath = oldMsg.imagePath,
-                                    imageBytes = imageBytes,
-                                    audioPath = oldMsg.audioPath,
-                                    audioBytes = audioBytes,
-                                    onMetrics = { lastMetrics = it },
-                                ),
+                            ragQuery = newText.trim(),
+                            imagePath = oldMsg.imagePath,
+                            imageBytes = imageBytes,
+                            audioPath = oldMsg.audioPath,
+                            audioBytes = audioBytes,
                             targetChatId = targetChatId,
+                            onMetrics = { lastMetrics = it },
+                            onRagSources = { ragSources = it },
                         )
+                    val (effectiveSystem, history, _) = runGenerationPipeline(pipelineCtx, s.enableThinking)
 
                     ragSources = handleAutonomousToolCall(
                         modelPath = modelPath,
@@ -2339,95 +2382,23 @@ class ChatViewModel(
                     }
                 }
                 try {
-                    val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
-                    val appliedWindow = activeSummary != null
-                    val windowed = promptWindowMessages()
-                    val (ragSystem, sources3) = withRagSystem(resolveSystemPrompt(s), lastUser.content, s)
-                    ragSources = sources3
-                    val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
-                    val history =
-                        windowed.dropLast(1).map { PromptBuilder.ChatMessage(it.role, it.content) }
-                    val prompt =
-                        PromptBuilder.build(
-                            messages = history,
-                            systemPrompt = effectiveSystem,
-                            templateFormat = s.promptTemplateFormat,
+                    val pipelineCtx =
+                        GenerationCtx(
+                            s = s,
                             modelPath = modelPath,
-                            enableThinking = s.enableThinking,
-                            contextWindow = s.contextWindowTokens,
-                        )
-                        collectStreamIntoMessage(
-                            deltas =
-                                engine.streamResponse(
-                                    prompt = prompt,
-                                    params =
-                                        LiteRtEngineManager.engineParamsFromSettings(
-                                            s = s,
-                                            modelPath = modelPath,
-                                            systemPrompt = effectiveSystem,
-                                            enableThinking = s.enableThinking,
-                                            temperature = effectiveTemperature(s),
-                                            topK = effectiveTopK(s),
-                                            maxTokens = s.maxTokens,
-                                            ),
-                                    imagePath = lastUser.imagePath,
-                                    imageBytes = imageBytes,
-                                    audioPath = lastUser.audioPath,
-                                    audioBytes = audioBytes,
-                                    onMetrics = { lastMetrics = it },
-                                ),
+                            ragQuery = lastUser.content,
+                            imagePath = lastUser.imagePath,
+                            imageBytes = imageBytes,
+                            audioPath = lastUser.audioPath,
+                            audioBytes = audioBytes,
                             targetChatId = targetRegenChatId,
+                            onMetrics = { lastMetrics = it },
+                            onRagSources = { ragSources = it },
                         )
-
-                    // Same thinking-only guard as sendMessage: retry once
-                    // without thinking so regenerate never yields a blank bubble.
-                    if (s.enableThinking &&
-                        currentConversationId == targetRegenChatId &&
-                        stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
-                    ) {
-                        KLog.w("ChatVM", "Local regen produced thinking-only output; retrying once without thinking")
-                        val rIdx = messages.lastIndex
-                        if (rIdx >= 0 && messages[rIdx].role == ChatConstants.ROLE_ASSISTANT) {
-                            messages[rIdx] = messages[rIdx].copy(content = "")
-                        }
-                        val retryPrompt =
-                            PromptBuilder.build(
-                                messages = history,
-                                systemPrompt = effectiveSystem,
-                                templateFormat = s.promptTemplateFormat,
-                                modelPath = modelPath,
-                                enableThinking = false,
-                                contextWindow = s.contextWindowTokens,
-                            )
-                        collectStreamIntoMessage(
-                            deltas =
-                                engine.streamResponse(
-                                    prompt = retryPrompt,
-                                    params =
-                                        LiteRtEngineManager.engineParamsFromSettings(
-                                            s = s,
-                                            modelPath = modelPath,
-                                            systemPrompt = effectiveSystem,
-                                            enableThinking = false,
-                                            temperature = effectiveTemperature(s),
-                                            topK = effectiveTopK(s),
-                                            maxTokens = s.maxTokens,
-                                            ),
-                                    imagePath = lastUser.imagePath,
-                                    imageBytes = imageBytes,
-                                    audioPath = lastUser.audioPath,
-                                    audioBytes = audioBytes,
-                                    onMetrics = { lastMetrics = it },
-                                ),
-                            targetChatId = targetRegenChatId,
-                        )
-                        if (currentConversationId == targetRegenChatId &&
-                            stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
-                        ) {
-                            regenBlankFailed = true
-                            errorMessage.value = "The model returned no answer. Try turning off Thinking or rephrasing."
-                        }
-                    }
+                    val outcome = streamWithThinkingFallback(pipelineCtx)
+                    regenBlankFailed = outcome.blankFailed
+                    val effectiveSystem = outcome.effectiveSystem
+                    val history = outcome.history
 
                     ragSources = handleAutonomousToolCall(
                         modelPath = modelPath,
