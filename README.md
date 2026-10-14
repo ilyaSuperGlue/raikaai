@@ -23,18 +23,18 @@ RaikaAI also features an embedded **OpenAI-compatible HTTP server (`/v1`)** buil
 <div align="center">
   <table>
     <tr>
-      <td align="center" width="20%"><b>Chat Screen</b></td>
-      <td align="center" width="20%"><b>Models Hub</b></td>
+      <td align="center" width="20%"><b>Chat&nbsp;Screen</b></td>
+      <td align="center" width="20%"><b>Models&nbsp;Hub</b></td>
       <td align="center" width="20%"><b>Characters</b></td>
-      <td align="center" width="20%"><b>Skills & Tools</b></td>
-      <td align="center" width="20%"><b>Chat History</b></td>
+      <td align="center" width="20%"><b>Skills&nbsp;&amp;&nbsp;Tools</b></td>
+      <td align="center" width="20%"><b>Chat&nbsp;History</b></td>
     </tr>
     <tr>
-      <td align="center" width="20%"><img src="docs/screenshots/chat.png" width="100%" alt="Chat Screen"></td>
-      <td align="center" width="20%"><img src="docs/screenshots/models.png" width="100%" alt="Models Hub"></td>
-      <td align="center" width="20%"><img src="docs/screenshots/characters.png" width="100%" alt="Characters"></td>
-      <td align="center" width="20%"><img src="docs/screenshots/skills.png" width="100%" alt="Skills & Tools"></td>
-      <td align="center" width="20%"><img src="docs/screenshots/history.png" width="100%" alt="Chat History"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/chat.png" width="180" alt="Chat Screen"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/models.png" width="180" alt="Models Hub"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/characters.png" width="180" alt="Characters"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/skills.png" width="180" alt="Skills & Tools"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/history.png" width="180" alt="Chat History"></td>
     </tr>
   </table>
 </div>
