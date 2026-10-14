@@ -3,12 +3,6 @@
 *.aab
 *.ap_
 
-# Character hub web prototype (local only, keeps repo language stats Kotlin)
-web/
-
-# Hub backend prototype (Axum + SQLite, local only)
-server/
-
 # Working docs & plans (kept locally, not part of the public repo)
 AGENTS.md
 PLAN.md
