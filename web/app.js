@@ -1,40 +1,88 @@
 /**
  * RaikaAI Hub - Main Script
- * Same interaction patterns as the portfolio reference:
- * theme toggle, scroll progress, mobile drawer, reveal, toasts.
- * Plus gallery logic: manifest load, search, detail modal, download/copy.
+ * App-like single screen: tabs (Galeri / Template / Panduan),
+ * upload + paste JSON, tag chips, detail modal, avatar menu.
+ * Theme, drawer, and toast patterns follow the portfolio reference.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
   initThemeToggle();
   initScrollProgress();
   initSmoothScrollToTop();
-  initScrollReveal();
   initMobileMenu();
-  initActiveNavObserver();
   initDynamicYear();
+  initTabs();
   initGallery();
-  initCopySample();
   initUploader();
+  initPasteModal();
+  initTemplates();
   initAvatarMenu();
+  initModalButtons();
 });
 
 /* iconType (aplikasi) -> glyph avatar (galeri) */
 const ICON_GLYPHS = {
-  general: '\u2728',
-  coder: '\uD83D\uDCBB',
-  writer: '\u270D\uFE0F',
-  translator: '\uD83C\uDF10',
-  reasoning: '\uD83E\uDDE0',
-  speed: '\u26A1',
+  general: '✨',
+  coder: '💻',
+  writer: '✍️',
+  translator: '🌐',
+  reasoning: '🧠',
+  speed: '⚡',
   shell: '⌨️',
-  assistant: '\uD83E\uDD16',
-  summarizer: '\uD83D\uDCDD',
-  custom: '\uD83C\uDFAD',
+  assistant: '🤖',
+  summarizer: '📝',
+  custom: '🎭',
 };
 
 function glyphFor(iconType) {
   return ICON_GLYPHS[iconType] || ICON_GLYPHS.custom;
+}
+
+/* Karakter hasil unggah/tempel (hanya sesi ini, tidak masuk galeri). */
+const localCharacters = [];
+const galleryListeners = [];
+
+function notifyGallery() {
+  galleryListeners.forEach(fn => fn());
+}
+
+function allCharacters(gallery) {
+  return localCharacters.concat(gallery);
+}
+
+/* ==========================================================================
+   TABS
+   ========================================================================== */
+function switchTab(name) {
+  document.querySelectorAll('[data-tab]').forEach(el => {
+    const active = el.getAttribute('data-tab') === name;
+    el.classList.toggle('is-active', active);
+    if (el.getAttribute('role') === 'tab') {
+      el.setAttribute('aria-selected', String(active));
+    }
+  });
+
+  document.querySelectorAll('.tab-view').forEach(view => {
+    const active = view.id === `view-${name}`;
+    view.hidden = !active;
+    view.classList.toggle('is-active', active);
+  });
+}
+
+function initTabs() {
+  document.querySelectorAll('[data-tab]').forEach(el => {
+    el.addEventListener('click', () => {
+      switchTab(el.getAttribute('data-tab'));
+      // Tutup drawer mobile setelah pilih tab
+      const mobileNav = document.getElementById('mobile-nav');
+      const mobileToggle = document.getElementById('mobile-toggle');
+      if (mobileNav && mobileNav.classList.contains('open')) {
+        mobileNav.classList.remove('open');
+        if (mobileToggle) mobileToggle.setAttribute('aria-expanded', 'false');
+      }
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    });
+  });
 }
 
 /* ==========================================================================
@@ -277,7 +325,6 @@ function fallbackCopy(text, successMessage) {
 function initMobileMenu() {
   const mobileToggle = document.getElementById('mobile-toggle');
   const mobileNav = document.getElementById('mobile-nav');
-  const mobileLinks = document.querySelectorAll('.mobile-nav-link');
 
   if (!mobileToggle || !mobileNav) return;
 
@@ -292,10 +339,6 @@ function initMobileMenu() {
     toggleMenu();
   });
 
-  mobileLinks.forEach(link => {
-    link.addEventListener('click', () => toggleMenu(true));
-  });
-
   document.addEventListener('click', (e) => {
     if (!mobileNav.contains(e.target) && !mobileToggle.contains(e.target)) {
       toggleMenu(true);
@@ -307,36 +350,6 @@ function initMobileMenu() {
       toggleMenu(true);
     }
   });
-}
-
-/* ==========================================================================
-   ACTIVE NAVIGATION OBSERVER
-   ========================================================================== */
-function initActiveNavObserver() {
-  const sections = document.querySelectorAll('section[id]');
-  const navLinks = document.querySelectorAll('.nav-link');
-
-  if (!sections.length || !navLinks.length) return;
-
-  const observerOptions = {
-    root: null,
-    rootMargin: '-20% 0px -70% 0px',
-    threshold: 0
-  };
-
-  const observer = new IntersectionObserver((entries) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        const currentId = entry.target.getAttribute('id');
-        navLinks.forEach(link => {
-          const href = link.getAttribute('href').replace('#', '');
-          link.classList.toggle('active', href === currentId);
-        });
-      }
-    });
-  }, observerOptions);
-
-  sections.forEach(section => observer.observe(section));
 }
 
 /* ==========================================================================
@@ -373,60 +386,25 @@ function initSmoothScrollToTop() {
 }
 
 /* ==========================================================================
-   SCROLL REVEAL
-   ========================================================================== */
-function initScrollReveal() {
-  const revealElements = document.querySelectorAll('.reveal-on-scroll');
-  if (!revealElements.length) return;
-
-  if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
-    revealElements.forEach(el => el.classList.add('is-revealed'));
-    return;
-  }
-
-  const observerOptions = {
-    root: null,
-    rootMargin: '0px 0px -40px 0px',
-    threshold: 0.08
-  };
-
-  const observer = new IntersectionObserver((entries, obs) => {
-    entries.forEach(entry => {
-      if (entry.isIntersecting) {
-        entry.target.classList.add('is-revealed');
-        obs.unobserve(entry.target);
-      }
-    });
-  }, observerOptions);
-
-  revealElements.forEach(el => observer.observe(el));
-}
-
-/* ==========================================================================
-   CHARACTER GALLERY
+   CHARACTER GALLERY (search + tag chips + local uploads)
    ========================================================================== */
 function initGallery() {
   const grid = document.getElementById('characters-grid');
   const searchInput = document.getElementById('search-input');
   const searchCount = document.getElementById('search-count');
   const emptyState = document.getElementById('empty-state');
-  const statCount = document.getElementById('stat-count');
+  const chipRow = document.getElementById('chip-row');
 
   if (!grid) return;
 
   let characters = [];
+  let activeTag = '';
 
-  function renderRefilter() {
-    render(searchInput ? searchInput.value : '');
-  }
-  galleryListeners.push(renderRefilter);
-
-  function paramText(c) {
-    const parts = [];
-    if (c.temperature !== null && c.temperature !== undefined) parts.push(`Temp ${c.temperature}`);
-    if (c.topK !== null && c.topK !== undefined) parts.push(`Top-K ${c.topK}`);
-    parts.push((c.lang || 'en').toUpperCase());
-    return parts.join(' · ');
+  function currentFilter() {
+    return {
+      query: searchInput ? searchInput.value.trim() : '',
+      tag: activeTag,
+    };
   }
 
   function matchesQuery(c, q) {
@@ -438,15 +416,59 @@ function initGallery() {
     return q.toLowerCase().split(/\s+/).every(token => haystack.includes(token));
   }
 
-  function render(filter = '') {
+  function paramText(c) {
+    const parts = [];
+    if (c.temperature !== null && c.temperature !== undefined) parts.push(`Temp ${c.temperature}`);
+    if (c.topK !== null && c.topK !== undefined) parts.push(`Top-K ${c.topK}`);
+    parts.push((c.lang || 'en').toUpperCase());
+    return parts.join(' · ');
+  }
+
+  function renderChips() {
+    if (!chipRow) return;
+    chipRow.innerHTML = '';
+
+    const tags = new Set();
+    allCharacters(characters).forEach(c => (c.tags || []).forEach(t => {
+      if (t !== 'lokal') tags.add(t);
+    }));
+
+    const allChip = document.createElement('button');
+    allChip.type = 'button';
+    allChip.className = 'chip' + (activeTag === '' ? ' is-active' : '');
+    allChip.textContent = 'Semua';
+    allChip.addEventListener('click', () => {
+      activeTag = '';
+      render();
+    });
+    chipRow.appendChild(allChip);
+
+    [...tags].sort().forEach(t => {
+      const chip = document.createElement('button');
+      chip.type = 'button';
+      chip.className = 'chip' + (activeTag === t ? ' is-active' : '');
+      chip.textContent = t;
+      chip.addEventListener('click', () => {
+        activeTag = activeTag === t ? '' : t;
+        render();
+      });
+      chipRow.appendChild(chip);
+    });
+  }
+
+  function render() {
+    const { query, tag } = currentFilter();
     grid.innerHTML = '';
     const pool = allCharacters(characters);
-    const visible = pool.filter(c => matchesQuery(c, filter.trim()));
+    const visible = pool.filter(c => {
+      if (tag && !(c.tags || []).includes(tag)) return false;
+      return matchesQuery(c, query);
+    });
 
-    visible.forEach((c, index) => {
+    visible.forEach((c) => {
       const card = document.createElement('button');
       card.type = 'button';
-      card.className = 'character-card reveal-on-scroll is-revealed';
+      card.className = 'character-card';
       card.setAttribute('aria-label', `Lihat detail ${c.name}`);
 
       const header = document.createElement('div');
@@ -454,8 +476,16 @@ function initGallery() {
 
       const avatar = document.createElement('div');
       avatar.className = 'character-avatar';
-      avatar.textContent = glyphFor(c.iconType);
       avatar.setAttribute('aria-hidden', 'true');
+      const uri = (c.avatarUri || '').trim();
+      if (uri) {
+        const img = document.createElement('img');
+        img.src = uri;
+        img.alt = '';
+        avatar.appendChild(img);
+      } else {
+        avatar.textContent = glyphFor(c.iconType);
+      }
 
       const titleBlock = document.createElement('div');
       titleBlock.className = 'character-title-block';
@@ -497,7 +527,6 @@ function initGallery() {
       if (tags.childNodes.length) card.appendChild(tags);
       card.appendChild(meta);
 
-      card.style.transitionDelay = `${Math.min(index, 5) * 60}ms`;
       card.addEventListener('click', () => openModal(c));
       grid.appendChild(card);
     });
@@ -508,10 +537,13 @@ function initGallery() {
     if (emptyState) {
       emptyState.hidden = visible.length > 0;
     }
+    renderChips();
   }
 
+  galleryListeners.push(render);
+
   if (searchInput) {
-    searchInput.addEventListener('input', () => render(searchInput.value));
+    searchInput.addEventListener('input', render);
   }
 
   fetch('characters/index.json')
@@ -529,8 +561,7 @@ function initGallery() {
     ))
     .then(list => {
       characters = list;
-      if (statCount) statCount.textContent = String(characters.length);
-      render(searchInput ? searchInput.value : '');
+      render();
     })
     .catch(err => {
       console.error('Gagal memuat galeri karakter:', err);
@@ -541,18 +572,6 @@ function initGallery() {
         emptyState.querySelector('.empty-desc').textContent = 'Jalankan lewat HTTP server lokal (mis. python3 -m http.server) karena fetch tidak bekerja lewat file://.';
       }
     });
-}
-
-/* Karakter hasil unggah (hanya sesi ini, tidak masuk galeri). */
-const localCharacters = [];
-const galleryListeners = [];
-
-function notifyGallery() {
-  galleryListeners.forEach(fn => fn());
-}
-
-function allCharacters(gallery) {
-  return localCharacters.concat(gallery);
 }
 
 /* ==========================================================================
@@ -596,17 +615,19 @@ function openModal(c) {
   if (!backdrop) return;
 
   renderModalAvatar(c);
-
-  const previewBadge = document.getElementById('modal-preview-badge');
-  if (previewBadge) previewBadge.hidden = !c._local;
   document.getElementById('modal-name').textContent = c.name;
   document.getElementById('modal-author').textContent = `oleh ${c.author || 'Komunitas'} · v${c.schemaVersion || '?'}`;
 
+  const previewBadge = document.getElementById('modal-preview-badge');
+  if (previewBadge) previewBadge.hidden = !c._local;
+
   const tagsBox = document.getElementById('modal-tags');
   tagsBox.innerHTML = '';
-  (c.tags || []).forEach(t => {
+  const shownTags = (c.tags || []).slice();
+  if (c._local && !shownTags.includes('lokal')) shownTags.push('lokal');
+  shownTags.forEach(t => {
     const tag = document.createElement('span');
-    tag.className = 'tag';
+    tag.className = 'tag' + (t === 'lokal' ? ' tag-local' : '');
     tag.textContent = t;
     tagsBox.appendChild(tag);
   });
@@ -633,22 +654,33 @@ function openModal(c) {
   document.getElementById('modal-close').focus();
 }
 
-function closeModal() {
-  const backdrop = document.getElementById('modal-backdrop');
+function closeModal(backdropId) {
+  const backdrop = document.getElementById(backdropId || 'modal-backdrop');
   if (!backdrop || backdrop.hidden) return;
 
   backdrop.classList.remove('open');
-  document.body.style.overflow = '';
+  if (document.getElementById('modal-backdrop').hidden || backdropId === 'modal-backdrop') {
+    document.body.style.overflow = '';
+  }
   setTimeout(() => {
     backdrop.hidden = true;
+    if (document.getElementById('modal-backdrop').hidden &&
+        document.getElementById('paste-backdrop').hidden) {
+      document.body.style.overflow = '';
+    }
   }, 200);
-  modalCharacter = null;
+  if (!backdropId || backdropId === 'modal-backdrop') modalCharacter = null;
+}
+
+function shareableCopy(c) {
+  const payload = { ...c };
+  delete payload._local;
+  return payload;
 }
 
 function downloadModalJson() {
   if (!modalCharacter) return;
-  const payload = { ...modalCharacter };
-  delete payload._local;
+  const payload = shareableCopy(modalCharacter);
   const uri = (payload.avatarUri || '').trim();
   if (uri.startsWith('data:')) {
     // Aturan galeri: avatarUri harus kosong agar berkas layak di-PR-kan.
@@ -667,16 +699,16 @@ function downloadModalJson() {
   showToast(`${payload.name} diunduh.`);
 }
 
-document.addEventListener('DOMContentLoaded', () => {
+function initModalButtons() {
   const backdrop = document.getElementById('modal-backdrop');
   if (backdrop) {
     backdrop.addEventListener('click', (e) => {
-      if (e.target === backdrop) closeModal();
+      if (e.target === backdrop) closeModal('modal-backdrop');
     });
   }
 
   const closeBtn = document.getElementById('modal-close');
-  if (closeBtn) closeBtn.addEventListener('click', closeModal);
+  if (closeBtn) closeBtn.addEventListener('click', () => closeModal('modal-backdrop'));
 
   const downloadBtn = document.getElementById('modal-download');
   if (downloadBtn) downloadBtn.addEventListener('click', downloadModalJson);
@@ -685,20 +717,29 @@ document.addEventListener('DOMContentLoaded', () => {
   if (copyBtn) {
     copyBtn.addEventListener('click', () => {
       if (!modalCharacter) return;
-      const payload = { ...modalCharacter };
-      delete payload._local;
-      copyText(JSON.stringify(payload, null, 2), 'JSON tersalin ke clipboard.');
+      copyText(JSON.stringify(shareableCopy(modalCharacter), null, 2), 'JSON tersalin ke clipboard.');
     });
   }
 
   document.addEventListener('keydown', (e) => {
-    const bd = document.getElementById('modal-backdrop');
-    if (e.key === 'Escape' && bd && !bd.hidden) closeModal();
+    if (e.key !== 'Escape') return;
+    const pasteBd = document.getElementById('paste-backdrop');
+    const modalBd = document.getElementById('modal-backdrop');
+    if (pasteBd && !pasteBd.hidden) {
+      closeModal('paste-backdrop');
+    } else if (modalBd && !modalBd.hidden) {
+      const avatarMenu = document.getElementById('avatar-menu');
+      if (avatarMenu && !avatarMenu.hidden) {
+        avatarMenu.hidden = true;
+      } else {
+        closeModal('modal-backdrop');
+      }
+    }
   });
-});
+}
 
 /* ==========================================================================
-   JSON UPLOAD (HERO DROPZONE) — pratinjau lokal, langsung bisa salin/unduh
+   JSON UPLOAD — tombol, drag-drop halaman, dan validasi
    ========================================================================== */
 function slugify(text) {
   return (text || '')
@@ -737,63 +778,254 @@ function normalizeUpload(data, fileName) {
   };
 }
 
-function initUploader() {
-  const dropzone = document.getElementById('upload-dropzone');
-  const input = document.getElementById('upload-input');
-  if (!dropzone || !input) return;
+function addLocalCharacter(character) {
+  const existing = localCharacters.findIndex(c => c.id === character.id);
+  if (existing >= 0) {
+    localCharacters[existing] = character;
+  } else {
+    localCharacters.unshift(character);
+  }
+  notifyGallery();
+  switchTab('galeri');
+  openModal(character);
+  showToast(`${character.name} siap dipratinjau.`);
+}
 
-  function handleFile(file) {
+function parseCharacterText(text, fileName) {
+  try {
+    const data = JSON.parse(text);
+    addLocalCharacter(normalizeUpload(data, fileName || 'tempelan'));
+  } catch (err) {
+    console.warn('JSON ditolak:', err);
+    showToast(err.message || 'JSON tidak valid.');
+  }
+}
+
+function initUploader() {
+  const uploadBtn = document.getElementById('upload-btn');
+  const input = document.getElementById('upload-input');
+  const overlay = document.getElementById('drop-overlay');
+  if (!uploadBtn || !input || !overlay) return;
+
+  uploadBtn.addEventListener('click', () => input.click());
+  input.addEventListener('change', () => {
+    const file = input.files[0];
+    input.value = '';
     if (!file) return;
     const reader = new FileReader();
-    reader.onload = () => {
-      try {
-        const data = JSON.parse(reader.result);
-        const character = normalizeUpload(data, file.name.replace(/\.json$/i, ''));
-        const existing = localCharacters.findIndex(c => c.id === character.id);
-        if (existing >= 0) {
-          localCharacters[existing] = character;
-        } else {
-          localCharacters.unshift(character);
-        }
-        notifyGallery();
-        openModal(character);
-        showToast(`${character.name} siap dipratinjau.`);
-      } catch (err) {
-        console.warn('Upload JSON ditolak:', err);
-        showToast(err.message || 'JSON tidak valid.');
-      }
-    };
+    reader.onload = () => parseCharacterText(reader.result, file.name.replace(/\.json$/i, ''));
     reader.onerror = () => showToast('Gagal membaca berkas.');
     reader.readAsText(file);
+  });
+
+  // Drag-drop di seluruh halaman
+  let dragDepth = 0;
+  window.addEventListener('dragenter', (e) => {
+    if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
+    e.preventDefault();
+    dragDepth += 1;
+    overlay.hidden = false;
+  });
+  window.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    dragDepth = Math.max(0, dragDepth - 1);
+    if (dragDepth === 0) overlay.hidden = true;
+  });
+  window.addEventListener('dragover', (e) => e.preventDefault());
+  window.addEventListener('drop', (e) => {
+    e.preventDefault();
+    dragDepth = 0;
+    overlay.hidden = true;
+    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => parseCharacterText(reader.result, file.name.replace(/\.json$/i, ''));
+    reader.onerror = () => showToast('Gagal membaca berkas.');
+    reader.readAsText(file);
+  });
+}
+
+/* ==========================================================================
+   PASTE JSON MODAL
+   ========================================================================== */
+function initPasteModal() {
+  const pasteBtn = document.getElementById('paste-btn');
+  const backdrop = document.getElementById('paste-backdrop');
+  const closeBtn = document.getElementById('paste-close');
+  const cancelBtn = document.getElementById('paste-cancel');
+  const previewBtn = document.getElementById('paste-preview');
+  const textarea = document.getElementById('paste-text');
+  if (!pasteBtn || !backdrop || !textarea) return;
+
+  function open() {
+    backdrop.hidden = false;
+    requestAnimationFrame(() => backdrop.classList.add('open'));
+    document.body.style.overflow = 'hidden';
+    textarea.focus();
   }
 
-  dropzone.addEventListener('click', () => input.click());
-  dropzone.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      input.click();
-    }
-  });
-  input.addEventListener('change', () => {
-    handleFile(input.files[0]);
-    input.value = '';
+  pasteBtn.addEventListener('click', open);
+  if (closeBtn) closeBtn.addEventListener('click', () => closeModal('paste-backdrop'));
+  if (cancelBtn) cancelBtn.addEventListener('click', () => closeModal('paste-backdrop'));
+  backdrop.addEventListener('click', (e) => {
+    if (e.target === backdrop) closeModal('paste-backdrop');
   });
 
-  ['dragenter', 'dragover'].forEach(evt => {
-    dropzone.addEventListener(evt, (e) => {
-      e.preventDefault();
-      dropzone.classList.add('dragover');
+  if (previewBtn) {
+    previewBtn.addEventListener('click', () => {
+      if (!textarea.value.trim()) {
+        showToast('Tempel dulu isi JSON-nya.');
+        return;
+      }
+      closeModal('paste-backdrop');
+      setTimeout(() => parseCharacterText(textarea.value, 'tempelan'), 200);
     });
-  });
-  ['dragleave', 'drop'].forEach(evt => {
-    dropzone.addEventListener(evt, (e) => {
-      e.preventDefault();
-      dropzone.classList.remove('dragover');
+  }
+}
+
+/* ==========================================================================
+   TEMPLATES
+   ========================================================================== */
+const TEMPLATES = [
+  {
+    id: 'template-minimal',
+    title: 'Minimal',
+    desc: 'Hanya field wajib: nama dan system prompt. Titik awal tercepat.',
+    data: {
+      schemaVersion: 1,
+      id: 'id-karakter',
+      name: 'Nama Karakter',
+      iconType: 'general',
+      description: '',
+      greeting: '',
+      systemPrompt: 'Tulis instruksi perilaku karakter di sini.',
+      avatarUri: '',
+      temperature: null,
+      topK: null,
+      personality: '',
+      scenario: '',
+      exampleDialogues: '',
+      author: '',
+      lang: 'id',
+      tags: [],
+    },
+  },
+  {
+    id: 'template-lengkap',
+    title: 'Lengkap',
+    desc: 'Semua field terisi contoh. Hapus atau ubah yang tidak perlu.',
+    data: {
+      schemaVersion: 1,
+      id: 'id-karakter',
+      name: 'Nama Karakter',
+      iconType: 'custom',
+      description: 'Deskripsi singkat karakter, satu-dua kalimat.',
+      greeting: 'Halo! Ada yang bisa saya bantu?',
+      systemPrompt: 'Jelaskan siapa karakter ini, gaya bicaranya, dan batasannya.',
+      avatarUri: '',
+      temperature: 0.7,
+      topK: 40,
+      personality: 'Sifat dan gaya bicara karakter.',
+      scenario: 'Konteks atau latar percakapan.',
+      exampleDialogues: 'User: Contoh pertanyaan\nKarakter: Contoh jawaban',
+      author: '',
+      lang: 'id',
+      tags: [],
+    },
+  },
+  {
+    id: 'template-roleplay',
+    title: 'Roleplay',
+    desc: 'Fokus ke kepribadian, skenario, dan contoh dialog untuk main peran.',
+    data: {
+      schemaVersion: 1,
+      id: 'id-karakter',
+      name: 'Nama Karakter',
+      iconType: 'custom',
+      description: 'Tokoh roleplay beserta dunianya.',
+      greeting: 'Sapaan in-character, sesuai kepribadian tokoh.',
+      systemPrompt: 'Kamu berperan sebagai tokoh berikut. Jangan pernah keluar dari peran. Narasikan aksi dengan tanda *asterisk*.',
+      avatarUri: '',
+      temperature: 0.8,
+      topK: 40,
+      personality: 'Kepribadian, cara bicara, kebiasaan tokoh.',
+      scenario: 'Latar tempat dan situasi awal roleplay.',
+      exampleDialogues: 'User: *melambaikan tangan*\nKarakter: *tersenyum* Hai! ...',
+      author: '',
+      lang: 'id',
+      tags: ['roleplay'],
+    },
+  },
+];
+
+function initTemplates() {
+  const grid = document.getElementById('templates-grid');
+  if (!grid) return;
+
+  TEMPLATES.forEach(t => {
+    const card = document.createElement('div');
+    card.className = 'template-card';
+
+    const title = document.createElement('h3');
+    title.textContent = t.title;
+
+    const desc = document.createElement('p');
+    desc.className = 'template-desc';
+    desc.textContent = t.desc;
+
+    const fields = document.createElement('div');
+    fields.className = 'template-fields';
+    const filled = Object.entries(t.data).filter(([, v]) => {
+      if (v === null) return false;
+      if (Array.isArray(v)) return v.length > 0;
+      return String(v).trim() !== '';
+    }).length;
+    const total = Object.keys(t.data).length;
+    const badge = document.createElement('span');
+    badge.className = 'tag';
+    badge.textContent = `${filled}/${total} field terisi`;
+    fields.appendChild(badge);
+    const schemaTag = document.createElement('span');
+    schemaTag.className = 'tag';
+    schemaTag.textContent = 'schema v1';
+    fields.appendChild(schemaTag);
+
+    const actions = document.createElement('div');
+    actions.className = 'template-actions';
+
+    const copyBtn = document.createElement('button');
+    copyBtn.type = 'button';
+    copyBtn.className = 'btn btn-outline';
+    copyBtn.innerHTML = '<span>Salin</span>';
+    copyBtn.addEventListener('click', () => {
+      copyText(JSON.stringify(t.data, null, 2), `Template ${t.title} tersalin.`);
     });
-  });
-  dropzone.addEventListener('drop', (e) => {
-    const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-    handleFile(file);
+
+    const dlBtn = document.createElement('button');
+    dlBtn.type = 'button';
+    dlBtn.className = 'btn btn-primary';
+    dlBtn.innerHTML = '<span>Unduh</span>';
+    dlBtn.addEventListener('click', () => {
+      const blob = new Blob([JSON.stringify(t.data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${t.id}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      showToast(`Template ${t.title} diunduh.`);
+    });
+
+    actions.appendChild(copyBtn);
+    actions.appendChild(dlBtn);
+
+    card.appendChild(title);
+    card.appendChild(desc);
+    card.appendChild(fields);
+    card.appendChild(actions);
+    grid.appendChild(card);
   });
 }
 
@@ -912,17 +1144,5 @@ function initAvatarMenu() {
     } else {
       downloadGlyphPng(glyphFor(modalCharacter.iconType), `${base}-icon.png`);
     }
-  });
-}
-/* ==========================================================================
-   COPY FORMAT TEMPLATE
-   ========================================================================== */
-function initCopySample() {
-  const btn = document.getElementById('copy-sample-btn');
-  const sample = document.getElementById('format-sample');
-  if (!btn || !sample) return;
-
-  btn.addEventListener('click', () => {
-    copyText(sample.innerText.trim(), 'Template JSON tersalin.');
   });
 }
