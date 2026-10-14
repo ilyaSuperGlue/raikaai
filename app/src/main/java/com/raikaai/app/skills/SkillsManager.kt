@@ -55,7 +55,7 @@ class SkillsManager private constructor(private val context: Context) {
                 category = "Coding",
                 iconCategory = "code",
                 instructions = "You are an expert Android Architect specializing in Kotlin 2.x, Jetpack Compose Material 3, Coroutines, StateFlow, and modern MVVM architecture. Always write clean, production-ready, type-safe, idiomatic code with full implementations. Avoid omitting required imports or leaving placeholder comments.",
-                isEnabled = true,
+                isEnabled = false,
                 isBuiltIn = true,
             ),
             Skill(
@@ -65,7 +65,7 @@ class SkillsManager private constructor(private val context: Context) {
                 category = "Coding",
                 iconCategory = "palette",
                 instructions = "You are a senior frontend developer who crafts modern, responsive, visually stunning single-file web applications. Use semantic HTML5, beautiful CSS3 (dark modes, glassmorphism, responsive grid/flexbox, smooth transitions), and clean vanilla JavaScript ES6+. Always return complete, self-contained, runnable code blocks.",
-                isEnabled = true,
+                isEnabled = false,
                 isBuiltIn = true,
             ),
             Skill(
@@ -136,6 +136,24 @@ class SkillsManager private constructor(private val context: Context) {
             }
         }
 
+        // One-time migration: the Kotlin and Web-Dev presets used to default
+        // to enabled; they now default to off, so switch them off once on
+        // existing installs (user can re-enable them manually afterwards).
+        val builtinOffMarker = File(dir, ".builtin_skills_default_off_v1")
+        var builtinChanged = false
+        val effectiveBuiltin =
+            if (builtinOffMarker.exists()) {
+                builtinWithToggles
+            } else {
+                try {
+                    builtinOffMarker.createNewFile()
+                } catch (_: Exception) {
+                }
+                val disabled = builtinWithToggles.map { if (it.isEnabled) it.copy(isEnabled = false) else it }
+                builtinChanged = (disabled != builtinWithToggles)
+                disabled
+            }
+
         // One-time migration: custom skills used to default to enabled at
         // creation; they now default to off and previously-created ones are
         // switched off once (user can re-enable them manually).
@@ -155,7 +173,8 @@ class SkillsManager private constructor(private val context: Context) {
                 disabled
             }
 
-        _skills.value = builtinWithToggles + effectiveCustom
+        _skills.value = effectiveBuiltin + effectiveCustom
+        if (builtinChanged) persistPresetToggles()
     }
 
     private fun persistCustom(customSkills: List<Skill>) {
