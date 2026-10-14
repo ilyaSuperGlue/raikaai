@@ -1,5 +1,7 @@
 package com.raikaai.app.ui.chat
 
+import com.raikaai.app.R
+
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -98,7 +100,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
+import com.raikaai.app.data.AttachmentType
 import com.raikaai.app.data.ChatConstants
 import com.raikaai.app.data.ChatMessageEntry
 import com.raikaai.app.ui.component.MarkdownText
@@ -141,7 +145,7 @@ internal fun BranchNavRow(
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.NavigateBefore,
-                contentDescription = "Previous branch",
+                contentDescription = stringResource(R.string.chat_branch_prev),
                 modifier = Modifier.size(14.dp),
             )
         }
@@ -158,7 +162,7 @@ internal fun BranchNavRow(
         ) {
             Icon(
                 Icons.AutoMirrored.Filled.NavigateNext,
-                contentDescription = "Next branch",
+                contentDescription = stringResource(R.string.chat_branch_next),
                 modifier = Modifier.size(14.dp),
             )
         }
@@ -185,14 +189,14 @@ internal fun EmptyChatHero(
         verticalArrangement = Arrangement.Center,
     ) {
         Text(
-            text = "What can I help you with today?",
+            text = stringResource(R.string.chat_hero_title),
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             textAlign = TextAlign.Center,
         )
         Spacer(Modifier.height(8.dp))
         Text(
-            text = "Tip: press and hold a message to edit it.",
+            text = stringResource(R.string.chat_hero_tip),
             style = MaterialTheme.typography.labelSmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
             textAlign = TextAlign.Center,
@@ -260,7 +264,7 @@ internal fun MessageList(
                     val msg = viewModel.messages.getOrNull(reversedIndex)
                     val kind = when {
                         msg == null -> "null"
-                        msg.attachments.orEmpty().any { it.type == "image" } || !msg.imagePath.isNullOrBlank() -> "media"
+                        msg.attachments.orEmpty().any { it.kind == AttachmentType.IMAGE } || !msg.imagePath.isNullOrBlank() -> "media"
                         !msg.audioPath.isNullOrBlank() -> "audio"
                         else -> "text"
                     }
@@ -312,7 +316,7 @@ internal fun MessageList(
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
                         Icons.Default.KeyboardArrowDown,
-                        contentDescription = "Scroll to bottom",
+                        contentDescription = stringResource(R.string.chat_scroll_bottom),
                         tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         modifier = Modifier.size(20.dp),
                     )
@@ -362,7 +366,7 @@ internal fun MessageBubble(
         // Skipped when the message already carries image attachments below:
         // those render inside the bubble and the legacy imagePath would
         // otherwise duplicate the same picture.
-        val hasAttachmentImages = message.attachments.orEmpty().any { it.type == "image" }
+        val hasAttachmentImages = message.attachments.orEmpty().any { it.kind == AttachmentType.IMAGE }
         if (!message.imagePath.isNullOrBlank() && !hasAttachmentImages) {
             // Decode off the main thread, downsampled (was: main-thread
             // full-size decode in remember — ANR/OOM on large camera photos).
@@ -384,7 +388,7 @@ internal fun MessageBubble(
             if (currentBitmap != null) {
                 Image(
                     bitmap = currentBitmap.asImageBitmap(),
-                    contentDescription = "Attached Image",
+                    contentDescription = stringResource(R.string.chat_attached_image),
                     modifier = Modifier
                         .fillMaxWidth(if (isUser) 0.85f else 1f)
                         .padding(bottom = 6.dp)
@@ -429,13 +433,13 @@ internal fun MessageBubble(
                 // Falls back to legacy single imagePath for old conversations.
                 val attachmentImages =
                     remember(message.attachments, message.imagePath) {
-                        val fromList = message.attachments.orEmpty().filter { it.type == "image" }.map { it.path }
+                        val fromList = message.attachments.orEmpty().filter { it.kind == AttachmentType.IMAGE }.map { it.path }
                         if (fromList.isNotEmpty()) fromList
                         else listOfNotNull(message.imagePath?.takeIf { it.isNotBlank() })
                     }
                 val attachmentFiles =
                     remember(message.attachments) {
-                        message.attachments.orEmpty().filter { it.type == "file" }
+                        message.attachments.orEmpty().filter { it.kind == AttachmentType.FILE }
                     }
                 attachmentImages.forEach { imagePath ->
                     // B38: decode off the main thread, downsampled to bubble
@@ -455,7 +459,7 @@ internal fun MessageBubble(
                     if (currentBitmap != null) {
                         Image(
                             bitmap = currentBitmap.asImageBitmap(),
-                            contentDescription = "Attached Image",
+                            contentDescription = stringResource(R.string.chat_attached_image),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 10.dp, vertical = 6.dp)
@@ -622,7 +626,7 @@ internal fun MessageBubble(
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.NavigateBefore,
-                                    contentDescription = "Previous variant",
+                                    contentDescription = stringResource(R.string.chat_variant_prev),
                                     modifier = Modifier.size(14.dp),
                                 )
                             }
@@ -643,7 +647,7 @@ internal fun MessageBubble(
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.NavigateNext,
-                                    contentDescription = "Next variant",
+                                    contentDescription = stringResource(R.string.chat_variant_next),
                                     modifier = Modifier.size(14.dp),
                                 )
                             }
@@ -666,7 +670,7 @@ internal fun MessageBubble(
                     ) {
                         Icon(
                             if (copied) Icons.Outlined.Check else Icons.Outlined.ContentCopy,
-                            contentDescription = "Copy message",
+                            contentDescription = stringResource(R.string.chat_copy_message),
                             modifier = Modifier.size(13.dp),
                             tint = if (copied) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -687,7 +691,7 @@ internal fun MessageBubble(
                     ) {
                         Icon(
                             imageVector = if (isSpeaking) Icons.AutoMirrored.Outlined.VolumeOff else Icons.AutoMirrored.Outlined.VolumeUp,
-                            contentDescription = if (isSpeaking) "Stop reading" else "Read aloud",
+                            contentDescription = if (isSpeaking) stringResource(R.string.chat_stop_reading) else stringResource(R.string.chat_read_aloud),
                             modifier = Modifier.size(14.dp),
                             tint = if (isSpeaking) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -708,7 +712,7 @@ internal fun MessageBubble(
                     ) {
                         Icon(
                             Icons.Outlined.Share,
-                            contentDescription = "Share message",
+                            contentDescription = stringResource(R.string.chat_share_message),
                             modifier = Modifier.size(13.dp),
                             tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
@@ -722,7 +726,7 @@ internal fun MessageBubble(
                         ) {
                             Icon(
                                 Icons.Outlined.Refresh,
-                                contentDescription = "Regenerate Response",
+                                contentDescription = stringResource(R.string.chat_regenerate),
                                 modifier = Modifier.size(14.dp),
                                 tint = MaterialTheme.colorScheme.primary,
                             )
@@ -748,12 +752,12 @@ internal fun MessageBubble(
         AlertDialog(
             onDismissRequest = { showEditDialog = false },
             icon = { Icon(Icons.Outlined.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
-            title = { Text("Edit Message") },
+            title = { Text(stringResource(R.string.chat_edit_title)) },
             text = {
                 OutlinedTextField(
                     value = editInput,
                     onValueChange = { editInput = it },
-                    label = { Text("Prompt") },
+                    label = { Text(stringResource(R.string.chat_edit_prompt_label)) },
                     minLines = 3,
                     maxLines = 8,
                     shape = RoundedCornerShape(12.dp),
@@ -770,12 +774,12 @@ internal fun MessageBubble(
                     },
                     enabled = editInput.isNotBlank(),
                 ) {
-                    Text("Save & Regenerate")
+                    Text(stringResource(R.string.chat_edit_save_regenerate))
                 }
             },
             dismissButton = {
                 TextButton(onClick = { showEditDialog = false }) {
-                    Text("Cancel")
+                    Text(stringResource(R.string.chat_action_cancel))
                 }
             },
         )
@@ -871,7 +875,7 @@ fun AudioMessagePlayer(
                 ) {
                     Icon(
                         imageVector = if (isPlaying) Icons.Default.Pause else Icons.Default.PlayArrow,
-                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        contentDescription = if (isPlaying) stringResource(R.string.chat_pause) else stringResource(R.string.chat_play),
                         tint = if (isPlaying) androidx.compose.ui.graphics.Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp),
                     )
@@ -1008,7 +1012,7 @@ fun ImageViewerDialog(
                     ) {
                         Image(
                             bitmap = viewerBitmap.asImageBitmap(),
-                            contentDescription = "Full image preview",
+                            contentDescription = stringResource(R.string.chat_full_image_preview),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .clip(RoundedCornerShape(8.dp)),
@@ -1017,7 +1021,7 @@ fun ImageViewerDialog(
                     }
                 } else {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Image cannot be loaded", color = Color.White)
+                        Text(stringResource(R.string.chat_image_load_failed), color = Color.White)
                     }
                 }
 
@@ -1033,7 +1037,7 @@ fun ImageViewerDialog(
                     IconButton(onClick = onDismiss) {
                         Icon(
                             Icons.Default.Close,
-                            contentDescription = "Close",
+                            contentDescription = stringResource(R.string.chat_action_close),
                             tint = Color.White,
                         )
                     }
@@ -1056,13 +1060,13 @@ fun ImageViewerDialog(
                                     }
                                     context.startActivity(Intent.createChooser(shareIntent, "Share Image"))
                                 } catch (e: Exception) {
-                                    Toast.makeText(context, "Failed to share: ${e.message}", Toast.LENGTH_SHORT).show()
+                                    Toast.makeText(context, context.getString(R.string.chat_share_failed, e.message ?: ""), Toast.LENGTH_SHORT).show()
                                 }
                             },
                         ) {
                             Icon(
                                 Icons.Outlined.Share,
-                                contentDescription = "Share",
+                                contentDescription = stringResource(R.string.chat_share),
                                 tint = Color.White,
                             )
                         }
@@ -1076,16 +1080,16 @@ fun ImageViewerDialog(
                                     val saved = FileSaver.saveImageToPictures(context, file)
                                     isSaving = false
                                     if (saved != null) {
-                                        Toast.makeText(context, "Saved to Pictures/RaikaAI ($saved)", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(context, context.getString(R.string.chat_saved_pictures, saved), Toast.LENGTH_LONG).show()
                                     } else {
-                                        Toast.makeText(context, "Failed to save image", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, context.getString(R.string.chat_save_failed), Toast.LENGTH_SHORT).show()
                                     }
                                 }
                             },
                         ) {
                             Icon(
                                 Icons.Outlined.Download,
-                                contentDescription = "Save to Pictures",
+                                contentDescription = stringResource(R.string.chat_save_to_pictures),
                                 tint = Color.White,
                             )
                         }

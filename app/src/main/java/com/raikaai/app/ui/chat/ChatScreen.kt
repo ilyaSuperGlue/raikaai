@@ -1,5 +1,7 @@
 package com.raikaai.app.ui.chat
 
+import com.raikaai.app.R
+
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
@@ -171,6 +173,7 @@ import com.raikaai.app.web.WebSourceCitation
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import com.raikaai.app.data.ChatMessageEntry
 import com.raikaai.app.ui.component.MarkdownText
@@ -248,16 +251,9 @@ fun ChatScreen(
             input = p
         }
     }
-    var showRagSheet by remember { mutableStateOf(false) }
-    var showCompareDialog by remember { mutableStateOf(false) }
-    var showModelDropdown by remember { mutableStateOf(false) }
-    var showAttachmentMenu by remember { mutableStateOf(false) }
-    var showUrlDialog by remember { mutableStateOf(false) }
-    var urlInput by remember { mutableStateOf("") }
+    // Overlay/dialog state shared with the composer and dialogs host.
+    val overlays = remember { ChatOverlayState() }
     val urlFetchState by viewModel.urlFetchState
-    var showImageGenDialog by remember { mutableStateOf(false) }
-    var imageGenPrompt by remember { mutableStateOf("") }
-    var imageGenSize by remember { mutableStateOf("1024x1024") }
     val imageGenState by viewModel.imageGenState
 
     val installedModels by viewModel.installedModels
@@ -265,10 +261,6 @@ fun ChatScreen(
 
     val artifacts by viewModel.artifacts.collectAsState()
     val isCompressing by viewModel.isCompressing
-
-    // Preview state: (entryFileName, entryHtml, allFiles)
-    var previewData by remember { mutableStateOf<Triple<String, String, Map<String, String>>?>(null) }
-    var previewImagePath by remember { mutableStateOf<String?>(null) }
 
     val ragDocuments by viewModel.ragDocuments.collectAsState()
     val ragDocumentPicker =
@@ -306,7 +298,7 @@ fun ChatScreen(
             try {
                 imageFallbackLauncher.launch("image/*")
             } catch (_: Exception) {
-                Toast.makeText(context, "No image picker available on this device", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.chat_toast_no_picker), Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -386,7 +378,7 @@ fun ChatScreen(
                     )
                 }
             } else {
-                Toast.makeText(context, "Microphone permission is required for voice input", Toast.LENGTH_SHORT).show()
+                Toast.makeText(context, context.getString(R.string.chat_toast_mic_permission), Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -444,79 +436,31 @@ fun ChatScreen(
 
     val modelPin by viewModel.modelPinState
 
-    val modelDisplayName = remember(settings.modelSource, settings.activeModelId, settings.customModelPath, settings.remoteModelId, loadedModelPath, modelPin) {
+    val ollamaLanLabel = stringResource(R.string.chat_model_ollama_lan)
+    val noModelLabel = stringResource(R.string.chat_model_none_selected)
+    val modelDisplayName = remember(settings.modelSource, settings.activeModelId, settings.customModelPath, settings.remoteModelId, loadedModelPath, modelPin, ollamaLanLabel, noModelLabel) {
         val pin = modelPin
         if (pin != null) {
             val (_, id) = pin
             shortModelLabel(id)
         } else if (settings.modelSource == ChatConstants.SOURCE_REMOTE) {
-            shortModelLabel(settings.remoteModelId.ifBlank { "Ollama (LAN)" })
+            shortModelLabel(settings.remoteModelId.ifBlank { ollamaLanLabel })
         } else {
             val fileName = loadedModelPath?.let { File(it).name }
                 ?: settings.customModelPath.ifBlank { null }?.let { File(it).name }
-                ?: settings.activeModelId.ifBlank { "No Model Selected" }
+                ?: settings.activeModelId.ifBlank { noModelLabel }
             shortModelLabel(fileName)
         }
     }
 
     Scaffold(
         topBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 2.dp,
-                modifier = Modifier.fillMaxWidth().statusBarsPadding(),
-            ) {
-                TopAppBar(
-                    title = {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier =
-                                Modifier
-                                    .clickable { onNavigateToModels() }
-                                    .padding(vertical = 2.dp),
-                        ) {
-                            if (activePersona.avatarUri.isNotBlank()) {
-                                PersonaAvatar(
-                                    avatarUri = activePersona.avatarUri,
-                                    size = 36.dp,
-                                    contentDescription = "Character photo",
-                                )
-                                Spacer(Modifier.width(10.dp))
-                            }
-                            Column {
-                                Text(
-                                    text = activePersona.name,
-                                    style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = onOpenDrawer,
-                            modifier = Modifier.padding(start = 4.dp),
-                        ) {
-                            Icon(
-                                Icons.Default.Menu,
-                                contentDescription = "Menu",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { viewModel.newChat() }) {
-                            Icon(
-                                Icons.Default.Add,
-                                contentDescription = "New chat",
-                                tint = MaterialTheme.colorScheme.onSurface,
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
-                )
-            }
+            ChatTopBar(
+                activePersona = activePersona,
+                onOpenDrawer = onOpenDrawer,
+                onNavigateToModels = onNavigateToModels,
+                onNewChat = { viewModel.newChat() },
+            )
         },
         bottomBar = {
             // ── Floating Compact Composer Bar ──
@@ -557,9 +501,9 @@ fun ChatScreen(
                                 Text(
                                     text =
                                         if (isCompressing) {
-                                            "Compressing memory…"
+                                            stringResource(R.string.chat_compressing)
                                         } else {
-                                            "+$inputTokens tokens"
+                                            stringResource(R.string.chat_context_tokens_extra, inputTokens)
                                         },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.primary,
@@ -570,7 +514,7 @@ fun ChatScreen(
                                 Spacer(Modifier.weight(1f))
                             }
                             Text(
-                                text = "Context: $totalContextTokens / $maxTokens tok (${ratio.toInt()}%)",
+                                text = stringResource(R.string.chat_context_status, totalContextTokens, maxTokens, ratio.toInt()),
                                 style = MaterialTheme.typography.labelSmall,
                                 color = if (ratio >= 60f) progressColor else MaterialTheme.colorScheme.onSurfaceVariant,
                                 fontSize = 11.sp,
@@ -692,7 +636,7 @@ fun ChatScreen(
                                         )
                                         Spacer(Modifier.width(8.dp))
                                         Text(
-                                            "Listening... Speak into microphone",
+                                            stringResource(R.string.chat_listening),
                                             style = MaterialTheme.typography.labelMedium,
                                             fontWeight = FontWeight.Bold,
                                             color = MaterialTheme.colorScheme.error,
@@ -739,7 +683,7 @@ fun ChatScreen(
                                             Box(modifier = Modifier.size(44.dp)) {
                                                 Image(
                                                     bitmap = previewBitmap.asImageBitmap(),
-                                                    contentDescription = "Selected image preview",
+                                                    contentDescription = stringResource(R.string.chat_selected_image_preview),
                                                     modifier = Modifier
                                                         .fillMaxSize()
                                                         .clip(RoundedCornerShape(6.dp)),
@@ -755,7 +699,7 @@ fun ChatScreen(
                                                 ) {
                                                     Icon(
                                                         Icons.Default.Close,
-                                                        contentDescription = "Remove attached image",
+                                                        contentDescription = stringResource(R.string.chat_remove_attached_image),
                                                         modifier = Modifier.padding(2.dp),
                                                         tint = MaterialTheme.colorScheme.onSurface,
                                                     )
@@ -787,7 +731,7 @@ fun ChatScreen(
                                                 Spacer(Modifier.width(4.dp))
                                                 Icon(
                                                     Icons.Default.Close,
-                                                    contentDescription = "Remove attached file",
+                                                    contentDescription = stringResource(R.string.chat_remove_attached_file),
                                                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                     modifier = Modifier
                                                         .size(14.dp)
@@ -825,7 +769,7 @@ fun ChatScreen(
                                         )
                                         Spacer(Modifier.width(6.dp))
                                         Text(
-                                            "Audio clip attached",
+                                            stringResource(R.string.chat_audio_clip_attached),
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurface,
                                             fontWeight = FontWeight.SemiBold,
@@ -840,7 +784,7 @@ fun ChatScreen(
                                         ) {
                                             Icon(
                                                 Icons.Default.Close,
-                                                contentDescription = "Remove attached audio",
+                                                contentDescription = stringResource(R.string.chat_remove_attached_audio),
                                                 modifier = Modifier.padding(2.dp),
                                                 tint = MaterialTheme.colorScheme.onSurface,
                                             )
@@ -877,7 +821,7 @@ fun ChatScreen(
                                     val sec = (recordingDurationMs / 1000) % 60
                                     val min = (recordingDurationMs / 1000) / 60
                                     Text(
-                                        text = "Recording 16kHz PCM… %02d:%02d".format(Locale.US, min, sec),
+                                        text = stringResource(R.string.chat_recording, min, sec),
                                         style = MaterialTheme.typography.labelMedium,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.error,
@@ -888,7 +832,7 @@ fun ChatScreen(
                                         onClick = { audioRecorderHelper.cancelRecording() },
                                         contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
                                     ) {
-                                        Text("Cancel", color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
+                                        Text(stringResource(R.string.chat_action_cancel), color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
                                     }
                                     Button(
                                         onClick = {
@@ -901,7 +845,7 @@ fun ChatScreen(
                                             containerColor = MaterialTheme.colorScheme.error,
                                         ),
                                     ) {
-                                        Text("Done", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onError)
+                                        Text(stringResource(R.string.chat_action_done), style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onError)
                                     }
                                 }
                             }
@@ -955,8 +899,7 @@ fun ChatScreen(
                                 )
                                 Spacer(Modifier.width(8.dp))
                                 Text(
-                                    "This remote model may not be able to read images. " +
-                                        "Use a vision model (e.g. qwen2-vl, llava) to analyze pictures.",
+                                    text = stringResource(R.string.chat_vision_warning),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onTertiaryContainer,
                                 )
@@ -989,9 +932,9 @@ fun ChatScreen(
                                             Text(
                                                 text =
                                                     when {
-                                                        selectedAttachments.isNotEmpty() -> "Ask about the attachment(s)…"
-                                                        selectedAudioFile != null -> "Ask about this audio clip…"
-                                                        else -> "Message ${activePersona.name}…"
+                                                        selectedAttachments.isNotEmpty() -> stringResource(R.string.chat_hint_attachments)
+                                                        selectedAudioFile != null -> stringResource(R.string.chat_hint_audio)
+                                                        else -> stringResource(R.string.chat_hint_message, activePersona.name)
                                                     },
                                                 style = MaterialTheme.typography.bodyMedium,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
@@ -1025,12 +968,12 @@ fun ChatScreen(
                                         modifier = Modifier.size(30.dp),
                                     ) {
                                         IconButton(
-                                            onClick = { showAttachmentMenu = true },
+                                            onClick = { overlays.showAttachmentMenu = true },
                                             modifier = Modifier.size(30.dp),
                                         ) {
                                             Icon(
                                                 imageVector = Icons.Default.Add,
-                                                contentDescription = "Add attachment or tool",
+                                                contentDescription = stringResource(R.string.chat_add_attachment),
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.size(16.dp),
                                             )
@@ -1038,52 +981,52 @@ fun ChatScreen(
                                     }
 
                                     DropdownMenu(
-                                        expanded = showAttachmentMenu,
-                                        onDismissRequest = { showAttachmentMenu = false },
+                                        expanded = overlays.showAttachmentMenu,
+                                        onDismissRequest = { overlays.showAttachmentMenu = false },
                                         shape = RoundedCornerShape(14.dp),
                                     ) {
                                         DropdownMenuItem(
-                                            text = { Text("Attach Images (Vision)", style = MaterialTheme.typography.bodySmall) },
+                                            text = { Text(stringResource(R.string.chat_attach_images), style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
                                                 Icon(Icons.Outlined.AddPhotoAlternate, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
-                                                showAttachmentMenu = false
+                                                overlays.showAttachmentMenu = false
                                                 launchImagePicker()
                                             },
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Attach File (PDF/TXT/MD)", style = MaterialTheme.typography.bodySmall) },
+                                            text = { Text(stringResource(R.string.chat_attach_file), style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
                                                 Icon(Icons.Default.Description, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
-                                                showAttachmentMenu = false
+                                                overlays.showAttachmentMenu = false
                                                 filePickerLauncher.launch(arrayOf("*/*"))
                                             },
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Summarize Link", style = MaterialTheme.typography.bodySmall) },
+                                            text = { Text(stringResource(R.string.chat_attach_summarize_link), style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
                                                 Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
-                                                showAttachmentMenu = false
-                                                showUrlDialog = true
+                                                overlays.showAttachmentMenu = false
+                                                overlays.showUrlDialog = true
                                             },
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Generate Image", style = MaterialTheme.typography.bodySmall) },
+                                            text = { Text(stringResource(R.string.chat_attach_generate_image), style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
                                                 Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
                                             },
                                             onClick = {
-                                                showAttachmentMenu = false
-                                                showImageGenDialog = true
+                                                overlays.showAttachmentMenu = false
+                                                overlays.showImageGenDialog = true
                                             },
                                         )
                                         DropdownMenuItem(
-                                            text = { Text("Knowledge Base (RAG Docs)", style = MaterialTheme.typography.bodySmall) },
+                                            text = { Text(stringResource(R.string.chat_attach_knowledge), style = MaterialTheme.typography.bodySmall) },
                                             leadingIcon = {
                                                 Icon(Icons.Outlined.AttachFile, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
                                             },
@@ -1104,8 +1047,8 @@ fun ChatScreen(
                                                 }
                                             },
                                             onClick = {
-                                                showAttachmentMenu = false
-                                                showRagSheet = true
+                                                overlays.showAttachmentMenu = false
+                                                overlays.showRagSheet = true
                                             },
                                         )
                                     }
@@ -1118,11 +1061,11 @@ fun ChatScreen(
                                         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.7f),
                                         border = androidx.compose.foundation.BorderStroke(
                                             1.dp,
-                                            if (showModelDropdown) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                                            if (overlays.showModelDropdown) MaterialTheme.colorScheme.primary.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
                                         ),
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(50))
-                                            .clickable { showModelDropdown = true },
+                                            .clickable { overlays.showModelDropdown = true },
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
@@ -1131,7 +1074,7 @@ fun ChatScreen(
                                             if (modelPin != null) {
                                                 Icon(
                                                     imageVector = Icons.Default.PushPin,
-                                                    contentDescription = "Pinned model",
+                                                    contentDescription = stringResource(R.string.chat_pinned_model),
                                                     tint = MaterialTheme.colorScheme.primary,
                                                     modifier = Modifier.size(12.dp),
                                                 )
@@ -1147,8 +1090,8 @@ fun ChatScreen(
                                             )
                                             Spacer(Modifier.width(3.dp))
                                             Icon(
-                                                imageVector = if (showModelDropdown) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
-                                                contentDescription = "Select Model",
+                                                imageVector = if (overlays.showModelDropdown) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
+                                                contentDescription = stringResource(R.string.chat_select_model),
                                                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
                                                 modifier = Modifier.size(13.dp),
                                             )
@@ -1156,11 +1099,11 @@ fun ChatScreen(
                                     }
 
                                     ModelQuickSwitchMenu(
-                                        expanded = showModelDropdown,
-                                        onDismiss = { showModelDropdown = false },
+                                        expanded = overlays.showModelDropdown,
+                                        onDismiss = { overlays.showModelDropdown = false },
                                         viewModel = viewModel,
                                         onNavigateToModels = onNavigateToModels,
-                                        onCompareClick = { showCompareDialog = true },
+                                        onCompareClick = { overlays.showCompareDialog = true },
                                     )
                                 }
 
@@ -1171,7 +1114,7 @@ fun ChatScreen(
                                         color = MaterialTheme.colorScheme.surfaceContainerHigh,
                                         modifier = Modifier
                                             .clip(RoundedCornerShape(50))
-                                            .clickable { showRagSheet = true },
+                                            .clickable { overlays.showRagSheet = true },
                                     ) {
                                         Row(
                                             verticalAlignment = Alignment.CenterVertically,
@@ -1184,7 +1127,7 @@ fun ChatScreen(
                                                 modifier = Modifier.size(11.dp),
                                             )
                                                                     Text(
-                                                "Docs (${ragDocuments.size})",
+                                                stringResource(R.string.chat_docs_count, ragDocuments.size),
                                                 style = MaterialTheme.typography.labelSmall,
                                                 fontSize = 11.sp,
                                                 fontWeight = FontWeight.Bold,
@@ -1253,7 +1196,7 @@ fun ChatScreen(
                                     ) {
                                         Icon(
                                             imageVector = if (isListening) Icons.Outlined.MicOff else Icons.Outlined.Mic,
-                                            contentDescription = if (isListening) "Stop recording" else "Voice input",
+                                            contentDescription = if (isListening) stringResource(R.string.chat_stop_recording) else stringResource(R.string.chat_voice_input),
                                             tint = if (isListening) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.size(17.dp),
                                         )
@@ -1288,7 +1231,7 @@ fun ChatScreen(
                                     ) {
                                         Icon(
                                             imageVector = if (isGenerating) Icons.Default.Stop else Icons.Default.ArrowUpward,
-                                            contentDescription = if (isGenerating) "Stop" else "Send",
+                                            contentDescription = if (isGenerating) stringResource(R.string.chat_stop) else stringResource(R.string.chat_send),
                                             tint = if (isGenerating || canSend) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                             modifier = Modifier.size(16.dp),
                                         )
@@ -1328,10 +1271,10 @@ fun ChatScreen(
                     audioPlayerHelper = audioPlayerHelper,
                     onPreviewHtml = { code ->
                         val resolvedName = com.raikaai.app.util.CodeArtifacts.deriveFileName("html", code)
-                        previewData = Triple(resolvedName, code, mapOf(resolvedName to code))
+                        overlays.previewData = Triple(resolvedName, code, mapOf(resolvedName to code))
                     },
                     onPreviewImage = { path ->
-                        previewImagePath = path
+                        overlays.previewImagePath = path
                     },
                 )
             }
@@ -1370,699 +1313,17 @@ fun ChatScreen(
         }
     }
 
-    // ── Compare Mode Dialog ──
-    if (showCompareDialog) {
-        AlertDialog(
-            onDismissRequest = { showCompareDialog = false },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.CompareArrows,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Compare Mode")
-                }
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(10.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            "Run every prompt on 2 models",
-                            style = MaterialTheme.typography.bodySmall,
-                            modifier = Modifier.weight(1f),
-                        )
-                        Switch(
-                            checked = settings.compareMode,
-                            onCheckedChange = { viewModel.setCompareMode(it) },
-                        )
-                    }
-                    Text(
-                        "Model A = active model. Pick model B (challenger):",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold,
-                    )
-                    Column(
-                        verticalArrangement = Arrangement.spacedBy(2.dp),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .heightIn(max = 320.dp)
-                            .verticalScroll(rememberScrollState()),
-                    ) {
-                        if (installedModels.isNotEmpty()) {
-                            Text(
-                                "On-device",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        installedModels.forEach { model ->
-                            val selected =
-                                settings.compareSource == ChatConstants.SOURCE_LOCAL &&
-                                    settings.compareModelId == model.absolutePath
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        viewModel.setCompareChallenger(ChatConstants.SOURCE_LOCAL, model.absolutePath)
-                                    }
-                                    .padding(vertical = 6.dp, horizontal = 4.dp),
-                            ) {
-                                RadioButton(selected = selected, onClick = {
-                                    viewModel.setCompareChallenger(ChatConstants.SOURCE_LOCAL, model.absolutePath)
-                                })
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    model.displayName,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                        if (remoteModels.isNotEmpty()) {
-                            Text(
-                                "Remote",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.primary,
-                                fontWeight = FontWeight.Bold,
-                            )
-                        }
-                        remoteModels.forEach { rModel ->
-                            val selected =
-                                settings.compareSource == ChatConstants.SOURCE_REMOTE &&
-                                    settings.compareModelId == rModel.id
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(8.dp))
-                                    .clickable {
-                                        viewModel.setCompareChallenger(ChatConstants.SOURCE_REMOTE, rModel.id)
-                                    }
-                                    .padding(vertical = 6.dp, horizontal = 4.dp),
-                            ) {
-                                RadioButton(selected = selected, onClick = {
-                                    viewModel.setCompareChallenger(ChatConstants.SOURCE_REMOTE, rModel.id)
-                                })
-                                Spacer(Modifier.width(6.dp))
-                                Text(
-                                    rModel.id,
-                                    style = MaterialTheme.typography.bodySmall,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                            }
-                        }
-                        if (installedModels.isEmpty() && remoteModels.isEmpty()) {
-                            Text(
-                                "No models yet. Download one in Models Hub first.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    }
-                    Text(
-                        "Result B appears as variant 2 (swipe 1/2) with the compare label under the message.",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { showCompareDialog = false }) { Text("Done") }
-            },
-        )
-    }
-
-    val mcpApprovalReq = viewModel.pendingMcpApproval.value
-    if (mcpApprovalReq != null) {
-        val toolSig =
-            viewModel.mcpToolsByServer.value[mcpApprovalReq.serverId]
-                ?.find { it.name == mcpApprovalReq.toolName }
-                ?.signature ?: mcpApprovalReq.toolName
-        AlertDialog(
-            onDismissRequest = { viewModel.respondMcpApproval(false) },
-            title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Build,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(22.dp),
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Allow tool call?")
-                }
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                ) {
-                    Text(
-                        "The assistant wants to run a tool on your MCP server. Review before allowing.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Text(
-                        text = toolSig,
-                        style = MaterialTheme.typography.bodySmall,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    Text(
-                        text = "Server: ${mcpApprovalReq.serverName}",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Text(
-                            text = mcpApprovalReq.argumentsJson.ifBlank { "{}" },
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
-                            modifier = Modifier
-                                .padding(8.dp)
-                                .heightIn(max = 180.dp)
-                                .verticalScroll(rememberScrollState()),
-                        )
-                    }
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = { viewModel.respondMcpApproval(true) }) { Text("Allow") }
-            },
-            dismissButton = {
-                TextButton(onClick = { viewModel.respondMcpApproval(false) }) { Text("Deny") }
-            },
-        )
-    }
-
-    if (showUrlDialog) {
-        AlertDialog(
-            onDismissRequest = { showUrlDialog = false },
-            title = { Text("Summarize Link") },
-            text = {
-                OutlinedTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    label = { Text("URL") },
-                    placeholder = { Text("https://example.com/article") },
-                    singleLine = true,
-                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Uri),
-                    modifier = Modifier.fillMaxWidth(),
-                )
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showUrlDialog = false
-                        viewModel.summarizeUrl(urlInput)
-                        urlInput = ""
-                    },
-                    enabled = urlInput.isNotBlank(),
-                ) { Text("Summarize") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showUrlDialog = false }) { Text("Cancel") }
-            },
-        )
-    }
-
-    if (showImageGenDialog) {
-        AlertDialog(
-            onDismissRequest = { showImageGenDialog = false },
-            title = { Text("Generate Image") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(
-                        value = imageGenPrompt,
-                        onValueChange = { imageGenPrompt = it },
-                        label = { Text("Prompt") },
-                        placeholder = { Text("A cozy cabin in the snowy mountains…") },
-                        minLines = 2,
-                        modifier = Modifier.fillMaxWidth(),
-                    )
-                    Text("Size", style = MaterialTheme.typography.labelSmall)
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        listOf("1024x1024", "1024x1792", "1792x1024").forEach { size ->
-                            FilterChip(
-                                selected = imageGenSize == size,
-                                onClick = { imageGenSize = size },
-                                label = { Text(size, style = MaterialTheme.typography.labelSmall) },
-                            )
-                        }
-                    }
-                    val imgModel = settings.remoteImageModelId.ifBlank { settings.remoteModelId }
-                    Text(
-                        if (imgModel.isBlank()) "Pick an image model in the Models tab first."
-                        else "Model: $imgModel",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showImageGenDialog = false
-                        viewModel.generateImage(imageGenPrompt, imageGenSize)
-                        imageGenPrompt = ""
-                    },
-                    enabled = imageGenPrompt.isNotBlank(),
-                ) { Text("Generate") }
-            },
-            dismissButton = {
-                TextButton(onClick = { showImageGenDialog = false }) { Text("Cancel") }
-            },
-        )
-    }
-
-    // ── Library Sheet: Knowledge Base + Artifacts ──
-    if (showRagSheet) {
-        var libraryTab by remember { mutableStateOf(0) }
-        val projects =
-            remember(artifacts) {
-                artifacts
-                    .groupBy { it.projectId }
-                    .map { (_, files) -> files.sortedBy { it.fileName } }
-                    .sortedByDescending { group -> group.maxOf { it.updatedAt } }
-            }
-
-        ModalBottomSheet(
-            onDismissRequest = { showRagSheet = false },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = MaterialTheme.colorScheme.surface,
-        ) {
-            Column(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 24.dp),
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Library",
-                        style = MaterialTheme.typography.titleLarge,
-                        fontWeight = FontWeight.Bold,
-                    )
-                    IconButton(
-                        onClick = { showRagSheet = false },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close", modifier = Modifier.size(20.dp))
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    FilterChip(
-                        selected = libraryTab == 0,
-                        onClick = { libraryTab = 0 },
-                        label = { Text("Knowledge") },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Description, contentDescription = null, modifier = Modifier.size(15.dp))
-                        },
-                    )
-                    FilterChip(
-                        selected = libraryTab == 1,
-                        onClick = { libraryTab = 1 },
-                        label = { Text("Artifacts") },
-                        leadingIcon = {
-                            Icon(Icons.Outlined.Code, contentDescription = null, modifier = Modifier.size(15.dp))
-                        },
-                    )
-                }
-
-                if (libraryTab == 0) {
-                    Text(
-                        "Import text documents so the assistant can answer from them on-device. Relevant excerpts are cited as [Doc1], [Doc2] ...",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(bottom = 12.dp),
-                    )
-
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceContainerLow,
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 10.dp),
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    "Use documents in chat",
-                                    style = MaterialTheme.typography.bodyMedium,
-                                    fontWeight = FontWeight.SemiBold,
-                                )
-                                Text(
-                                    if (ragDocuments.isEmpty()) {
-                                        "No documents imported yet"
-                                    } else {
-                                        "${ragDocuments.size} document(s) indexed"
-                                    },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                )
-                            }
-                            Switch(
-                                checked = settings.ragEnabled,
-                                onCheckedChange = { viewModel.setRagEnabled(it) },
-                            )
-                        }
-                    }
-
-                    OutlinedButton(
-                        onClick = { ragDocumentPicker.launch(arrayOf("*/*")) },
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.fillMaxWidth(),
-                    ) {
-                        Icon(Icons.Outlined.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
-                        Spacer(Modifier.width(6.dp))
-                        Text("Import Document (txt, md, csv, json, code)")
-                    }
-
-                    Spacer(Modifier.height(12.dp))
-
-                    if (ragDocuments.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(120.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "No documents yet. Import one to get started.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth().height(280.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp),
-                        ) {
-                            items(ragDocuments, key = { it.id }) { doc ->
-                                val addedStr =
-                                    SimpleDateFormat("MMM d \u00b7 HH:mm", Locale.getDefault()).format(Date(doc.addedAt))
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                    ) {
-                                        Icon(
-                                            Icons.Outlined.Description,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(18.dp),
-                                        )
-                                        Spacer(Modifier.width(10.dp))
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = doc.name,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis,
-                                            )
-                                            Text(
-                                                text = "${doc.chunkCount} chunks \u00b7 ${doc.charCount / 1024} KB \u00b7 $addedStr",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontSize = 11.sp,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                        IconButton(
-                                            onClick = { viewModel.deleteRagDocument(doc.id) },
-                                            modifier = Modifier.size(28.dp),
-                                        ) {
-                                            Icon(
-                                                Icons.Outlined.Delete,
-                                                contentDescription = "Delete document",
-                                                tint = MaterialTheme.colorScheme.error,
-                                                modifier = Modifier.size(16.dp),
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                } else {
-                    if (projects.isEmpty()) {
-                        Box(
-                            modifier = Modifier.fillMaxWidth().height(160.dp),
-                            contentAlignment = Alignment.Center,
-                        ) {
-                            Text(
-                                "No artifacts yet. Ask the assistant to build something and it will appear here.",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.padding(horizontal = 24.dp),
-                            )
-                        }
-                    } else {
-                        LazyColumn(
-                            modifier = Modifier.fillMaxWidth().height(380.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
-                        ) {
-                            items(projects, key = { it.first().projectId }) { files ->
-                                val projectId = files.first().projectId
-                                val entryHtml = files.firstOrNull { it.fileName.endsWith(".html", true) }
-                                val label =
-                                    (entryHtml?.fileName?.substringBeforeLast('.')
-                                        ?: files.first().fileName.substringBeforeLast('.'))
-                                        .ifBlank { "project" }
-                                val subtitle = files.joinToString(" \u00b7 ") { it.fileName }
-                                val dateStr =
-                                    SimpleDateFormat("MMM d \u00b7 HH:mm", Locale.getDefault())
-                                        .format(Date(files.maxOf { it.updatedAt }))
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceContainerLow,
-                                    modifier = Modifier.fillMaxWidth(),
-                                ) {
-                                    Column(modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) {
-                                        Row(verticalAlignment = Alignment.CenterVertically) {
-                                            Icon(
-                                                Icons.Outlined.Folder,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(18.dp),
-                                            )
-                                            Spacer(Modifier.width(10.dp))
-                                            Column(modifier = Modifier.weight(1f)) {
-                                                Text(
-                                                    text = "$label (${files.size} file)",
-                                                    style = MaterialTheme.typography.bodyMedium,
-                                                    fontWeight = FontWeight.SemiBold,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                                Text(
-                                                    text = subtitle,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontSize = 11.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                    maxLines = 2,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                )
-                                                Text(
-                                                    text = dateStr,
-                                                    style = MaterialTheme.typography.labelSmall,
-                                                    fontSize = 11.sp,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                )
-                                            }
-                                            Row {
-                                                if (entryHtml != null) {
-                                                    IconButton(
-                                                        onClick = {
-                                                            val target = entryHtml
-                                                            viewModel.loadWebPreview(projectId) { _, map ->
-                                                                val html = map[target.fileName]
-                                                                if (html != null) {
-                                                                    previewData = Triple(target.fileName, html, map)
-                                                                }
-                                                            }
-                                                        },
-                                                        modifier = Modifier.size(28.dp),
-                                                    ) {
-                                                        Icon(
-                                                            Icons.Outlined.Visibility,
-                                                            contentDescription = "Preview project",
-                                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                            modifier = Modifier.size(17.dp),
-                                                        )
-                                                    }
-                                                }
-                                                IconButton(
-                                                    onClick = {
-                                                        viewModel.exportArtifactProject(projectId, label) { n ->
-                                                            android.widget.Toast.makeText(
-                                                                context,
-                                                                if (n > 0) "Exported $n file(s) to Download/RaikaAI/$label" else "Export failed",
-                                                                android.widget.Toast.LENGTH_SHORT,
-                                                            ).show()
-                                                        }
-                                                    },
-                                                    modifier = Modifier.size(28.dp),
-                                                ) {
-                                                    Icon(
-                                                        Icons.Default.FileDownload,
-                                                        contentDescription = "Export folder",
-                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                        modifier = Modifier.size(17.dp),
-                                                    )
-                                                }
-                                                IconButton(
-                                                    onClick = { viewModel.deleteArtifactProject(projectId) },
-                                                    modifier = Modifier.size(28.dp),
-                                                ) {
-                                                    Icon(
-                                                        Icons.Outlined.Delete,
-                                                        contentDescription = "Delete project",
-                                                        tint = MaterialTheme.colorScheme.error,
-                                                        modifier = Modifier.size(16.dp),
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // ── Web Preview Sheet ──
-    previewData?.let { data ->
-        val (entryFile, entryHtml, fileMap) = data
-        ModalBottomSheet(
-            onDismissRequest = { previewData = null },
-            sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true),
-            containerColor = MaterialTheme.colorScheme.surface,
-            modifier = Modifier.fillMaxHeight(0.92f),
-        ) {
-            Column(modifier = Modifier.fillMaxSize()) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
-                    Text(
-                        "Preview: $entryFile",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
-                    )
-                    IconButton(
-                        onClick = { previewData = null },
-                        modifier = Modifier.size(32.dp),
-                    ) {
-                        Icon(Icons.Default.Close, contentDescription = "Close preview", modifier = Modifier.size(20.dp))
-                    }
-                }
-                AndroidView(
-                    factory = { ctx ->
-                        val web = WebView(ctx)
-                        web.settings.javaScriptEnabled = true
-                        web.settings.domStorageEnabled = true
-                        // Sandboxed preview: the HTML comes from model output
-                        // (untrusted). Block ALL network/file access except the
-                        // in-memory project files served below.
-                        web.settings.allowFileAccess = false
-                        web.settings.allowContentAccess = false
-                        web.webViewClient =
-                            object : WebViewClient() {
-                                override fun shouldOverrideUrlLoading(
-                                    view: WebView,
-                                    request: WebResourceRequest,
-                                ): Boolean = true // never leave the preview
-
-                                override fun shouldInterceptRequest(
-                                    view: WebView,
-                                    request: WebResourceRequest,
-                                ): WebResourceResponse? {
-                                    val host = request.url.host
-                                    if (host != "appassets.raikaai.local") {
-                                        // Foreign host (exfil via <img>/fetch):
-                                        // answer with an empty body instead of
-                                        // letting the WebView fetch it.
-                                        return WebResourceResponse(
-                                            "text/plain",
-                                            "utf-8",
-                                            403,
-                                            "Blocked",
-                                            emptyMap(),
-                                            ByteArray(0).inputStream(),
-                                        )
-                                    }
-                                    val path = Uri.decode(request.url.path.orEmpty()).trimStart('/')
-                                    val content = fileMap[path]
-                                        ?: fileMap.entries.firstOrNull { it.key.equals(path, ignoreCase = true) }?.value
-                                        ?: return null
-                                    return WebResourceResponse(
-                                        com.raikaai.app.util.FileSaver.mimeFor(path),
-                                        "utf-8",
-                                        content.byteInputStream(),
-                                    )
-                                }
-                            }
-                        web.loadDataWithBaseURL(
-                            "https://appassets.raikaai.local/",
-                            entryHtml,
-                            "text/html",
-                            "utf-8",
-                            null,
-                        )
-                        web
-                    },
-                    // B37: WebViews hold native resources; destroy on dismiss.
-                    onRelease = { it.destroy() },
-                    modifier = Modifier.fillMaxSize().weight(1f),
-                )
-            }
-        }
-    }
-
-    // ── Fullscreen Image Preview Lightbox ──
-    previewImagePath?.let { path ->
-        ImageViewerDialog(
-            imagePath = path,
-            onDismiss = { previewImagePath = null },
-        )
-    }
+    ChatDialogsHost(
+        viewModel = viewModel,
+        settings = settings,
+        installedModels = installedModels,
+        remoteModels = remoteModels,
+        overlays = overlays,
+        artifacts = artifacts,
+        ragDocuments = ragDocuments,
+        ragDocumentPicker = ragDocumentPicker,
+        context = context,
+    )
 }
 
 // Composables extracted to ChatComponents.kt

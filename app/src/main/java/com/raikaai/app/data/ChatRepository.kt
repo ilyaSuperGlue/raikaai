@@ -14,13 +14,22 @@ import java.util.Date
 import java.util.Locale
 import java.util.UUID
 
+/** Attachment kind. Stored on disk as [ChatAttachment.type] strings ("image" | "file") — never rename those. */
+enum class AttachmentType {
+    IMAGE,
+    FILE,
+}
+
 /** A file attached to a message: an image for vision, or a document whose text is injected. */
 data class ChatAttachment(
-    val type: String = "image", // "image" | "file"
+    val type: String = "image", // "image" | "file" (persisted schema; compare via [kind])
     val path: String = "", // absolute path inside app storage
     val name: String = "",
     val mimeType: String? = null,
-)
+) {
+    /** Typed view of [type]; unknown values safely fall back to FILE. */
+    val kind: AttachmentType get() = if (type == "image") AttachmentType.IMAGE else AttachmentType.FILE
+}
 
 data class ChatMessageEntry(
     val role: String, // "user" | "assistant"

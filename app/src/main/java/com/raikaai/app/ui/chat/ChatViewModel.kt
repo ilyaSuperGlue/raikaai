@@ -32,6 +32,7 @@ import com.raikaai.app.data.Conversation
 import com.raikaai.app.data.ConversationHeader
 import com.raikaai.app.data.DEFAULT_SYSTEM_PROMPT
 import com.raikaai.app.data.AppLimits
+import com.raikaai.app.data.AttachmentType
 import com.raikaai.app.data.SamplingDefaults
 import com.raikaai.app.data.Settings
 import com.raikaai.app.data.SettingsRepository
@@ -2027,7 +2028,7 @@ class ChatViewModel(
             if (imagePaths.isNotEmpty()) {
                 imagePaths
             } else {
-                userEntry.attachments.orEmpty().filter { it.type == "image" }.map { it.path }
+                userEntry.attachments.orEmpty().filter { it.kind == AttachmentType.IMAGE }.map { it.path }
                     .ifEmpty { listOfNotNull(userEntry.imagePath) }
             }
 

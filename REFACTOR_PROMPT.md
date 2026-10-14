@@ -1,5 +1,13 @@
 # PROMPT: Structural Refactor — RaikaAI Chat Module
 
+> Status 2026-10-14: FASE 1 ✅, FASE 2 ✅ (PersonaStore/AttachmentPipeline/
+> BenchmarkRunner/ServerControls), FASE 3 ✅ partial (ChatTopBar +
+> ChatDialogsHost + ChatOverlayState; ComposerBar DEFERRED — input/prefill/
+> helpers coupling, ekstraksi butuh hoist state besar), FASE 4 ✅,
+> FASE 5 ✅ partial (chat surfaces: ChatScreen/DialogsHost/Components/TopBar;
+> layar lain menyusul per-layar-per-commit).
+
+
 > Copy-paste dokumen ini sebagai instruksi kerja agen (atau checklist manusia).
 > Estimasi total: 5 fase. Kerjakan BERURUTAN, satu fase = satu commit.
 > Bahasa kode & komentar: **English only** (kecuali functional language patterns:
