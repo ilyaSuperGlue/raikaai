@@ -25,16 +25,16 @@ Selain antarmuka obrolan, RaikaAI menyematkan **server HTTP kompatibel OpenAI (`
     <tr>
       <td align="center" width="20%"><b>Layar Obrolan</b></td>
       <td align="center" width="20%"><b>Hub Model</b></td>
-      <td align="center" width="20%"><b>Server Lokal</b></td>
       <td align="center" width="20%"><b>Karakter & Persona</b></td>
-      <td align="center" width="20%"><b>Keterampilan & MCP</b></td>
+      <td align="center" width="20%"><b>Keterampilan & Alat</b></td>
+      <td align="center" width="20%"><b>Riwayat Obrolan</b></td>
     </tr>
     <tr>
       <td align="center" width="20%"><img src="docs/screenshots/chat.png" width="100%" alt="Layar Obrolan"></td>
       <td align="center" width="20%"><img src="docs/screenshots/models.png" width="100%" alt="Hub Model"></td>
-      <td align="center" width="20%"><img src="docs/screenshots/server.png" width="100%" alt="Server Lokal"></td>
       <td align="center" width="20%"><img src="docs/screenshots/characters.png" width="100%" alt="Karakter & Persona"></td>
-      <td align="center" width="20%"><img src="docs/screenshots/skills.png" width="100%" alt="Keterampilan & MCP"></td>
+      <td align="center" width="20%"><img src="docs/screenshots/skills.png" width="100%" alt="Keterampilan & Alat"></td>
+      <td align="center" width="20%"><img src="docs/screenshots/history.png" width="100%" alt="Riwayat Obrolan"></td>
     </tr>
   </table>
 </div>
