@@ -449,7 +449,7 @@ class SettingsRepository(
                     mcpEnabled = prefs[Keys.MCP_ENABLED] ?: false,
                     mcpServersJson = prefs[Keys.MCP_SERVERS_JSON] ?: "[]",
                     huggingFaceToken = securePrefs().getString(SEC_HF_TOKEN, "") ?: "",
-                    serverPort = prefs[Keys.SERVER_PORT] ?: 8080,
+                    serverPort = (prefs[Keys.SERVER_PORT] ?: 8080).coerceIn(1024, 65535),
                     serverBindAll = prefs[Keys.SERVER_BIND_ALL] ?: false,
                     serverAuthToken = securePrefs().getString(SEC_SERVER_AUTH_TOKEN, "") ?: "",
                     systemPrompt = prefs[Keys.SYSTEM_PROMPT] ?: DEFAULT_SYSTEM_PROMPT,
@@ -685,7 +685,7 @@ class SettingsRepository(
 
     suspend fun setHuggingFaceToken(value: String) = putSecureToken(SEC_HF_TOKEN, value)
 
-    suspend fun setServerPort(value: Int) = edit { it[Keys.SERVER_PORT] = value }
+    suspend fun setServerPort(value: Int) = edit { it[Keys.SERVER_PORT] = value.coerceIn(1024, 65535) }
 
     suspend fun setServerBindAll(value: Boolean) = edit { it[Keys.SERVER_BIND_ALL] = value }
 

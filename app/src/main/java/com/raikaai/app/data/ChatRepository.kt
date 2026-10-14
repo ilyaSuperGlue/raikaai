@@ -38,7 +38,7 @@ data class ChatMessageEntry(
 )
 
 data class Conversation(
-    val id: String = UUID.randomUUID().toString(),
+    var id: String = UUID.randomUUID().toString(),
     var title: String = "",
     val createdAt: Long = System.currentTimeMillis(),
     var updatedAt: Long = System.currentTimeMillis(),
@@ -417,7 +417,14 @@ class ChatRepository(
             @Suppress("SENSELESS_COMPARISON")
             if (conv.folder == null) conv.folder = ""
             conv.tags = sanitizeTags(conv.tags)
-            val msgs = conv.messages
+            @Suppress("SENSELESS_COMPARISON")
+            if ((conv.title as String?) == null) conv.title = ""
+            @Suppress("SENSELESS_COMPARISON")
+            if ((conv.id as String?).isNullOrBlank()) conv.id = UUID.randomUUID().toString()
+            val msgs = (conv.messages as List<ChatMessageEntry>?) ?: run {
+                conv.messages = emptyList()
+                return conv
+            }
             if (msgs.isEmpty()) return conv
             var changed = false
             val out = ArrayList<ChatMessageEntry>(msgs.size)
@@ -441,12 +448,14 @@ class ChatRepository(
                     id != m.id ||
                         parent != m.parentId ||
                         m.variants == null ||
-                        m.attachments == null
+                        m.attachments == null ||
+                        (m.role as String?) == null ||
+                        (m.content as String?) == null
                 out.add(
                     if (needsSanitize) {
                         ChatMessageEntry(
-                            role = m.role,
-                            content = m.content,
+                            role = (m.role as String?).orEmpty(),
+                            content = (m.content as String?).orEmpty(),
                             timestamp = m.timestamp,
                             stats = m.stats,
                             variants = m.variants.orEmpty(),

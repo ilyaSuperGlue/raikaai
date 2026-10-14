@@ -33,10 +33,29 @@ data class McpServerConfig(
 ) {
     /** Normalized endpoint URL, or null when blank/malformed. */
     fun endpoint(): String? {
-        var u = url.trim()
+        var u = (url as String?).orEmpty().trim()
         if (u.isBlank()) return null
         if (!u.startsWith("http://") && !u.startsWith("https://")) u = "https://$u"
         return u
+    }
+}
+
+/**
+ * Gson bypasses the Kotlin constructor: name/url/authToken can arrive as
+ * JVM-null from hand-edited or legacy JSON, crashing url.trim() and friends.
+ */
+@Suppress("SENSELESS_COMPARISON")
+internal fun McpServerConfig.normalized(): McpServerConfig {
+    fun str(v: String?, fallback: String): String = if (v.isNullOrBlank()) fallback else v
+    val safeUrl = (url as String?).orEmpty()
+    return McpServerConfig(
+        id = str(id as String?, "mcp_" + System.currentTimeMillis()),
+        name = str(name as String?, safeUrl.ifBlank { "MCP Server" }),
+        url = safeUrl,
+        authToken = (authToken as String?).orEmpty(),
+        enabled = (enabled as Boolean?) ?: true,
+    ).also {
+        it.hasToken = this.hasToken
     }
 }
 

@@ -42,6 +42,8 @@ class McpManager private constructor(private val appContext: Context) {
             runCatching {
                 if (json.isBlank()) return emptyList()
                 (McpJson.gson.fromJson<List<McpServerConfig>>(json, SERVER_LIST_TYPE) ?: emptyList())
+                    .map { it.normalized() }
+                    .filter { it.url.isNotBlank() }
             }.getOrElse {
                 KLog.w("McpManager", "Failed to parse MCP servers JSON: ${it.message}")
                 emptyList()

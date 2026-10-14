@@ -41,6 +41,14 @@ class McpModelsTest {
     }
 
     @Test
+    fun testServersFromJsonNullsNormalizedAndBlankUrlDropped() {
+        val back = McpManager.serversFromJson("""[{"id":null,"name":null,"url":null},{"name":"Ok","url":"example.com/mcp"}]""")
+        assertEquals(1, back.size)
+        assertEquals("Ok", back[0].name)
+        assertEquals("https://example.com/mcp", back[0].endpoint())
+    }
+
+    @Test
     fun testToolSignature() {
         val schema =
             JsonParser.parseString(

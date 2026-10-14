@@ -108,14 +108,28 @@ class SkillsManager private constructor(private val context: Context) {
 
     @Synchronized
     private fun loadSkills() {
+        var customCorrupt = false
         val customList: List<Skill> = try {
             if (customSkillsFile.exists()) {
-                gson.fromJson(customSkillsFile.readText(), object : TypeToken<List<Skill>>() {}.type) ?: emptyList()
+                val parsed: List<Skill>? =
+                    gson.fromJson(customSkillsFile.readText(), object : TypeToken<List<Skill>>() {}.type)
+                parsed?.map { it.normalize() } ?: emptyList()
             } else {
                 emptyList()
             }
         } catch (_: Exception) {
+            customCorrupt = true
             emptyList()
+        }
+        // A corrupt custom_skills.json must never be silently wiped by a
+        // later persist: quarantine it to .bak so user data survives.
+        if (customCorrupt) {
+            try {
+                val bak = File(dir, "custom_skills.json.bak.${System.currentTimeMillis()}")
+                customSkillsFile.copyTo(bak, overwrite = true)
+                KLog.e("Skills", "custom_skills.json corrupt; quarantined to ${bak.name}")
+            } catch (_: Exception) {
+            }
         }
 
         val toggles: Map<String, Boolean> = try {
@@ -305,8 +319,11 @@ class SkillsManager private constructor(private val context: Context) {
         try {
             // Check if JSON format
             if (rawText.trimStart().startsWith("{")) {
-                val parsed = gson.fromJson(rawText, Skill::class.java)
-                if (parsed != null && parsed.name.isNotBlank()) {
+                val raw = gson.fromJson(rawText, Skill::class.java)
+                // Reject nameless imports on the RAW value: normalize() would
+                // fill a fallback name and defeat this check.
+                if (raw != null && !(raw.name as String?).isNullOrBlank()) {
+                    val parsed = raw.normalize()
                     val skill = parsed.copy(
                         id = UUID.randomUUID().toString(),
                         name = parsed.name.take(80),

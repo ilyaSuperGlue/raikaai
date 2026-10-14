@@ -1680,7 +1680,9 @@ class ChatViewModel(
             var savedAudioFile: File? = currentAudioFile
             var audioBytes: ByteArray? = null
             if (savedAudioFile != null) {
-                audioBytes = try { savedAudioFile.readBytes() } catch (_: Exception) { null }
+                audioBytes = withContext(Dispatchers.IO) {
+                    try { savedAudioFile.readBytes() } catch (_: Exception) { null }
+                }
                 clearSelectedAudio()
             }
 
@@ -1736,7 +1738,10 @@ class ChatViewModel(
                 conversation?.personaId = activePersona.value.id
             }
             // Local engine supports a single vision image: use the first one.
-            val firstImageBytes = imagePaths.firstOrNull()?.let { try { File(it).readBytes() } catch (_: Exception) { null } }
+            // Disk read stays off the main thread (large camera photos).
+            val firstImageBytes = withContext(Dispatchers.IO) {
+                imagePaths.firstOrNull()?.let { try { File(it).readBytes() } catch (_: Exception) { null } }
+            }
             val userEntry =
                 ChatMessageEntry(
                     role = ChatConstants.ROLE_USER,
@@ -1760,6 +1765,7 @@ class ChatViewModel(
             // Single coroutine for the whole send flow: previously a redundant
             // nested launch overwrote genJob mid-flight, so stopGeneration()
             // could miss the outer job.
+            var localBlankFailed = false
             try {
                         // Single local generation pass. Returns the effective system
                         // prompt used (needed by the post-pass tool-call check).
@@ -1831,6 +1837,7 @@ class ChatViewModel(
                             if (currentConversationId == targetChatId &&
                                 stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
                             ) {
+                                localBlankFailed = true
                                 errorMessage.value = "Model tidak memberikan jawaban. Coba matikan Thinking atau ulangi pertanyaan."
                             }
                         }
@@ -1867,6 +1874,17 @@ class ChatViewModel(
                                 val current = messages[idx]
                                 val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
                                 messages[idx] = current.copy(stats = lastMetrics.displayBadge, variants = variants, sources = ragSources)
+                            }
+                            // Double-blank after the no-thinking retry: drop the
+                            // empty bubble instead of persisting it. Runs before
+                            // the compare-mode chaining below, which (if armed)
+                            // still produces its own challenger message.
+                            if (localBlankFailed &&
+                                messages.isNotEmpty() &&
+                                messages.last().role == ChatConstants.ROLE_ASSISTANT &&
+                                stripThinking(messages.last().content).isBlank()
+                            ) {
+                                messages.removeAt(messages.lastIndex)
                             }
                         persist()
                         captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
@@ -2071,14 +2089,22 @@ class ChatViewModel(
                         if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
                             val idx = messages.lastIndex
                             val current = messages[idx]
-                            val outputTokens = usageCompletionTokens ?: estimateTokens(current.content)
-                            val decodeStart = if (firstChunkAt > 0L) firstChunkAt else start
-                            val duration = maxOf(0.1f, (System.currentTimeMillis() - decodeStart) / 1000f)
-                            val tokSec = outputTokens / duration
-                            val badge = "%.1f tok/s · %d tokens · Remote".format(tokSec, outputTokens)
-                            val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
-                            messages[idx] = current.copy(stats = badge, variants = variants, sources = ragSources)
-                            recordRemoteCost(s.remoteModelId, promptTokensEstimate, outputTokens)
+                            // Mirror the local guard: a stream that ended with no
+                            // visible body (cut connection, all chunks malformed)
+                            // must not persist as a silent empty bubble.
+                            if (stripThinking(current.content).isBlank()) {
+                                messages.removeAt(idx)
+                                errorMessage.value = "Remote model returned an empty response. Please try again."
+                            } else {
+                                val outputTokens = usageCompletionTokens ?: estimateTokens(current.content)
+                                val decodeStart = if (firstChunkAt > 0L) firstChunkAt else start
+                                val duration = maxOf(0.1f, (System.currentTimeMillis() - decodeStart) / 1000f)
+                                val tokSec = outputTokens / duration
+                                val badge = "%.1f tok/s · %d tokens · Remote".format(tokSec, outputTokens)
+                                val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
+                                messages[idx] = current.copy(stats = badge, variants = variants, sources = ragSources)
+                                recordRemoteCost(s.remoteModelId, promptTokensEstimate, outputTokens)
+                            }
                         }
                         persist()
                         captureArtifacts(messages.lastOrNull()?.id, messages.lastOrNull()?.content.orEmpty())
@@ -2158,14 +2184,8 @@ class ChatViewModel(
         registerActiveChild(assistant)
         isGenerating.value = true
 
-        val imageBytes =
-            oldMsg.imagePath?.let { path ->
-                try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-            }
-        val audioBytes =
-            oldMsg.audioPath?.let { path ->
-                try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-            }
+        val editImagePathStr = oldMsg.imagePath
+        val editAudioPathStr = oldMsg.audioPath
 
         var lastMetrics: LiteRtEngineManager.InferenceMetrics? = null
         var ragSources: List<String>? = null
@@ -2173,6 +2193,17 @@ class ChatViewModel(
 
         genJob =
             viewModelScope.launch {
+                // Disk reads stay off the main thread (large camera photos).
+                val imageBytes = withContext(Dispatchers.IO) {
+                    editImagePathStr?.let { path ->
+                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
+                    }
+                }
+                val audioBytes = withContext(Dispatchers.IO) {
+                    editAudioPathStr?.let { path ->
+                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
+                    }
+                }
                 try {
                     val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
                     val appliedWindow = activeSummary != null
@@ -2299,14 +2330,8 @@ class ChatViewModel(
         }
         if (!keepExisting) removeTrailingAssistantMessage()
 
-        val imageBytes =
-            lastUser.imagePath?.let { path ->
-                try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-            }
-        val audioBytes =
-            lastUser.audioPath?.let { path ->
-                try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-            }
+        val imagePathStr = lastUser.imagePath
+        val audioPathStr = lastUser.audioPath
 
         val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = lastUser.id)
         messages.add(assistant)
@@ -2319,6 +2344,18 @@ class ChatViewModel(
 
         genJob =
             viewModelScope.launch {
+                var regenBlankFailed = false
+                // Disk reads stay off the main thread (large camera photos).
+                val imageBytes = withContext(Dispatchers.IO) {
+                    imagePathStr?.let { path ->
+                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
+                    }
+                }
+                val audioBytes = withContext(Dispatchers.IO) {
+                    audioPathStr?.let { path ->
+                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
+                    }
+                }
                 try {
                     val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
                     val appliedWindow = activeSummary != null
@@ -2409,6 +2446,7 @@ class ChatViewModel(
                         if (currentConversationId == targetRegenChatId &&
                             stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
                         ) {
+                            regenBlankFailed = true
                             errorMessage.value = "Model tidak memberikan jawaban. Coba matikan Thinking atau ulangi pertanyaan."
                         }
                     }
@@ -2434,6 +2472,17 @@ class ChatViewModel(
                     val merge = pendingCompareMerge
                     pendingCompareMerge = null
                     if (currentConversationId == targetRegenChatId) {
+                        // Double-blank after the no-thinking retry: drop the
+                        // empty bubble instead of persisting it with an empty
+                        // variant. Partial user-stopped output is untouched:
+                        // regenBlankFailed is only set by the retry path.
+                        if (regenBlankFailed &&
+                            messages.isNotEmpty() &&
+                            messages.last().role == ChatConstants.ROLE_ASSISTANT &&
+                            stripThinking(messages.last().content).isBlank()
+                        ) {
+                            messages.removeAt(messages.lastIndex)
+                        }
                         if (messages.isNotEmpty() && messages.last().role == ChatConstants.ROLE_ASSISTANT) {
                             val idx = messages.lastIndex
                             val current = messages[idx]

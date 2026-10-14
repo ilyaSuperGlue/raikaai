@@ -338,26 +338,26 @@ internal fun MessageBubble(
         // otherwise duplicate the same picture.
         val hasAttachmentImages = message.attachments.orEmpty().any { it.type == "image" }
         if (!message.imagePath.isNullOrBlank() && !hasAttachmentImages) {
-            val imgFile = remember(message.imagePath) { File(message.imagePath) }
-            val bitmap = remember(message.imagePath) {
-                try {
-                    if (imgFile.exists()) {
-                        val opts = BitmapFactory.Options().apply {
-                            inPreferredConfig = Bitmap.Config.RGB_565
+            // Decode off the main thread, downsampled (was: main-thread
+            // full-size decode in remember — ANR/OOM on large camera photos).
+            // No manual recycle: the bitmap is referenced by the Image below.
+            val legacyPath = message.imagePath
+            val bitmap by produceState<Bitmap?>(initialValue = null, legacyPath) {
+                value =
+                    withContext(Dispatchers.IO) {
+                        if (legacyPath.isNullOrBlank()) {
+                            null
+                        } else {
+                            decodeSampledBitmapFromFile(File(legacyPath), reqSizePx = 1024)
                         }
-                        BitmapFactory.decodeFile(imgFile.absolutePath, opts)
-                    } else null
-                } catch (_: Throwable) {
-                    null
-                }
+                    }
             }
-            // Recycle bitmap when imagePath changes or composable leaves composition
-            DisposableEffect(bitmap) {
-                onDispose { bitmap?.recycle() }
-            }
-            if (bitmap != null) {
+            // Copy to a local val first: smart cast doesn't work on
+            // delegated properties.
+            val currentBitmap = bitmap
+            if (currentBitmap != null) {
                 Image(
-                    bitmap = bitmap.asImageBitmap(),
+                    bitmap = currentBitmap.asImageBitmap(),
                     contentDescription = "Attached Image",
                     modifier = Modifier
                         .fillMaxWidth(if (isUser) 0.85f else 1f)
@@ -794,19 +794,24 @@ fun AudioMessagePlayer(
     val currentlyPlaying by audioPlayerHelper?.currentlyPlayingPath?.collectAsState() ?: remember { mutableStateOf(null) }
     val isPlaying = currentlyPlaying == audioPath
 
-    val durationText = remember(audioPath) {
-        try {
-            val mmr = android.media.MediaMetadataRetriever()
-            mmr.setDataSource(audioPath)
-            val durMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
-            mmr.release()
-            val totalSec = durMs / 1000
-            val min = totalSec / 60
-            val sec = totalSec % 60
-            "%d:%02d".format(Locale.US, min, sec)
-        } catch (_: Throwable) {
-            "Audio"
-        }
+    // Metadata read stays off the main thread (disk I/O can block on
+    // slow storage). Shows a placeholder until resolved.
+    val durationText by produceState(initialValue = "Audio", audioPath) {
+        value =
+            withContext(Dispatchers.IO) {
+                try {
+                    val mmr = android.media.MediaMetadataRetriever()
+                    mmr.setDataSource(audioPath)
+                    val durMs = mmr.extractMetadata(android.media.MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull() ?: 0L
+                    mmr.release()
+                    val totalSec = durMs / 1000
+                    val min = totalSec / 60
+                    val sec = totalSec % 60
+                    "%d:%02d".format(Locale.US, min, sec)
+                } catch (_: Throwable) {
+                    "Audio"
+                }
+            }
     }
 
     Surface(
@@ -890,30 +895,30 @@ fun PersonaAvatar(
 ): Boolean {
     if (avatarUri.isBlank()) return false
     val context = LocalContext.current
-    val bitmap = remember(avatarUri) {
-        try {
-            val file = File(avatarUri)
-            if (file.isAbsolute && file.exists()) {
-                val opts = BitmapFactory.Options().apply {
-                    inSampleSize = 2
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                }
-                BitmapFactory.decodeFile(file.absolutePath, opts)
-            } else {
-                context.contentResolver.openInputStream(android.net.Uri.parse(avatarUri))?.use { stream ->
-                    BitmapFactory.decodeStream(stream)
+    // Decode off the main thread, downsampled to avatar size (was:
+    // main-thread decode in remember). No manual recycle: the bitmap is
+    // referenced by the Image below.
+    val bitmap by produceState<Bitmap?>(initialValue = null, avatarUri) {
+        value =
+            withContext(Dispatchers.IO) {
+                try {
+                    val file = File(avatarUri)
+                    if (file.isAbsolute && file.exists()) {
+                        decodeSampledBitmapFromFile(file, reqSizePx = 256)
+                    } else {
+                        context.contentResolver.openInputStream(android.net.Uri.parse(avatarUri))?.use { stream ->
+                            BitmapFactory.decodeStream(stream)
+                        }
+                    }
+                } catch (_: Throwable) {
+                    null
                 }
             }
-        } catch (_: Throwable) {
-            null
-        }
     }
-    DisposableEffect(bitmap) {
-        onDispose { bitmap?.recycle() }
-    }
-    if (bitmap == null) return false
+    val currentBitmap = bitmap
+    if (currentBitmap == null) return false
     Image(
-        bitmap = bitmap.asImageBitmap(),
+        bitmap = currentBitmap.asImageBitmap(),
         contentDescription = contentDescription,
         modifier = modifier
             .size(size)
@@ -936,22 +941,24 @@ fun ImageViewerDialog(
     val scope = rememberCoroutineScope()
     var isSaving by remember { mutableStateOf(false) }
 
+    // Cheap handle for the save/share actions below (no I/O here).
     val file = remember(imagePath) { File(imagePath) }
-    val bitmap = remember(imagePath) {
-        try {
-            if (file.exists()) {
-                val opts = BitmapFactory.Options().apply {
-                    inPreferredConfig = Bitmap.Config.RGB_565
+
+    // Decode off the main thread, downsampled to screen size (was:
+    // main-thread full-res decode in remember — ANR/OOM on large photos).
+    // No manual recycle: the bitmap is referenced by the Image below.
+    val bitmap by produceState<Bitmap?>(initialValue = null, imagePath) {
+        value =
+            withContext(Dispatchers.IO) {
+                try {
+                    val f = File(imagePath)
+                    if (f.exists()) decodeSampledBitmapFromFile(f, reqSizePx = 2048) else null
+                } catch (_: Throwable) {
+                    null
                 }
-                BitmapFactory.decodeFile(file.absolutePath, opts)
-            } else null
-        } catch (_: Throwable) {
-            null
-        }
+            }
     }
-    DisposableEffect(bitmap) {
-        onDispose { bitmap?.recycle() }
-    }
+    val currentBitmap = bitmap
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -965,7 +972,8 @@ fun ImageViewerDialog(
         ) {
             Box(modifier = Modifier.fillMaxSize()) {
                 // Image Container centered
-                if (bitmap != null) {
+                val viewerBitmap = currentBitmap
+                if (viewerBitmap != null) {
                     Box(
                         modifier = Modifier
                             .fillMaxSize()
@@ -973,7 +981,7 @@ fun ImageViewerDialog(
                         contentAlignment = Alignment.Center,
                     ) {
                         Image(
-                            bitmap = bitmap.asImageBitmap(),
+                            bitmap = viewerBitmap.asImageBitmap(),
                             contentDescription = "Full image preview",
                             modifier = Modifier
                                 .fillMaxWidth()
