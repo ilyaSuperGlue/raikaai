@@ -2,7 +2,6 @@ package com.raikaai.app.ui.chat
 
 import android.app.Application
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.net.Uri
 import android.util.Base64
 import com.raikaai.app.attachments.AttachmentProcessor
@@ -12,12 +11,13 @@ import com.raikaai.app.data.ChatAttachment
 import com.raikaai.app.data.ChatConstants
 import com.raikaai.app.web.UrlSummarizer
 import java.io.File
+import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
 import com.raikaai.app.core.engine.LiteRtEngineManager
 import com.raikaai.app.core.remote.RemoteAiClient
 import com.raikaai.app.core.remote.RemoteChatMessage
@@ -63,7 +63,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.util.UUID
-
 
 data class PersonaPreset(
     val id: String,
@@ -213,22 +212,70 @@ class ChatViewModel(
 
     val settings = MutableStateFlow(Settings())
 
-    /** Estimated cumulative remote API spend in USD. */
-    val remoteSpendUsd = mutableStateOf(0.0)
+    /** Estimated cumulative remote API spend in USD (owned by ServerControls). */
     val messages = mutableStateListOf<ChatMessageEntry>()
     val isGenerating = mutableStateOf(false)
     val errorMessage = mutableStateOf<String?>(null)
     val installedModels = mutableStateOf<List<com.raikaai.app.localai.InstalledModel>>(emptyList())
     val conversations = mutableStateOf<List<ConversationHeader>>(emptyList())
 
-    val customPersonas = mutableStateListOf<PersonaPreset>()
-    val isBenchmarking = mutableStateOf(false)
-    val latestBenchmark = mutableStateOf<BenchmarkResult?>(null)
+    // Character/persona state lives in PersonaStore; these accessors keep
+    // UI and internal call sites unchanged.
+    private val personaStore = PersonaStore(app, settingsRepo, viewModelScope)
+    val customPersonas: SnapshotStateList<PersonaPreset> get() = personaStore.customPersonas
+    // Benchmark + remote-model discovery live in BenchmarkRunner; these
+    // accessors keep UI and internal call sites unchanged.
+    private val benchmarkRunner = BenchmarkRunner(
+        app = app,
+        settingsRepo = settingsRepo,
+        engine = engine,
+        scope = viewModelScope,
+        settings = settings,
+        isGenerating = isGenerating,
+        onError = { errorMessage.value = it },
+    )
+    val isBenchmarking: State<Boolean> get() = benchmarkRunner.isBenchmarking
+    val latestBenchmark: State<BenchmarkResult?> get() = benchmarkRunner.latestBenchmark
+    val remoteModels: State<List<RemoteModelItem>> get() = benchmarkRunner.remoteModels
+    val isFetchingRemoteModels: State<Boolean> get() = benchmarkRunner.isFetchingRemoteModels
+    val isDetectingContextWindow: State<Boolean> get() = benchmarkRunner.isDetectingContextWindow
 
-    val serverStatus: StateFlow<OpenAiServer.Status> = OpenAiServer.status
+    fun runBenchmark(
+        prompt: String = "Explain in 35 words why on-device AI is private and fast.",
+        backendOverride: String? = null,
+        onComplete: ((BenchmarkResult) -> Unit)? = null,
+    ) = benchmarkRunner.runBenchmark(prompt, backendOverride, onComplete)
+
+    fun detectRemoteContextWindow(modelId: String = settings.value.remoteModelId) =
+        benchmarkRunner.detectRemoteContextWindow(modelId)
+
+    fun fetchRemoteModels(baseUrl: String, apiKey: String = "") =
+        benchmarkRunner.fetchRemoteModels(baseUrl, apiKey)
+
+    fun setRemoteModelId(id: String) = benchmarkRunner.setRemoteModelId(id)
+
+    // Embedded-server controls + spend tracking live in ServerControls.
+    private val serverControls = ServerControls(
+        app = app,
+        settingsRepo = settingsRepo,
+        scope = viewModelScope,
+        settings = settings,
+    )
+    val serverStatus: StateFlow<OpenAiServer.Status> get() = serverControls.serverStatus
+    val remoteSpendUsd: State<Double> get() = serverControls.remoteSpendUsd
+
+    fun toggleServer(context: android.content.Context = app) = serverControls.toggleServer(context)
+
+    fun setServerPort(v: Int) = serverControls.setServerPort(v)
+
+    fun setServerBindAll(v: Boolean) = serverControls.setServerBindAll(v)
+
+    fun setServerAuthToken(v: String) = serverControls.setServerAuthToken(v)
+
+    fun resetRemoteSpend() = serverControls.resetRemoteSpend()
     val downloadStates = downloader.downloadStates
-    // Active Persona tracking
-    val activePersona = MutableStateFlow<PersonaPreset>(PERSONA_PRESETS.first())
+    // Active Persona tracking (owned by PersonaStore).
+    val activePersona: StateFlow<PersonaPreset> get() = personaStore.activePersona
 
     // Multimodal attachment state (images + documents)
     val selectedAttachments = MutableStateFlow<List<PendingAttachment>>(emptyList())
@@ -280,10 +327,7 @@ class ChatViewModel(
     val activeBackendState: StateFlow<String?> get() = engine.activeBackendState
     val engineLogs: StateFlow<List<String>> get() = LiteRtEngineManager.engineLogs
 
-    // Remote Provider state
-    val remoteModels = mutableStateOf<List<RemoteModelItem>>(emptyList())
-    val isFetchingRemoteModels = mutableStateOf(false)
-    val isDetectingContextWindow = mutableStateOf(false)
+    // Remote Provider state lives in BenchmarkRunner (accessors above).
 
     fun addAttachments(uris: List<Uri>, forceImage: Boolean = false) {
         if (uris.isEmpty()) return
@@ -332,18 +376,6 @@ class ChatViewModel(
 
     fun clearSelectedAudio() {
         selectedAudioFile.value = null
-    }
-
-    /** Default prompt when the user sends only attachment(s) without text. */
-    private fun defaultPromptForAttachments(prepared: List<PreparedAttachment>): String {
-        val hasImages = prepared.any { it.attachment.type == "image" }
-        val hasDocs = prepared.any { it.attachment.type == "file" && it.extractedText != null }
-        return when {
-            hasImages && hasDocs -> "Describe the images and summarize the attached documents."
-            hasImages -> if (prepared.count { it.attachment.type == "image" } > 1) "Describe these images." else "Describe this image."
-            hasDocs -> "Summarize the attached document(s)."
-            else -> "What can you tell me about the attached file(s)?"
-        }
     }
 
     // Image-generation state: non-null while an image is being generated.
@@ -454,8 +486,8 @@ class ChatViewModel(
     /**
      * Conversation id whose persona still needs resolving because custom
      * personas hadn't loaded when it was opened. Retried after customs load.
+     * (Owned by PersonaStore.)
      */
-    private var pendingPersonaRestoreId: String? = null
     private var conversation: Conversation? = null
     private var nodes = mutableListOf<ChatMessageEntry>() // flat tree storage for branching
     private var genJob: Job? = null
@@ -618,7 +650,6 @@ class ChatViewModel(
     fun setEnableWebSearch(v: Boolean) = launchSetting { settingsRepo.setEnableWebSearch(v) }
 
     // ── Context Compression (rolling summary + chat memory archive) ──
-
 
     /**
      * Messages that should be sent verbatim to the model: with a rolling
@@ -863,17 +894,17 @@ class ChatViewModel(
         viewModelScope.launch {
             settingsRepo.settingsFlow.collect { s ->
                 settings.value = s
-                remoteSpendUsd.value = s.remoteSpendMicros / 1_000_000.0
-                loadCustomPersonasFromJson(s.customPersonasJson)
+                serverControls.refreshSpend(s.remoteSpendMicros)
+                personaStore.loadCustomPersonasFromJson(s.customPersonasJson)
                 // Retry a persona restore that previously fell back to General
                 // only because the custom list wasn't loaded yet.
-                val pendingId = pendingPersonaRestoreId
+                val pendingId = personaStore.pendingPersonaRestoreId
                 val conv = conversation
                 if (pendingId != null && conv != null && conv.id == pendingId && conv.id == currentConversationId) {
-                    val resolved = resolvePersona(conv.personaId)
+                    val resolved = personaStore.resolvePersona(conv.personaId)
                     if (resolved.id == conv.personaId) {
-                        activePersona.value = resolved
-                        pendingPersonaRestoreId = null
+                        personaStore.applyPersona(resolved)
+                        personaStore.pendingPersonaRestoreId = null
                     }
                 }
             }
@@ -917,7 +948,6 @@ class ChatViewModel(
         }
     }
 
-
     fun clearError() {
         errorMessage.value = null
     }
@@ -942,14 +972,7 @@ class ChatViewModel(
         }
     }
 
-    fun toggleServer(context: android.content.Context = app) {
-        val current = serverStatus.value
-        if (current is OpenAiServer.Status.Running || current is OpenAiServer.Status.Starting) {
-            ChatServerService.stop(context)
-        } else {
-            ChatServerService.start(context)
-        }
-    }
+    // Server start/stop lives in ServerControls (delegating accessor above).
 
     fun loadConversation(id: String) = selectConversation(id)
 
@@ -1065,23 +1088,13 @@ class ChatViewModel(
                 rebuildFromTree()
                 // Restore the chat's own character without touching global settings.
                 // If custom personas haven't finished loading yet, retry once they're ready.
-                val resolved = resolvePersona(conv.personaId)
-                activePersona.value = resolved
-                pendingPersonaRestoreId =
+                val resolved = personaStore.resolvePersona(conv.personaId)
+                personaStore.applyPersona(resolved)
+                personaStore.pendingPersonaRestoreId =
                     if (conv.personaId != null && resolved.id != conv.personaId) conv.id else null
                 refreshPinState()
             }
         }
-    }
-
-    /**
-     * Looks up a persona by id across builtins and customs.
-     * Returns General for null ids (legacy chats) or deleted personas.
-     */
-    private fun resolvePersona(personaId: String?): PersonaPreset {
-        if (personaId == null) return PERSONA_PRESETS.first()
-        return (PERSONA_PRESETS + customPersonas).firstOrNull { it.id == personaId }
-            ?: PERSONA_PRESETS.first()
     }
 
     fun newChat(withPersona: PersonaPreset? = null) {
@@ -1092,12 +1105,12 @@ class ChatViewModel(
         val p = withPersona ?: activePersona.value
         val newConv = Conversation().also { currentConversationId = it.id }
         newConv.personaId = p.id
-        pendingPersonaRestoreId = null
+        personaStore.pendingPersonaRestoreId = null
         conversation = newConv
         nodes.clear()
         messages.clear()
         refreshPinState()
-        applyPersona(p)
+        personaStore.applyPersona(p)
         if (p.greeting.isNotBlank()) {
             messages.add(
                 ChatMessageEntry(
@@ -1789,9 +1802,7 @@ class ChatViewModel(
             var savedAudioFile: File? = currentAudioFile
             var audioBytes: ByteArray? = null
             if (savedAudioFile != null) {
-                audioBytes = withContext(Dispatchers.IO) {
-                    try { savedAudioFile.readBytes() } catch (_: Exception) { null }
-                }
+                audioBytes = AttachmentPipeline.readBytesOffMain(savedAudioFile.absolutePath)
                 clearSelectedAudio()
             }
 
@@ -1801,34 +1812,14 @@ class ChatViewModel(
             clearSelectedImage()
 
             val attachments = prepared.map { it.attachment }
-            val imagePaths = attachments.filter { it.type == "image" }.map { it.path }
+            val imagePaths = AttachmentPipeline.imagePathsOf(attachments)
             // Inject extracted document text into the prompt.
-            val docBlocks =
-                prepared.mapNotNull { pa ->
-                    pa.extractedText?.takeIf { it.isNotBlank() }?.let { text ->
-                        "\n\n[Attached file \"${pa.attachment.name}\":]\n$text"
-                    }
-                }
-            val unsupportedNote =
-                prepared
-                    .filter { it.attachment.type == "file" && it.extractedText == null }
-                    .takeIf { it.isNotEmpty() }
-                    ?.joinToString(", ") { "\"${it.attachment.name}\"" }
-                    ?.let { "\n\n[Note: attached file(s) $it could not be read as text.]" }
-                    .orEmpty()
-
             val promptText =
-                buildString {
-                    append(
-                        when {
-                            body.isNotBlank() -> body
-                            savedAudioFile != null -> "Please listen to this audio clip and respond."
-                            else -> defaultPromptForAttachments(prepared)
-                        }
-                    )
-                    docBlocks.forEach { append(it) }
-                    append(unsupportedNote)
-                }
+                AttachmentPipeline.buildPromptText(
+                    body = body,
+                    hasAudio = savedAudioFile != null,
+                    prepared = prepared,
+                )
 
             if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
                 sendRemoteMessage(promptText, s, imagePaths, attachments)
@@ -1847,10 +1838,7 @@ class ChatViewModel(
                 conversation?.personaId = activePersona.value.id
             }
             // Local engine supports a single vision image: use the first one.
-            // Disk read stays off the main thread (large camera photos).
-            val firstImageBytes = withContext(Dispatchers.IO) {
-                imagePaths.firstOrNull()?.let { try { File(it).readBytes() } catch (_: Exception) { null } }
-            }
+            val firstImageBytes = AttachmentPipeline.readBytesOffMain(imagePaths.firstOrNull())
             val userEntry =
                 ChatMessageEntry(
                     role = ChatConstants.ROLE_USER,
@@ -2246,16 +2234,8 @@ class ChatViewModel(
         genJob =
             viewModelScope.launch {
                 // Disk reads stay off the main thread (large camera photos).
-                val imageBytes = withContext(Dispatchers.IO) {
-                    editImagePathStr?.let { path ->
-                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-                    }
-                }
-                val audioBytes = withContext(Dispatchers.IO) {
-                    editAudioPathStr?.let { path ->
-                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-                    }
-                }
+                val imageBytes = AttachmentPipeline.readBytesOffMain(editImagePathStr)
+                val audioBytes = AttachmentPipeline.readBytesOffMain(editAudioPathStr)
                 try {
                     val pipelineCtx =
                         GenerationCtx(
@@ -2371,16 +2351,8 @@ class ChatViewModel(
             viewModelScope.launch {
                 var regenBlankFailed = false
                 // Disk reads stay off the main thread (large camera photos).
-                val imageBytes = withContext(Dispatchers.IO) {
-                    imagePathStr?.let { path ->
-                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-                    }
-                }
-                val audioBytes = withContext(Dispatchers.IO) {
-                    audioPathStr?.let { path ->
-                        try { File(path).takeIf { it.exists() }?.readBytes() } catch (_: Exception) { null }
-                    }
-                }
+                val imageBytes = AttachmentPipeline.readBytesOffMain(imagePathStr)
+                val audioBytes = AttachmentPipeline.readBytesOffMain(audioPathStr)
                 try {
                     val pipelineCtx =
                         GenerationCtx(
@@ -2540,18 +2512,6 @@ class ChatViewModel(
     fun setRemoteApiKey(key: String) = launchSetting { settingsRepo.setRemoteApiKey(key) }
 
     fun setRemoteImageModelId(id: String) = launchSetting { settingsRepo.setRemoteImageModelId(id) }
-
-    fun setRemoteModelId(id: String) =
-        launchSetting {
-            settingsRepo.setRemoteModelId(id)
-            // Auto-detect the context window for a newly selected model, once:
-            // skip when a per-model override was already stored.
-            if (id.isNotBlank() &&
-                parseRemoteModelContextWindows(settings.value.remoteModelContextWindowsJson)[id] == null
-            ) {
-                detectRemoteContextWindow(id)
-            }
-        }
 
     fun setRemoteContextWindowTokens(tokens: Int) =
         launchSetting { settingsRepo.setRemoteContextWindowTokens(tokens) }
@@ -2806,73 +2766,9 @@ class ChatViewModel(
         }.take(2500)
     }
 
-    /**
-     * Best-effort detection of the selected remote model's context window
-     * (Ollama `/api/show`, OpenRouter `context_length`). On success the value
-     * is stored as a per-model override; the global remote default and the
-     * on-device setting are untouched.
-     */
-    fun detectRemoteContextWindow(modelId: String = settings.value.remoteModelId) {
-        val s = settings.value
-        if (s.remoteBaseUrl.isBlank() || modelId.isBlank()) {
-            errorMessage.value = "Set the Remote Base URL and select a model first."
-            return
-        }
-        if (isDetectingContextWindow.value) return
-        isDetectingContextWindow.value = true
-        viewModelScope.launch {
-            try {
-                val detected =
-                    RemoteAiClient.detectContextWindow(s.remoteBaseUrl, s.remoteApiKey, modelId)
-                if (detected != null) {
-                    settingsRepo.setRemoteModelContextWindow(modelId, detected)
-                } else {
-                    errorMessage.value =
-                        "Could not detect the context window for this provider — set it manually below."
-                }
-            } finally {
-                isDetectingContextWindow.value = false
-            }
-        }
-    }
-
-    fun fetchRemoteModels(baseUrl: String, apiKey: String = "") {
-        isFetchingRemoteModels.value = true
-        viewModelScope.launch {
-            val res = RemoteAiClient.fetchModels(baseUrl, apiKey)
-            res.onSuccess {
-                remoteModels.value = it
-                if (it.isNotEmpty() && settings.value.remoteModelId.isBlank()) {
-                    setRemoteModelId(it.first().id)
-                }
-            }.onFailure {
-                errorMessage.value = "Failed to connect to remote server: ${it.message}"
-            }
-            // Best-effort: cache per-model pricing for cost estimates (OpenRouter only).
-            runCatching {
-                val pricing = RemoteAiClient.fetchOpenRouterPricing(baseUrl, apiKey)
-                if (pricing.isNotEmpty()) {
-                    settingsRepo.setRemoteModelPricingJson(remoteModelPricingToJson(pricing))
-                }
-            }
-            isFetchingRemoteModels.value = false
-        }
-    }
-
-    /** Records the estimated USD cost of one remote generation. */
-    private fun recordRemoteCost(modelId: String, promptTokens: Int, completionTokens: Int) {
-        if (modelId.isBlank() || (promptTokens <= 0 && completionTokens <= 0)) return
-        val pricing = parseRemoteModelPricing(settings.value.remoteModelPricingJson)[modelId] ?: return
-        val usd = promptTokens * pricing.promptPerToken + completionTokens * pricing.completionPerToken
-        if (usd <= 0) return
-        viewModelScope.launch {
-            settingsRepo.addRemoteSpendMicros((usd * 1_000_000).toLong().coerceAtLeast(1L))
-        }
-    }
-
-    fun resetRemoteSpend() {
-        viewModelScope.launch { settingsRepo.resetRemoteSpend() }
-    }
+    /** Records the estimated USD cost of one remote generation (owned by ServerControls). */
+    private fun recordRemoteCost(modelId: String, promptTokens: Int, completionTokens: Int) =
+        serverControls.recordRemoteCost(modelId, promptTokens, completionTokens)
 
     // ── Model Management ─────────────────────────────────────────────
 
@@ -2963,21 +2859,7 @@ class ChatViewModel(
         }
     }
 
-    // ── Custom Personas CRUD (Character Card v2) ─────────────────────
-
-    private fun loadCustomPersonasFromJson(json: String) {
-        if (json.isBlank()) {
-            customPersonas.clear()
-            return
-        }
-        try {
-            val listType = object : TypeToken<List<PersonaPreset>>() {}.type
-            val list = Gson().fromJson<List<PersonaPreset>>(json, listType) ?: emptyList()
-            customPersonas.clear()
-            customPersonas.addAll(list.map { it.normalize() })
-        } catch (_: Exception) {
-        }
-    }
+    // ── Custom Personas CRUD (Character Card v2, owned by PersonaStore) ──
 
     fun addCustomPersona(
         name: String,
@@ -2991,135 +2873,21 @@ class ChatViewModel(
         personality: String = "",
         scenario: String = "",
         exampleDialogues: String = "",
-    ) {
-        val newP =
-            PersonaPreset(
-                id = "custom_" + System.currentTimeMillis(),
-                name = name.trim().ifBlank { "Custom Persona" },
-                iconType = iconType.trim().ifBlank { "custom" },
-                description = description.trim(),
-                greeting = greeting.trim(),
-                systemPrompt = systemPrompt.trim(),
-                avatarUri = avatarUri.trim(),
-                temperature = temperature,
-                topK = topK,
-                personality = personality.trim(),
-                scenario = scenario.trim(),
-                exampleDialogues = exampleDialogues.trim(),
-            )
-        val updated = customPersonas.toList() + newP
-        saveCustomPersonas(updated)
-    }
+    ) = personaStore.addCustomPersona(name, iconType, systemPrompt, description, greeting, avatarUri, temperature, topK, personality, scenario, exampleDialogues)
 
-    fun deleteCustomPersona(id: String) {
-        val updated = customPersonas.filter { it.id != id }
-        saveCustomPersonas(updated)
-    }
+    fun deleteCustomPersona(id: String) = personaStore.deleteCustomPersona(id)
 
-    /**
-     * Inserts a new custom persona or replaces the existing one with the same
-     * id (edit = update, no duplicates). avatarUri is authoritative: blank
-     * means "no photo" (the editor manages avatars explicitly).
-     * Refreshes [activePersona] when the edited persona is currently active.
-     * Never touches global [Settings].
-     */
-    fun upsertCustomPersona(persona: PersonaPreset) {
-        val existing = customPersonas.firstOrNull { it.id == persona.id }
-        val updated =
-            if (existing != null) {
-                customPersonas.map { if (it.id == persona.id) persona else it }
-            } else {
-                customPersonas.toList() + persona
-            }
-        saveCustomPersonas(updated)
-        if (activePersona.value.id == persona.id) {
-            activePersona.value = persona
-        }
-    }
+    fun upsertCustomPersona(persona: PersonaPreset) = personaStore.upsertCustomPersona(persona)
 
-    /**
-     * Copies a picked profile photo into internal storage (downscaled) and
-     * returns its absolute path for [PersonaPreset.avatarUri]. Null on failure.
-     * Internal copy keeps the photo readable across restarts without
-     * gallery URI permission issues.
-     */
-    suspend fun savePersonaAvatar(source: Uri): String? =
-        withContext(Dispatchers.IO) {
-            try {
-                val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                app.contentResolver.openInputStream(source)?.use { input ->
-                    BitmapFactory.decodeStream(input, null, options)
-                }
-                var sampleSize = 1
-                val maxOriginal = maxOf(options.outWidth, options.outHeight)
-                while ((maxOriginal / (sampleSize * 2)) >= 512) {
-                    sampleSize *= 2
-                }
-                val decodeOptions = BitmapFactory.Options().apply {
-                    inSampleSize = sampleSize
-                    inPreferredConfig = Bitmap.Config.RGB_565
-                }
-                val bitmap = app.contentResolver.openInputStream(source)?.use { input ->
-                    BitmapFactory.decodeStream(input, null, decodeOptions)
-                } ?: return@withContext null
-                val dir = File(app.filesDir, "avatars").apply { if (!exists()) mkdirs() }
-                val dest = File(dir, "avatar_${System.currentTimeMillis()}.jpg")
-                dest.outputStream().use { out ->
-                    bitmap.compress(Bitmap.CompressFormat.JPEG, 85, out)
-                }
-                bitmap.recycle()
-                dest.absolutePath
-            } catch (t: Throwable) {
-                KLog.e("ChatVM", "Failed to save persona avatar", t)
-                null
-            }
-        }
+    suspend fun savePersonaAvatar(source: Uri): String? = personaStore.savePersonaAvatar(source)
 
-    private fun saveCustomPersonas(list: List<PersonaPreset>) {
-        val json = Gson().toJson(list)
-        launchSetting { settingsRepo.setCustomPersonasJson(json) }
-    }
+    fun exportPersonaJson(persona: PersonaPreset): String = personaStore.exportPersonaJson(persona)
 
-    fun exportPersonaJson(persona: PersonaPreset): String {
-        return Gson().toJson(persona)
-    }
+    fun importPersonaJson(jsonString: String): Boolean = personaStore.importPersonaJson(jsonString)
 
-    fun importPersonaJson(jsonString: String): Boolean {
-        // Bound untrusted clipboard input before parsing/serializing (mirrors
-        // the skill import caps): one giant paste must not bloat DataStore or
-        // the per-emission settings payload.
-        if (jsonString.isBlank() || jsonString.length > AppLimits.PERSONA_IMPORT_MAX_CHARS) return false
-        return try {
-            val parsed = Gson().fromJson(jsonString, PersonaPreset::class.java)?.normalize() ?: return false
-            if (parsed.name.isBlank()) return false
-            val persona = parsed.copy(
-                id = "imported_" + System.currentTimeMillis(),
-                name = parsed.name.take(80),
-                description = parsed.description.take(500),
-                greeting = parsed.greeting.take(2_000),
-                systemPrompt = parsed.systemPrompt.take(20_000),
-                personality = parsed.personality.take(2_000),
-                scenario = parsed.scenario.take(2_000),
-                exampleDialogues = parsed.exampleDialogues.take(8_000),
-            )
-            saveCustomPersonas(customPersonas.toList() + persona)
-            true
-        } catch (_: Exception) {
-            false
-        }
-    }
+    fun importPersonaFromJson(jsonString: String): Boolean = personaStore.importPersonaFromJson(jsonString)
 
-    fun importPersonaFromJson(jsonString: String): Boolean = importPersonaJson(jsonString)
-
-    /**
-     * Selects the active character for the current chat. Deliberately does NOT
-     * touch global [Settings] (systemPrompt, temperature, topK): per-character
-     * values are resolved at generation time via [resolveSystemPrompt],
-     * [effectiveTemperature] and [effectiveTopK].
-     */
-    fun applyPersona(persona: PersonaPreset) {
-        activePersona.value = persona
-    }
+    fun applyPersona(persona: PersonaPreset) = personaStore.applyPersona(persona)
 
     /**
      * Effective system prompt for chat generation. The "general" character
@@ -3136,88 +2904,6 @@ class ChatViewModel(
     private fun effectiveTemperature(s: Settings): Float = activePersona.value.temperature ?: s.temperature
 
     private fun effectiveTopK(s: Settings): Int = activePersona.value.topK ?: s.topK
-
-    // ── LM Studio Benchmark Tool ────────────────────────────────────────
-
-    fun runBenchmark(
-        prompt: String = "Explain in 35 words why on-device AI is private and fast.",
-        backendOverride: String? = null,
-        onComplete: ((BenchmarkResult) -> Unit)? = null,
-    ) {
-        if (isBenchmarking.value || isGenerating.value) return
-        val s = settings.value
-        val modelPath = ChatServerService.resolveModelPath(app, s)
-        if (modelPath == null) {
-            errorMessage.value = "Please download or select a model first to run the benchmark."
-            return
-        }
-
-        val testPrompt = prompt.ifBlank { "Explain in 35 words why on-device AI is private and fast." }
-        val chosenBackend = backendOverride ?: s.backend
-        val modelName = java.io.File(modelPath).name.removeSuffix(".litertlm")
-
-        isBenchmarking.value = true
-        viewModelScope.launch(Dispatchers.Default) {
-            try {
-                val startTime = System.currentTimeMillis()
-                var fullResponse = ""
-                var totalTokens = 0
-
-                val params =
-                    LiteRtEngineManager.engineParamsFromSettings(
-                        s = s,
-                        modelPath = modelPath,
-                        systemPrompt = "You are a concise AI benchmark responder.",
-                        temperature = 0.1f,
-                        topK = 20,
-                        maxTokens = SamplingDefaults.BENCHMARK_MAX_TOKENS,
-                        contextWindow = 2048,
-                        backend = chosenBackend,
-                    )
-
-                engine.streamResponse(
-                    prompt = testPrompt,
-                    params = params,
-                    onMetrics = { metrics ->
-                        val duration = maxOf(0.05f, metrics.durationSec)
-                        val rating =
-                            when {
-                                metrics.tokensPerSec >= 20.0f -> "Blazing Fast"
-                                metrics.tokensPerSec >= 12.0f -> "Fast & Smooth"
-                                metrics.tokensPerSec >= 6.0f -> "Good"
-                                else -> "Moderate"
-                            }
-                        val result =
-                            BenchmarkResult(
-                                prompt = testPrompt,
-                                modelName = modelName,
-                                backend = metrics.backend,
-                                tokensGenerated = metrics.totalTokens,
-                                ttftMs = metrics.ttftMs,
-                                decodeSpeedTokPerSec = metrics.tokensPerSec,
-                                totalDurationSec = duration,
-                                responseText = fullResponse,
-                                rating = rating,
-                            )
-                        latestBenchmark.value = result
-                        onComplete?.invoke(result)
-                    },
-                ).collect { delta ->
-                    fullResponse += delta
-                    totalTokens++
-                }
-            } catch (e: Exception) {
-                if (e !is CancellationException) {
-                    KLog.e("ChatVM", "Benchmark failed", e)
-                    withContext(Dispatchers.Main) {
-                        errorMessage.value = "Benchmark failed: ${e.message ?: e.javaClass.simpleName}"
-                    }
-                }
-            } finally {
-                isBenchmarking.value = false
-            }
-        }
-    }
 
     // ── Settings mutations ───────────────────────────────────────────
 
@@ -3250,12 +2936,6 @@ class ChatViewModel(
     fun setPureBlack(v: Boolean) = launchSetting { settingsRepo.setPureBlack(v) }
 
     fun setHuggingFaceToken(v: String) = launchSetting { settingsRepo.setHuggingFaceToken(v) }
-
-    fun setServerPort(v: Int) = launchSetting { settingsRepo.setServerPort(v) }
-
-    fun setServerBindAll(v: Boolean) = launchSetting { settingsRepo.setServerBindAll(v) }
-
-    fun setServerAuthToken(v: String) = launchSetting { settingsRepo.setServerAuthToken(v) }
 
     fun setSystemPrompt(v: String) = launchSetting { settingsRepo.setSystemPrompt(v) }
 
