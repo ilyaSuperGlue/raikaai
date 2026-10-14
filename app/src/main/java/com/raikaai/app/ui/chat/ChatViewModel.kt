@@ -1761,25 +1761,28 @@ class ChatViewModel(
             // nested launch overwrote genJob mid-flight, so stopGeneration()
             // could miss the outer job.
             try {
-                        val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
-                        val appliedWindow = activeSummary != null
-                        val windowed = promptWindowMessages()
-                        val (ragSystem, sources1) = withRagSystem(resolveSystemPrompt(s), promptText, s)
-                        ragSources = sources1
-                        val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
-                        val history =
-                            windowed
-                                .dropLast(1)
-                                .map { PromptBuilder.ChatMessage(it.role, it.content) }
-                        val prompt =
-                            PromptBuilder.build(
-                                messages = history,
-                                systemPrompt = effectiveSystem,
-                                templateFormat = s.promptTemplateFormat,
-                                modelPath = modelPath,
-                                enableThinking = s.enableThinking,
-                                contextWindow = s.contextWindowTokens,
-                            )
+                        // Single local generation pass. Returns the effective system
+                        // prompt used (needed by the post-pass tool-call check).
+                        suspend fun runLocalPass(useThinking: Boolean): Pair<String, List<PromptBuilder.ChatMessage>> {
+                            val activeSummary = runCatching { ensureContextFit(s, modelPath) }.getOrNull()
+                            val appliedWindow = activeSummary != null
+                            val windowed = promptWindowMessages()
+                            val (ragSystem, sources1) = withRagSystem(resolveSystemPrompt(s), promptText, s)
+                            ragSources = sources1
+                            val effectiveSystem = injectSummary(ragSystem, activeSummary, appliedWindow)
+                            val history =
+                                windowed
+                                    .dropLast(1)
+                                    .map { PromptBuilder.ChatMessage(it.role, it.content) }
+                            val prompt =
+                                PromptBuilder.build(
+                                    messages = history,
+                                    systemPrompt = effectiveSystem,
+                                    templateFormat = s.promptTemplateFormat,
+                                    modelPath = modelPath,
+                                    enableThinking = useThinking,
+                                    contextWindow = s.contextWindowTokens,
+                                )
                             collectStreamIntoMessage(
                                 deltas =
                                     engine.streamResponse(
@@ -1794,7 +1797,7 @@ class ChatViewModel(
                                                 contextWindow = s.contextWindowTokens,
                                                 backend = s.backend,
                                                 systemPrompt = effectiveSystem,
-                                                enableThinking = s.enableThinking,
+                                                enableThinking = useThinking,
                                             ),
                                         imagePath = imagePaths.firstOrNull(),
                                         imageBytes = firstImageBytes,
@@ -1804,6 +1807,33 @@ class ChatViewModel(
                                     ),
                                 targetChatId = targetChatId,
                             )
+                            return effectiveSystem to history
+                        }
+
+                        var (effectiveSystem, history) = runLocalPass(s.enableThinking)
+
+                        // Small on-device thinking models sometimes end the turn
+                        // inside the thinking channel (thoughts but zero answer
+                        // text). Retry once with thinking disabled so the user
+                        // gets a visible reply instead of a blank bubble.
+                        if (s.enableThinking &&
+                            currentConversationId == targetChatId &&
+                            stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
+                        ) {
+                            KLog.w("ChatVM", "Local pass produced thinking-only output; retrying once without thinking")
+                            val idx = messages.lastIndex
+                            if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                                messages[idx] = messages[idx].copy(content = "")
+                            }
+                            val retry = runLocalPass(false)
+                            effectiveSystem = retry.first
+                            history = retry.second
+                            if (currentConversationId == targetChatId &&
+                                stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
+                            ) {
+                                errorMessage.value = "Model tidak memberikan jawaban. Coba matikan Thinking atau ulangi pertanyaan."
+                            }
+                        }
 
                         ragSources = handleAutonomousToolCall(
                             modelPath = modelPath,
@@ -2331,6 +2361,57 @@ class ChatViewModel(
                                 ),
                             targetChatId = targetRegenChatId,
                         )
+
+                    // Same thinking-only guard as sendMessage: retry once
+                    // without thinking so regenerate never yields a blank bubble.
+                    if (s.enableThinking &&
+                        currentConversationId == targetRegenChatId &&
+                        stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
+                    ) {
+                        KLog.w("ChatVM", "Local regen produced thinking-only output; retrying once without thinking")
+                        val rIdx = messages.lastIndex
+                        if (rIdx >= 0 && messages[rIdx].role == ChatConstants.ROLE_ASSISTANT) {
+                            messages[rIdx] = messages[rIdx].copy(content = "")
+                        }
+                        val retryPrompt =
+                            PromptBuilder.build(
+                                messages = history,
+                                systemPrompt = effectiveSystem,
+                                templateFormat = s.promptTemplateFormat,
+                                modelPath = modelPath,
+                                enableThinking = false,
+                                contextWindow = s.contextWindowTokens,
+                            )
+                        collectStreamIntoMessage(
+                            deltas =
+                                engine.streamResponse(
+                                    prompt = retryPrompt,
+                                    params =
+                                        LiteRtEngineManager.EngineParams(
+                                            modelPath = modelPath,
+                                            temperature = effectiveTemperature(s),
+                                            topK = effectiveTopK(s),
+                                            topP = s.topP,
+                                            maxTokens = s.maxTokens,
+                                            contextWindow = s.contextWindowTokens,
+                                            backend = s.backend,
+                                            systemPrompt = effectiveSystem,
+                                            enableThinking = false,
+                                        ),
+                                    imagePath = lastUser.imagePath,
+                                    imageBytes = imageBytes,
+                                    audioPath = lastUser.audioPath,
+                                    audioBytes = audioBytes,
+                                    onMetrics = { lastMetrics = it },
+                                ),
+                            targetChatId = targetRegenChatId,
+                        )
+                        if (currentConversationId == targetRegenChatId &&
+                            stripThinking(messages.lastOrNull()?.content.orEmpty()).isBlank()
+                        ) {
+                            errorMessage.value = "Model tidak memberikan jawaban. Coba matikan Thinking atau ulangi pertanyaan."
+                        }
+                    }
 
                     ragSources = handleAutonomousToolCall(
                         modelPath = modelPath,

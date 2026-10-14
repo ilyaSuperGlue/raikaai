@@ -332,8 +332,12 @@ internal fun MessageBubble(
         modifier = Modifier.fillMaxWidth(),
         horizontalAlignment = if (isUser) Alignment.End else Alignment.Start,
     ) {
-        // Attached Image if present (above the message body)
-        if (!message.imagePath.isNullOrBlank()) {
+        // Attached Image if present (above the message body).
+        // Skipped when the message already carries image attachments below:
+        // those render inside the bubble and the legacy imagePath would
+        // otherwise duplicate the same picture.
+        val hasAttachmentImages = message.attachments.orEmpty().any { it.type == "image" }
+        if (!message.imagePath.isNullOrBlank() && !hasAttachmentImages) {
             val imgFile = remember(message.imagePath) { File(message.imagePath) }
             val bitmap = remember(message.imagePath) {
                 try {
