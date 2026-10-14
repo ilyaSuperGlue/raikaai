@@ -227,9 +227,6 @@ fun ChatScreen(
 ) {
     val settings by viewModel.settings.collectAsState()
     val activePersona by viewModel.activePersona.collectAsState()
-    val isModelLoaded by viewModel.isModelLoaded.collectAsState()
-    val isLoadingModel by viewModel.isLoadingModel.collectAsState()
-    val activeBackend by viewModel.activeBackendState.collectAsState()
     val loadedModelPath by viewModel.loadedModelPath.collectAsState()
     val isGenerating by viewModel.isGenerating
     // B39: hoisted derived state — topBar/bottomBar read this, and reading
@@ -459,12 +456,6 @@ fun ChatScreen(
         }
     }
 
-    val conversationTitle = remember(viewModel.conversations.value, viewModel.currentConversationId) {
-        viewModel.conversations.value
-            .find { it.id == viewModel.currentConversationId }
-            ?.title?.takeIf { it.isNotBlank() }
-    }
-
     Scaffold(
         topBar = {
             Surface(
@@ -491,21 +482,8 @@ fun ChatScreen(
                             }
                             Column {
                                 Text(
-                                    text = conversationTitle ?: activePersona.name,
+                                    text = activePersona.name,
                                     style = MaterialTheme.typography.titleMedium,
-                                    maxLines = 1,
-                                    overflow = TextOverflow.Ellipsis,
-                                )
-                                Text(
-                                    text =
-                                        when {
-                                            isLoadingModel -> "Loading model…"
-                                            settings.modelSource == ChatConstants.SOURCE_REMOTE -> "$modelDisplayName · Remote"
-                                            isModelLoaded -> "$modelDisplayName · ${activeBackend ?: "GPU"}"
-                                            else -> "No model loaded"
-                                        },
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis,
                                 )
