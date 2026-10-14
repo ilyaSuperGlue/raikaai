@@ -33,7 +33,6 @@ import androidx.compose.material.icons.filled.Dns
 import androidx.compose.material.icons.filled.Memory
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -640,9 +639,8 @@ fun ModelsScreen(
                         modifier = Modifier.fillMaxWidth(),
                     ) {
                         Row(
-                            modifier = Modifier.padding(16.dp).fillMaxWidth(),
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 14.dp).fillMaxWidth(),
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween,
                         ) {
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
@@ -650,22 +648,30 @@ fun ModelsScreen(
                                     style = MaterialTheme.typography.titleSmall,
                                     fontWeight = FontWeight.Bold,
                                 )
+                                Spacer(Modifier.height(2.dp))
                                 Text(
-                                    "Estimated accumulated remote API cost (OpenRouter pricing).",
+                                    "Accumulated API usage cost",
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
                             }
-                            Text(
-                                text = "$%.4f".format(remoteSpendUsd),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary,
-                            )
+                            Spacer(Modifier.width(12.dp))
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer,
+                            ) {
+                                Text(
+                                    text = "$%.4f".format(remoteSpendUsd),
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                )
+                            }
                         }
                         if (remoteSpendUsd > 0) {
                             Row(
-                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 12.dp).fillMaxWidth(),
+                                modifier = Modifier.padding(start = 16.dp, end = 16.dp, bottom = 8.dp).fillMaxWidth(),
                                 horizontalArrangement = Arrangement.End,
                             ) {
                                 TextButton(onClick = { viewModel.resetRemoteSpend() }) {
@@ -711,36 +717,6 @@ fun ModelsScreen(
                                 placeholder = { Text("sk-...") },
                                 modifier = Modifier.fillMaxWidth(),
                             )
-
-                            // S3: warn when the base URL is plain HTTP — the API key and
-                            // prompts are sent unencrypted. Blocking is not an
-                            // option: LAN Ollama instances typically serve HTTP.
-                            val urlForWarning = remoteUrlInput.ifBlank { settings.remoteBaseUrl }
-                            if (urlForWarning.trimStart().startsWith("http://", ignoreCase = true)) {
-                                Row(
-                                    modifier =
-                                        Modifier
-                                            .fillMaxWidth()
-                                            .clip(RoundedCornerShape(12.dp))
-                                            .background(MaterialTheme.colorScheme.errorContainer)
-                                            .padding(12.dp),
-                                    verticalAlignment = Alignment.CenterVertically,
-                                ) {
-                                    Icon(
-                                        Icons.Filled.Warning,
-                                        contentDescription = null,
-                                        tint = MaterialTheme.colorScheme.onErrorContainer,
-                                        modifier = Modifier.size(20.dp),
-                                    )
-                                    Spacer(Modifier.width(10.dp))
-                                    Text(
-                                        "Plain HTTP: your API key and prompts are sent unencrypted. " +
-                                            "Use https:// (e.g. via a reverse proxy) if you don't trust this network.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onErrorContainer,
-                                    )
-                                }
-                            }
 
                             Button(
                                 onClick = { viewModel.fetchRemoteModels(remoteUrlInput, remoteKeyInput) },
