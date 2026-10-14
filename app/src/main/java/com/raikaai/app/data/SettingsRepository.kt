@@ -105,7 +105,7 @@ data class Settings(
     val autoCompress: Boolean = true,
     val captureArtifacts: Boolean = true,
     val enableVision: Boolean = true,
-    val enableWebSearch: Boolean = true,
+    val enableWebSearch: Boolean = false,
 )
 
 /**
@@ -464,7 +464,7 @@ class SettingsRepository(
                     autoCompress = prefs[Keys.AUTO_COMPRESS] ?: true,
                     captureArtifacts = prefs[Keys.CAPTURE_ARTIFACTS] ?: true,
                     enableVision = prefs[Keys.ENABLE_VISION] ?: true,
-                    enableWebSearch = prefs[Keys.ENABLE_WEB_SEARCH] ?: true,
+                    enableWebSearch = prefs[Keys.ENABLE_WEB_SEARCH] ?: false,
                 )
             }
         }

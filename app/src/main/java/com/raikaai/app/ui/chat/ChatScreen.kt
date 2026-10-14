@@ -86,7 +86,6 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.outlined.AddPhotoAlternate
 import androidx.compose.material.icons.outlined.AttachFile
 import androidx.compose.material.icons.outlined.AudioFile
-import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CloudDownload
 import androidx.compose.material.icons.outlined.Code
@@ -253,7 +252,6 @@ fun ChatScreen(
         }
     }
     var showRagSheet by remember { mutableStateOf(false) }
-    var showSkillsSheet by remember { mutableStateOf(false) }
     var showCompareDialog by remember { mutableStateOf(false) }
     var showModelDropdown by remember { mutableStateOf(false) }
     var showAttachmentMenu by remember { mutableStateOf(false) }
@@ -267,8 +265,6 @@ fun ChatScreen(
 
     val installedModels by viewModel.installedModels
     val remoteModels by viewModel.remoteModels
-    val skills by viewModel.skills.collectAsState()
-    val activeSkillsCount = remember(skills) { skills.count { it.isEnabled } }
 
     val artifacts by viewModel.artifacts.collectAsState()
     val isCompressing by viewModel.isCompressing
@@ -1185,38 +1181,7 @@ fun ChatScreen(
                                     )
                                 }
 
-                                // 3. Quick AI Skills Pill (when active)
-                                if (activeSkillsCount > 0) {
-                                    Surface(
-                                        shape = RoundedCornerShape(50),
-                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                                        modifier = Modifier
-                                            .clip(RoundedCornerShape(50))
-                                            .clickable { showSkillsSheet = true },
-                                    ) {
-                                        Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 4.dp),
-                                        ) {
-                                            Icon(
-                                                Icons.Outlined.AutoAwesome,
-                                                contentDescription = null,
-                                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                modifier = Modifier.size(11.dp),
-                                            )
-                                            Spacer(Modifier.width(2.dp))
-                                            Text(
-                                                "Skills ($activeSkillsCount)",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                fontSize = 10.sp,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            )
-                                        }
-                                    }
-                                }
-
-                                // 4. Quick RAG Pill (when documents exist)
+                                // 3. Quick RAG Pill (when documents exist)
                                 if (settings.ragEnabled && ragDocuments.isNotEmpty()) {
                                     Surface(
                                         shape = RoundedCornerShape(50),
@@ -2013,14 +1978,6 @@ fun ChatScreen(
                 }
             }
         }
-    }
-
-    // ── AI Skills & Capabilities Sheet ──
-    if (showSkillsSheet) {
-        com.raikaai.app.ui.skills.SkillsSheet(
-            viewModel = viewModel,
-            onDismiss = { showSkillsSheet = false },
-        )
     }
 
     // ── Web Preview Sheet ──

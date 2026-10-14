@@ -139,7 +139,9 @@ class SkillsManager private constructor(private val context: Context) {
         // One-time migration: custom skills used to default to enabled at
         // creation; they now default to off and previously-created ones are
         // switched off once (user can re-enable them manually).
-        val migrationMarker = File(dir, ".custom_skills_default_off")
+        // v2 (RaikaAI rebrand): run the sweep again so any custom skill left
+        // enabled on existing installs is switched off once.
+        val migrationMarker = File(dir, ".custom_skills_default_off_v2")
         val effectiveCustom =
             if (migrationMarker.exists()) {
                 customList

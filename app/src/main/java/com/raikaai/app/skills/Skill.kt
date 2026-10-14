@@ -6,7 +6,7 @@ data class Skill(
     val description: String,
     val instructions: String,
     val iconCategory: String = "code", // "code", "terminal", "write", "search", "math", "palette", "sparkles"
-    val isEnabled: Boolean = true,
+    val isEnabled: Boolean = false,
     val isBuiltIn: Boolean = false,
     val category: String = "General", // "Coding", "Writing", "Reasoning", "Analysis", "General"
     val createdAt: Long = System.currentTimeMillis(),
