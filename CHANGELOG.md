@@ -17,15 +17,15 @@ This is the first official open-source release of **RaikaAI**, a standalone Andr
 
 ### Features & Capabilities
 
-#### 🧠 On-Device LiteRT-LM Inference Engine
+#### On-Device LiteRT-LM Inference Engine
 - **Hardware Acceleration**: GPU acceleration via OpenCL (Qualcomm Adreno & ARM Mali) with automatic CPU fallback (Arm NEON / XNNPack).
 - **Supported Models**: Native execution of `.litertlm` compiled weights including Gemma 2B / 3 / 4, SmolLM 135M / 360M, Llama 3.2 1B / 3B, Qwen 2.5, DeepSeek R1 Distill, and user-compiled custom models.
 - **Real-Time Streaming**: Token-by-token generation streaming with sub-millisecond latency.
 - **Generation Controls**: Instant prompt cancellation via `Conversation.cancelProcess()`, adjustable temperature, Top-K, Top-P, and max output tokens.
 - **Context Window Indicator**: Visual token usage meter tracking conversation capacity against model context limit.
-- **Speed Benchmark Tool (⚡)**: Built-in benchmark suite reporting Time-To-First-Token (TTFT ms), generation speed (tok/s), latency, and GPU vs. CPU comparison.
+- **Speed Benchmark Tool**: Built-in benchmark suite reporting Time-To-First-Token (TTFT ms), generation speed (tok/s), latency, and GPU vs. CPU comparison.
 
-#### 🌐 Embedded OpenAI-Compatible HTTP/CIO Server
+#### Embedded OpenAI-Compatible HTTP/CIO Server
 - **Ktor Embedded Server**: Runs directly on device in an Android Foreground Service with sticky notification and CPU wake-lock.
 - **API Endpoints**:
   - `POST /v1/chat/completions` (Server-Sent Events streaming `stream: true` and single JSON response).
@@ -35,30 +35,30 @@ This is the first official open-source release of **RaikaAI**, a standalone Andr
 - **Universal Client Compatibility**: Works out of the box with VS Code (Continue, Roo Code), OpenWebUI, SillyTavern, Obsidian Local LLM plugins, LangChain, curl, and Python `openai` SDK.
 - **Network & Security**: Automatic LAN / Wi-Fi IP detection (`http://<ip>:8080/v1`), global CORS preflight support, and configurable API Bearer token protection.
 
-#### 📦 Model Hub & Storage Manager
+#### Model Hub & Storage Manager
 - **Verified Preset Catalog**: One-click download for optimized mobile models (SmolLM, Gemma, Llama).
 - **Hugging Face Hub Integration**: In-app search for `.litertlm` repositories with support for gated models via Hugging Face Access Tokens.
 - **Resumeable Downloader**: Multi-part chunked HTTP downloader with pause, resume, progress bar, and storage space checks.
 - **SAF Importer**: Import external `.litertlm` models directly from SD card, Downloads folder, or USB OTG via Android Storage Access Framework.
 - **Disk Management**: Visual storage allocation breakdown with one-tap model deletion.
 
-#### 🎭 Characters & Persona System
-- **Custom AI Characters**: Create and configure unlimited personas with custom avatar emoji, name, description, and system prompt.
+#### Characters & Persona System
+- **Custom AI Characters**: Create and configure unlimited personas with custom avatar icon, name, description, and system prompt.
 - **TopBar Carousel**: Instant persona switching during active conversation without resetting context.
 - **DataStore Persistence**: Fully persistent personas saved across app restarts.
 
-#### 🛠️ Agentic Skills & Web Tools
+#### Agentic Skills & Web Tools
 - **Skills Hub**: Extensible agent plugin architecture with capability discovery.
 - **Live Web Search**: Tool calling integration for real-time web querying via SearXNG and DuckDuckGo.
 - **Structured Tool Execution**: Agent loop with JSON schema function execution and synthesis.
 
-#### 📎 Multimodal & Attachment Processing
+#### Multimodal & Attachment Processing
 - **Image Support**: Vision model inputs via camera capture and gallery selection (`image/*`).
 - **Document Ingestion**: Read and parse text files (`.txt`, `.md`, `.json`, `.csv`, `.log`).
 - **PDF Extraction**: Native on-device PDF text rendering and extraction via Android `PdfRenderer`.
 - **Audio Support**: Attachment pipeline handling audio formats (`audio/*`).
 
-#### 🎨 Material You Interface & Usability
+#### Material You Interface & Usability
 - **Modern Jetpack Compose UI**: Built strictly with Material 3 Expressive components and fluid animations.
 - **Dynamic Theming**: Palette harmonization powered by `MaterialKolor` with dynamic accent color picker.
 - **Pure Black OLED Mode**: Deep contrast theme optimized for OLED/AMOLED battery saving.
