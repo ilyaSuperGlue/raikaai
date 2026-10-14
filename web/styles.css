@@ -725,6 +725,11 @@ code {
   flex: 1;
 }
 
+/* chip-row memakai display:flex, jadi hidden perlu aturan eksplisit */
+.chip-row[hidden] {
+  display: none;
+}
+
 .chip {
   font-size: 0.775rem;
   font-weight: 500;

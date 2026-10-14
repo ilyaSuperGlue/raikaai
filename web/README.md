@@ -17,8 +17,8 @@ python3 -m http.server 8000
 
 ## Menambah karakter baru
 
-1. Buat `characters/<id-kamu>.json` mengikuti contoh `characters/coder.json`
-   (atau mulai dari tab Template di hub, lalu unduh).
+1. Buat `characters/<id-kamu>.json` mengikuti aturan field di tab Panduan
+   (atau mulai dari tab Template jika sudah ada isinya, lalu unduh).
 2. Daftarkan nama berkasnya di `characters/index.json` (array `files`).
 3. Kirim Pull Request. Karakter tampil di galeri setelah PR digabung.
 

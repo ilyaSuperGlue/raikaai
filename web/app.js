@@ -424,14 +424,21 @@ function initGallery() {
     return parts.join(' · ');
   }
 
-  function renderChips() {
+  function renderChips(pool) {
     if (!chipRow) return;
     chipRow.innerHTML = '';
 
     const tags = new Set();
-    allCharacters(characters).forEach(c => (c.tags || []).forEach(t => {
+    pool.forEach(c => (c.tags || []).forEach(t => {
       if (t !== 'lokal') tags.add(t);
     }));
+
+    // Tanpa tag dari data, baris chip disembunyikan seluruhnya.
+    if (!tags.size) {
+      chipRow.hidden = true;
+      return;
+    }
+    chipRow.hidden = false;
 
     const allChip = document.createElement('button');
     allChip.type = 'button';
@@ -536,8 +543,19 @@ function initGallery() {
     }
     if (emptyState) {
       emptyState.hidden = visible.length > 0;
+      if (visible.length === 0) {
+        const titleEl = emptyState.querySelector('.empty-title');
+        const descEl = emptyState.querySelector('.empty-desc');
+        if (!pool.length) {
+          titleEl.textContent = 'Belum ada karakter';
+          descEl.textContent = 'Unggah JSON lewat tombol di atas, seret berkas ke halaman, atau klik Tempel.';
+        } else {
+          titleEl.textContent = 'Tidak ada karakter yang cocok';
+          descEl.textContent = 'Coba kata kunci atau tag lain — atau unggah JSON-mu sendiri lewat tombol di atas.';
+        }
+      }
     }
-    renderChips();
+    renderChips(pool);
   }
 
   galleryListeners.push(render);
@@ -566,6 +584,7 @@ function initGallery() {
     .catch(err => {
       console.error('Gagal memuat galeri karakter:', err);
       grid.innerHTML = '';
+      if (chipRow) chipRow.hidden = true;
       if (emptyState) {
         emptyState.hidden = false;
         emptyState.querySelector('.empty-title').textContent = 'Galeri gagal dimuat';
