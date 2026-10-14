@@ -723,6 +723,11 @@ function initModalButtons() {
 
   document.addEventListener('keydown', (e) => {
     if (e.key !== 'Escape') return;
+    const dropOverlay = document.getElementById('drop-overlay');
+    if (dropOverlay && !dropOverlay.hidden) {
+      dropOverlay.hidden = true;
+      return;
+    }
     const pasteBd = document.getElementById('paste-backdrop');
     const modalBd = document.getElementById('modal-backdrop');
     if (pasteBd && !pasteBd.hidden) {
@@ -818,24 +823,25 @@ function initUploader() {
     reader.readAsText(file);
   });
 
-  // Drag-drop di seluruh halaman
-  let dragDepth = 0;
+  // Drag-drop di seluruh halaman. Overlay disembunyikan lewat banyak
+  // jalur (drop, dragleave keluar window, blur, klik, Esc) agar tidak
+  // pernah nyangkut terlihat seperti bug.
+  function hideOverlay() {
+    overlay.hidden = true;
+  }
+
   window.addEventListener('dragenter', (e) => {
     if (!e.dataTransfer || ![...e.dataTransfer.types].includes('Files')) return;
     e.preventDefault();
-    dragDepth += 1;
     overlay.hidden = false;
   });
   window.addEventListener('dragleave', (e) => {
-    e.preventDefault();
-    dragDepth = Math.max(0, dragDepth - 1);
-    if (dragDepth === 0) overlay.hidden = true;
+    if (!e.relatedTarget) hideOverlay();
   });
   window.addEventListener('dragover', (e) => e.preventDefault());
   window.addEventListener('drop', (e) => {
     e.preventDefault();
-    dragDepth = 0;
-    overlay.hidden = true;
+    hideOverlay();
     const file = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
     if (!file) return;
     const reader = new FileReader();
@@ -843,6 +849,8 @@ function initUploader() {
     reader.onerror = () => showToast('Gagal membaca berkas.');
     reader.readAsText(file);
   });
+  window.addEventListener('blur', hideOverlay);
+  overlay.addEventListener('click', hideOverlay);
 }
 
 /* ==========================================================================
