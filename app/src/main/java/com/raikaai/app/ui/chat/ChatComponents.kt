@@ -19,8 +19,10 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -300,6 +302,7 @@ internal fun MessageList(
  * use a thin neutral bubble. All actions (edit, copy, TTS, regenerate,
  * branch nav) are preserved in a small action row below the message.
  */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 internal fun MessageBubble(
     messageIndex: Int,
@@ -383,7 +386,13 @@ internal fun MessageBubble(
                 Surface(
                     shape = RoundedCornerShape(16.dp),
                     color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier = Modifier.fillMaxWidth(0.85f),
+                    modifier =
+                        Modifier
+                            .fillMaxWidth(0.85f)
+                            .combinedClickable(
+                                onClick = {},
+                                onLongClick = { showEditDialog = true },
+                            ),
                 ) {
                     Column {
                 // Attachments: images (multi) + document chips.
@@ -479,32 +488,8 @@ internal fun MessageBubble(
                     }
                 }
             }
-
-            // Edit action below the bubble (compact: plain clickable Box, not
-            // IconButton, which would enforce a 48.dp min touch target and
-            // leave a large gap under user messages).
-            if (!isGenerating) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier =
-                            Modifier
-                                .size(28.dp)
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable { showEditDialog = true },
-                    ) {
-                        Icon(
-                            imageVector = Icons.Outlined.Edit,
-                            contentDescription = "Edit message",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(14.dp),
-                        )
-                    }
-                }
-            }
+            // Edit via long-press on the bubble (no visible button, saves
+            // vertical space). The edit dialog below is kept.
         } else {
             MarkdownText(
                 markdown = message.content.ifBlank { "…" },
