@@ -16,9 +16,9 @@
   </p>
 </div>
 
-RaikaAI is an open-source, 100% on-device AI chat application and local inference server for Android powered by **Google AI Edge LiteRT-LM** (`com.google.ai.edge.litertlm`). It runs large language models (Gemma 4, SmolLM2, Llama 3.2, Qwen) directly on smartphone hardware with Qualcomm Adreno / ARM Mali GPU acceleration (OpenCL) and CPU fallback.
+RaikaAI is an open-source Android app for chatting with large language models entirely on-device, powered by **Google AI Edge LiteRT-LM**. Supported models include Gemma, SmolLM2, Llama 3.2, and Qwen. Inference runs on the phone GPU (Qualcomm Adreno / ARM Mali via OpenCL) with CPU fallback.
 
-RaikaAI also features an embedded **OpenAI-compatible HTTP server (`/v1`)** built with **Ktor CIO**, turning your Android smartphone into a private LLM backend for desktop tools, IDEs (VS Code Continue), OpenWebUI, and SillyTavern over your local Wi-Fi network.
+It also includes a built-in **OpenAI-compatible HTTP server (`/v1`)** based on **Ktor CIO**, so tools on the same Wi-Fi network — VS Code extensions (Continue), OpenWebUI, SillyTavern, or plain scripts — can send requests to the phone.
 
 <div align="center">
   <table>
@@ -41,31 +41,29 @@ RaikaAI also features an embedded **OpenAI-compatible HTTP server (`/v1`)** buil
 
 ---
 
-## Highlights & Features
+## Features
 
-- **100% Offline On-Device AI (Google LiteRT-LM)**: Execute LLM inference locally without internet or cloud subscriptions using native OpenCL GPU acceleration (Qualcomm Adreno / ARM Mali) and CPU fallback (Arm NEON / XNNPack).
-- **Embedded OpenAI-Compatible Server**: High-throughput Ktor CIO server hosting `/v1/chat/completions` (SSE streaming + JSON), `/v1/completions`, and `/v1/models`. Connect VS Code Continue, OpenWebUI, or desktop scripts to your phone over Wi-Fi.
-- **Custom Character Cards & Personas (v2)**: Create and switch AI personas with custom profile avatars, greetings, scenarios, system directives, and example dialogues. Full import/export support via standard JSON.
-- **On-Device RAG & Document Chat**: Import PDF, TXT, MD, CSV, and source code files into a local knowledge base. The model references and cites excerpts on-device (`[Doc1]`, `[Doc2]`).
-- **Skills & MCP Client**: Expand the assistant with modular skills (Web-Dev, Kotlin Specialist) and connect to external Model Context Protocol (MCP) servers with explicit user-approval safety prompts.
-- **Multimodal Vision & Audio**: Send images directly to vision-capable local models, record 16kHz PCM audio clips, and transcribe voice inputs with speech-to-text.
-- **LM Studio Speed Benchmark Tool (`⚡`)**: Test on-device hardware performance with standardized metrics: Time to First Token (TTFT ms), decode speed (tok/s), duration, and GPU vs CPU comparison.
-- **Model Comparison Mode**: Run any prompt simultaneously across two models (on-device vs on-device, or on-device vs remote) with swipeable variant branches.
-- **Hugging Face Model Manager**: Search, discover, and download `.litertlm` model weights directly from Hugging Face with resumeable multi-threaded downloads, or import existing files via Android Storage Access Framework (SAF).
-- **Web Search & Link Summarizer**: Live internet research synthesis with numbered factual citations, plus one-tap web article extraction and summarization.
-- **Material 3 Expressive & Pure Black OLED**: Dynamic theming powered by MaterialKolor with dynamic accent colors, smooth animations, and true 100% OLED dark mode.
+- **On-device chat**: token-by-token streaming, stop generation anytime, adjustable temperature / Top-K / Top-P, context usage indicator, markdown rendering with code copy button, text-to-speech, and saved chat history.
+- **OpenAI-compatible server**: `POST /v1/chat/completions` (SSE streaming or single JSON), `POST /v1/completions`, `GET /v1/models`, `GET /health`. Optional bearer-token auth and CORS support.
+- **Model manager**: built-in catalog of tested mobile models; search and download `.litertlm` weights from Hugging Face (gated repos supported via access token) with pause and resume; or import model files from device storage (SAF).
+- **Characters**: create custom personas with avatar, system prompt, greeting, and example dialogues. Switch persona mid-conversation. Import/export as JSON.
+- **Document chat (RAG)**: attach PDF, TXT, MD, CSV, or source code files. Answers cite the referenced excerpts (`[Doc1]`, `[Doc2]`).
+- **Skills & MCP**: modular skill packs plus a Model Context Protocol (MCP) client. Tool execution always asks for user approval first.
+- **Vision & audio**: send images to vision-capable models, attach audio clips, and dictate input via speech-to-text.
+- **Compare mode**: run one prompt on two models side by side (local/local or local/remote).
+- **Benchmark**: measure time-to-first-token (TTFT), tokens per second, and GPU vs CPU performance on your own device.
+- **Web search & link summary**: optional web lookup with cited sources, plus one-tap summarization of article links.
+- **Appearance**: Material 3 theme with selectable accent colors and a black mode for OLED screens.
 
 ---
 
 ## Download & Installation
 
-Download the latest signed release APK directly from **[GitHub Releases](https://github.com/kouzen-neo/raikaai/releases/latest)**.
+Get the latest signed APK from **[GitHub Releases](https://github.com/kouzen-neo/raikaai/releases/latest)**.
 
-### Which APK should I download?
-
-| APK Variant | Recommended Device |
+| File | Requirements |
 |---|---|
-| **`RaikaAI-v0.1.0-arm64-v8a.apk`** | **For all modern 64-bit smartphones** (Snapdragon, Dimensity, Tensor, Exynos). Requires Android 8.0+ (API 26) on `arm64-v8a`. LiteRT-LM ships no 32-bit native library, so 32-bit (`armeabi-v7a`) devices are not supported. |
+| `RaikaAI-*-arm64-v8a.apk` | 64-bit phone (`arm64-v8a`), Android 8.0+ (API 26). 32-bit devices (`armeabi-v7a`) are not supported because LiteRT-LM provides no 32-bit native library. |
 
 ---
 
@@ -114,21 +112,21 @@ Requirements: JDK 17+, Android SDK (compileSdk 37, targetSdk 36), and an ARM64 A
 
 ## Privacy & Security
 
-- **100% Local Inference**: When using on-device models, all prompts, images, attachments, and generated responses never leave your physical device. Zero tracking, zero telemetry sent to third parties.
-- **Encrypted Secret Storage**: Remote API keys and Hugging Face tokens are encrypted at rest using Android Keystore and hardware-backed AES-GCM (EncryptedSharedPreferences).
-- **LAN Server Sandbox**: Embedded Ktor server blocks cross-origin browser requests (`Origin` header) with `403 Forbidden` unless a secret API bearer token is configured, preventing rogue websites from querying your device.
+- **Local inference**: with on-device models, prompts, attachments, and responses stay on the phone. No tracking or third-party telemetry.
+- **Encrypted secret storage**: remote API keys and Hugging Face tokens are stored encrypted via Android Keystore (AES-GCM).
+- **LAN server protection**: the embedded server rejects cross-origin browser requests (`403 Forbidden`) unless an API bearer token is configured.
 
 ---
 
 ## Open-Source Acknowledgments
 
-RaikaAI is built on top of outstanding open-source projects:
+RaikaAI is built with these open-source projects:
 
-- [Google AI Edge LiteRT](https://ai.google.dev/edge/litert) for on-device LLM inference acceleration.
-- [Ktor](https://ktor.io/) for high-performance embedded HTTP/CIO server.
-- [Jetpack Compose](https://developer.android.com/compose) for modern Android UI.
-- [MaterialKolor](https://github.com/jordond/MaterialKolor) for dynamic Material 3 color harmonizing.
-- [OkHttp](https://square.github.io/okhttp/) & [Gson](https://github.com/google/gson) for network downloads and serialization.
+- [Google AI Edge LiteRT](https://ai.google.dev/edge/litert) for on-device LLM inference.
+- [Ktor](https://ktor.io/) for the embedded HTTP/CIO server.
+- [Jetpack Compose](https://developer.android.com/compose) for the Android UI.
+- [MaterialKolor](https://github.com/jordond/MaterialKolor) for Material 3 color theming.
+- [OkHttp](https://square.github.io/okhttp/) & [Gson](https://github.com/google/gson) for downloads and serialization.
 
 ---
 
