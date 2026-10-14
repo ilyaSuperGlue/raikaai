@@ -4,7 +4,7 @@
 > yang bisa dipakai aplikasi lain (device sama via `127.0.0.1`, atau LAN via `0.0.0.0`).
 >
 > Nama project: **TBD placeholder "RaikaAI"** — applicationId `com.raikaai.app` (mudah diganti).
-> Sumber inspirasi/porting: `/home/kouzen/Documents/Projects/kzkt`.
+> Sumber inspirasi/porting: `<previous-project>`.
 
 ---
 

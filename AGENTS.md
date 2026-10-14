@@ -56,7 +56,7 @@ app/src/main/java/com/raikaai/app/
 
 ## ⚙️ 3. Konsep Inti & Panduan Komponen
 
-### A. LiteRT-LM Engine Lifecycle ([`LiteRtEngineManager.kt`](file:///home/kouzen/Documents/Projects/litechat/app/src/main/java/com/raikaai/app/core/engine/LiteRtEngineManager.kt))
+### A. LiteRT-LM Engine Lifecycle ([`LiteRtEngineManager.kt`](app/src/main/java/com/raikaai/app/core/engine/LiteRtEngineManager.kt))
 - **Thread Safety**: Google AI Edge LiteRT `Engine` tidak mendukung eksekusi prompt secara konkuren. Seluruh proses inferensi disinkronkan melalui `kotlinx.coroutines.sync.Mutex`.
 - **Eksplisit Load / Unload**:
   - `load(params)`: Mengompilasi shader OpenCL / memuat model ke RAM/VRAM.
@@ -64,14 +64,14 @@ app/src/main/java/com/raikaai/app/
 - **Pembatalan Generasi**: Memanfaatkan `Conversation.cancelProcess()` untuk membatalkan proses generasi teks secara instan tanpa membuat native bridge *crash*.
 - **Metrik Inferensi**: Menghitung *Time to First Token (TTFT ms)*, *Tokens per second (tok/s)*, dan mencatat telemetry log ke disk cache.
 
-### B. Embedded OpenAI-Compatible Server ([`OpenAiServer.kt`](file:///home/kouzen/Documents/Projects/litechat/app/src/main/java/com/raikaai/app/core/server/OpenAiServer.kt))
+### B. Embedded OpenAI-Compatible Server ([`OpenAiServer.kt`](app/src/main/java/com/raikaai/app/core/server/OpenAiServer.kt))
 - **Endpoint yang Didukung**:
   - `POST /v1/chat/completions`: Streaming SSE (`stream: true`) atau single JSON response (`stream: false`).
   - `POST /v1/completions`: Raw text completion untuk extension IDE.
   - `GET /v1/models` & `GET /v1/models/{model}`: Metadata model aktif.
   - `GET /health`: Health check string.
 - **CORS Penuh**: Menyediakan penanganan preflight `OPTIONS` global dan header `Access-Control-Allow-Origin: *` agar Web App di browser laptop/komputer dapat memanggil server HP tanpa hambatan.
-- **Deteksi LAN IP**: Menggunakan [`NetworkUtils.kt`](file:///home/kouzen/Documents/Projects/litechat/app/src/main/java/com/raikaai/app/util/NetworkUtils.kt) untuk menampilkan URL lokal langsung (`http://192.168.x.x:8080/v1`).
+- **Deteksi LAN IP**: Menggunakan [`NetworkUtils.kt`](app/src/main/java/com/raikaai/app/util/NetworkUtils.kt) untuk menampilkan URL lokal langsung (`http://192.168.x.x:8080/v1`).
 
 ### C. Fitur Khas LM Studio di Antarmuka
 1. **Speed Benchmark Tool (`⚡`)**:
@@ -139,4 +139,4 @@ adb install -r RaikaAI-arm64-v8a-release.apk
    - Gunakan `StateFlow` dan `collectAsState()` untuk reaktivitas state asinkron dari repository/service.
    - Pastikan operasi IO berat (pembacaan berkas model, parsing JSON, download) selalu dijalankan pada `Dispatchers.IO`.
 3. **ProGuard & R8**:
-   - Setiap data class baru yang diserialisasi ke JSON (via Gson) atau berinteraksi dengan native JNI harus didaftarkan di [`proguard-rules.pro`](file:///home/kouzen/Documents/Projects/litechat/app/proguard-rules.pro) dengan tag `-keep class ...`.
+   - Setiap data class baru yang diserialisasi ke JSON (via Gson) atau berinteraksi dengan native JNI harus didaftarkan di [`proguard-rules.pro`](app/proguard-rules.pro) dengan tag `-keep class ...`.

@@ -3,7 +3,7 @@
   <h1>RaikaAI</h1>
 
   <p>
-    <a href="https://github.com/kouzen-neo/litechat/actions/workflows/build-apk.yml"><img src="https://img.shields.io/github/actions/workflow/status/kouzen-neo/litechat/build-apk.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="Build"></a>
+    <a href="https://github.com/kouzen-neo/raikaai/actions/workflows/build-apk.yml"><img src="https://img.shields.io/github/actions/workflow/status/kouzen-neo/raikaai/build-apk.yml?style=for-the-badge&logo=githubactions&logoColor=white" alt="Build"></a>
     <a href="https://developer.android.com"><img src="https://img.shields.io/badge/Android-API%2026%2B-3DDC84.svg?style=for-the-badge&logo=android&logoColor=white" alt="Android SDK"></a>
     <a href="https://ai.google.dev/edge/litert"><img src="https://img.shields.io/badge/Google_LiteRT-GPU_Accelerated-4285F4.svg?style=for-the-badge&logo=google&logoColor=white" alt="LiteRT"></a>
   </p>
@@ -51,7 +51,7 @@ app/src/main/java/com/raikaai/app/
 │   ├── engine/
 │   │   └── LiteRtEngineManager.kt       # JNI bridge to LiteRT-LM runtime, RAM lifecycle, telemetry
 │   └── server/
-│       ├── OpenAiServer.kt              # Ktor embedded server (/v1/chat/completions, CORS)
+│       ├── OpenAiServer.kt              # Ktor embedded server (/v1/chat/completions, CORS + browser guard)
 │       ├── ChatServerService.kt         # Foreground Service and sticky notification server
 │       ├── PromptBuilder.kt             # Multi-turn conversation and system prompt serializer
 │       └── SseProtocol.kt               # SSE chunk formatter for streaming tokens
@@ -61,16 +61,21 @@ app/src/main/java/com/raikaai/app/
 │   ├── LocalModelDownloader.kt          # Resumeable HTTP downloader
 │   └── LocalModelManager.kt             # Storage and SAF file import manager
 ├── data/
-│   ├── ChatRepository.kt                # JSON conversation tree storage
-│   └── SettingsRepository.kt            # Jetpack DataStore preferences
+│   ├── ChatRepository.kt                # JSON conversation tree storage (+ AttachmentType)
+│   └── SettingsRepository.kt            # Jetpack DataStore preferences (+ SamplingDefaults/AppLimits)
 ├── ui/
-│   ├── chat/                            # Main chat screen, composer, persona carousel, modal sheets
+│   ├── chat/                            # ChatScreen, ChatTopBar, ChatDialogsHost, MessageBubble,
+│   │                                    # PersonaStore, BenchmarkRunner, ServerControls, CharacterPrompt
+│   ├── characters/                      # Character cards, import/export, persona editor
 │   ├── models/                          # Model cards, parameters, downloader, SAF importer
 │   ├── component/                       # Material 3 reusable components and Markdown parser
 │   └── theme/                           # Dynamic theming and typography
+├── skills/                              # Built-in/custom skills + tool-call parser
+├── mcp/                                 # Model Context Protocol client
+├── reminder/                            # Scheduled reminders (WorkManager)
 └── util/
-    ├── KLog.kt                          # Structured logging system
-    └── NetworkUtils.kt                  # Local LAN / Wi-Fi IP address resolution
+    ├── KLog.kt                          # Release-safe logging
+    └── NetworkUtils.kt                  # LAN IP resolution + SSRF-safe HTTP helpers
 ```
 
 ---
@@ -105,6 +110,12 @@ app/src/main/java/com/raikaai/app/
 ```
 
 *Output: `app/build/outputs/apk/release/app-arm64-v8a-release.apk`*
+
+> Release builds are signed with `app/release.keystore`, which is
+> **git-ignored and never committed**. Provide it locally plus one of:
+> `RAIKAAI_KEYSTORE_STORE_PASSWORD` / `RAIKAAI_KEYSTORE_KEY_PASSWORD`
+> environment variables (or `raikaai.keystore.*` Gradle properties).
+> Legacy `LITECHAT_*` / `litechat.*` names are accepted as fallback.
 
 ### Install via ADB
 
