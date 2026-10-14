@@ -891,84 +891,21 @@ function initPasteModal() {
   }
 }
 
-/* ==========================================================================
-   TEMPLATES
-   ========================================================================== */
-const TEMPLATES = [
-  {
-    id: 'template-minimal',
-    title: 'Minimal',
-    desc: 'Hanya field wajib: nama dan system prompt. Titik awal tercepat.',
-    data: {
-      schemaVersion: 1,
-      id: 'id-karakter',
-      name: 'Nama Karakter',
-      iconType: 'general',
-      description: '',
-      greeting: '',
-      systemPrompt: 'Tulis instruksi perilaku karakter di sini.',
-      avatarUri: '',
-      temperature: null,
-      topK: null,
-      personality: '',
-      scenario: '',
-      exampleDialogues: '',
-      author: '',
-      lang: 'id',
-      tags: [],
-    },
-  },
-  {
-    id: 'template-lengkap',
-    title: 'Lengkap',
-    desc: 'Semua field terisi contoh. Hapus atau ubah yang tidak perlu.',
-    data: {
-      schemaVersion: 1,
-      id: 'id-karakter',
-      name: 'Nama Karakter',
-      iconType: 'custom',
-      description: 'Deskripsi singkat karakter, satu-dua kalimat.',
-      greeting: 'Halo! Ada yang bisa saya bantu?',
-      systemPrompt: 'Jelaskan siapa karakter ini, gaya bicaranya, dan batasannya.',
-      avatarUri: '',
-      temperature: 0.7,
-      topK: 40,
-      personality: 'Sifat dan gaya bicara karakter.',
-      scenario: 'Konteks atau latar percakapan.',
-      exampleDialogues: 'User: Contoh pertanyaan\nKarakter: Contoh jawaban',
-      author: '',
-      lang: 'id',
-      tags: [],
-    },
-  },
-  {
-    id: 'template-roleplay',
-    title: 'Roleplay',
-    desc: 'Fokus ke kepribadian, skenario, dan contoh dialog untuk main peran.',
-    data: {
-      schemaVersion: 1,
-      id: 'id-karakter',
-      name: 'Nama Karakter',
-      iconType: 'custom',
-      description: 'Tokoh roleplay beserta dunianya.',
-      greeting: 'Sapaan in-character, sesuai kepribadian tokoh.',
-      systemPrompt: 'Kamu berperan sebagai tokoh berikut. Jangan pernah keluar dari peran. Narasikan aksi dengan tanda *asterisk*.',
-      avatarUri: '',
-      temperature: 0.8,
-      topK: 40,
-      personality: 'Kepribadian, cara bicara, kebiasaan tokoh.',
-      scenario: 'Latar tempat dan situasi awal roleplay.',
-      exampleDialogues: 'User: *melambaikan tangan*\nKarakter: *tersenyum* Hai! ...',
-      author: '',
-      lang: 'id',
-      tags: ['roleplay'],
-    },
-  },
-];
+/* Template bawaan dihapus; isi lewat kontribusi (lihat Panduan).
+   Biarkan array kosong agar tab menampilkan empty state. */
+const TEMPLATES = [];
 
 function initTemplates() {
   const grid = document.getElementById('templates-grid');
   if (!grid) return;
+
+  const empty = document.getElementById('templates-empty');
+  if (!TEMPLATES.length) {
+    grid.innerHTML = '';
+    if (empty) empty.hidden = false;
+    return;
+  }
+  if (empty) empty.hidden = true;
 
   TEMPLATES.forEach(t => {
     const card = document.createElement('div');
