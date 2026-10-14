@@ -30,11 +30,11 @@ Selain antarmuka obrolan, RaikaAI menyematkan **server HTTP kompatibel OpenAI (`
       <td align="center" width="20%"><b>Riwayat&nbsp;Chat</b></td>
     </tr>
     <tr>
-      <td align="center" valign="top"><img src="docs/screenshots/chat.png" width="220" alt="Layar Obrolan"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/models.png" width="220" alt="Hub Model"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/characters.png" width="220" alt="Karakter"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/skills.png" width="220" alt="Skills & Tools"></td>
-      <td align="center" valign="top"><img src="docs/screenshots/history.png" width="220" alt="Riwayat Chat"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/chat.png" width="220" height="489" alt="Layar Obrolan"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/models.png" width="220" height="489" alt="Hub Model"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/characters.png" width="220" height="489" alt="Karakter"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/skills.png" width="220" height="489" alt="Skills & Tools"></td>
+      <td align="center" valign="top"><img src="docs/screenshots/history.png" width="220" height="489" alt="Riwayat Chat"></td>
     </tr>
   </table>
 </div>
