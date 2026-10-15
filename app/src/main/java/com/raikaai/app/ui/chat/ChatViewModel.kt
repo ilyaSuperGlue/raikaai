@@ -3419,7 +3419,10 @@ class ChatViewModel(
             "never run rm -rf / or --allow-untrusted. Small official packages install automatically; " +
             "other installs ask the user first. Never invent command results. " +
             "Act directly: emit the tool call instead of asking the user what to run. " +
-            "Respond concisely; do not narrate your reasoning steps."
+            "Respond concisely; do not narrate your reasoning steps. " +
+            "When the user mentions a file, first run `ls /workspace` to locate it — " +
+            "user files live ONLY in the phone's /workspace (never /mnt/data, /sdcard, or home). " +
+            "If the file isn't there, tell the user to add it via the Files tab Import button, then continue."
     }
 
     /** Records the estimated USD cost of one remote generation (owned by ServerControls). */
