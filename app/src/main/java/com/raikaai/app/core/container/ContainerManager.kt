@@ -425,6 +425,10 @@ class ContainerManager private constructor(
         env["LD_LIBRARY_PATH"] = if (existing.isBlank()) libDir else "$libDir:$existing"
         env["PROOT_LOADER"] = File(nativeLibDir, "libproot_loader.so").absolutePath
         env["PROOT_LOADER_32"] = File(nativeLibDir, "libproot_loader32.so").absolutePath
+        // Guest shells inherit an empty PATH through proot: set Alpine's
+        // default so apk/ls/busybox applets resolve without full paths.
+        env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+        env["HOME"] = "/root"
         // proot's compiled-in tmp points at the Termux prefix: redirect all
         // temp (glue rootfs, f2fs probe, shm) into app storage.
         val tmpDir = File(app.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath
