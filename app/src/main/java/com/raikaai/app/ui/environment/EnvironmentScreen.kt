@@ -64,6 +64,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
@@ -244,6 +246,9 @@ private fun TerminalTab(
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var running by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
+    // Termux keys must hand focus back to the input, otherwise the IME keeps
+    // a stale buffer and typed text appears to vanish.
+    val fieldFocus = remember { FocusRequester() }
 
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
@@ -253,7 +258,7 @@ private fun TerminalTab(
         input = TextFieldValue(text, selection = TextRange(text.length))
     }
 
-    /** Inserts at the cursor (Termux keys must not jump to the end). */
+    /** Inserts at the cursor and keeps IME focus (keys must not jump to the end). */
     fun insertAtCursor(s: String) {
         val cur = input
         val len = cur.text.length
@@ -261,6 +266,7 @@ private fun TerminalTab(
         val hi = maxOf(cur.selection.start, cur.selection.end).coerceIn(0, len)
         val newText = cur.text.substring(0, lo) + s + cur.text.substring(hi)
         input = cur.copy(text = newText, selection = TextRange(lo + s.length))
+        fieldFocus.requestFocus()
     }
 
     fun exec(cmd: String) {
@@ -287,6 +293,7 @@ private fun TerminalTab(
         if (history.isEmpty()) return
         histPos = (histPos + dir).coerceIn(-1, history.size - 1)
         setInputText(if (histPos < 0) "" else history[history.size - 1 - histPos])
+        fieldFocus.requestFocus()
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -354,7 +361,7 @@ private fun TerminalTab(
             modifier = Modifier.fillMaxWidth(),
         ) {
             val keys: List<Pair<String, () -> Unit>> = listOf(
-                "ESC" to { input = TextFieldValue("") },
+                "ESC" to { input = TextFieldValue(""); fieldFocus.requestFocus() },
                 "CTRL+C" to { scope.launch(Dispatchers.IO) { manager.cancelRun() } },
                 "↑" to { historyStep(1) },
                 "↓" to { historyStep(-1) },
@@ -378,7 +385,7 @@ private fun TerminalTab(
                 onValueChange = { input = it; histPos = -1 },
                 placeholder = { Text("$") },
                 singleLine = true,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).focusRequester(fieldFocus),
                 shape = RoundedCornerShape(12.dp),
             )
             Spacer(Modifier.width(8.dp))

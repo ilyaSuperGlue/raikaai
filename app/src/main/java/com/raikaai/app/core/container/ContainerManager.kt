@@ -149,10 +149,13 @@ class ContainerManager private constructor(
                 }
 
                 _installState.value = InstallState.Extracting("alpine-minirootfs")
+                // Clean slate: an older unpack may lack symlinks or be partial.
+                alpineDir.deleteRecursively()
                 alpineDir.mkdirs()
-                unpackTarGz(tmpTar, alpineDir)
+                val entries = unpackTarGz(tmpTar, alpineDir)
                 tmpTar.delete()
                 makeBusyboxExecutable()
+                verifyRootfs(entries)
 
                 File(alpineDir, "etc/resolv.conf").apply {
                     parentFile?.mkdirs()
@@ -161,8 +164,19 @@ class ContainerManager private constructor(
                 File(alpineDir, ".installed").writeText(manifest.alpineVersion)
                 settingsRepo.setAlpineInstalled(true)
                 settingsRepo.setAlpineVersion(manifest.alpineVersion)
+                // Smoke test: Ready must mean the shell actually runs.
+                val smoke = run("echo ok", timeoutSec = 20)
+                if (smoke.exitCode != 0 || !smoke.stdout.contains("ok")) {
+                    File(alpineDir, ".installed").delete()
+                    settingsRepo.setAlpineInstalled(false)
+                    settingsRepo.setAlpineVersion("")
+                    throw IllegalStateException(
+                        "Shell smoke test failed (exit=${smoke.exitCode}): " +
+                            (smoke.stderr.ifBlank { smoke.stdout }.take(300).ifBlank { "no output" }),
+                    )
+                }
                 _installState.value = InstallState.Ready
-                KLog.d(TAG, "Alpine ${manifest.alpineVersion} installed")
+                KLog.d(TAG, "Alpine ${manifest.alpineVersion} installed ($entries entries)")
             } catch (t: Throwable) {
                 if (t is kotlinx.coroutines.CancellationException) throw t
                 KLog.e(TAG, "Install failed", t)
@@ -405,8 +419,40 @@ class ContainerManager private constructor(
         return got.equals(hex, ignoreCase = true)
     }
 
-    /** Minimal tar.gz extractor: regular files + dirs, honors GNU long names. */
-    private fun unpackTarGz(tarGz: File, destDir: File) {
+    /**
+     * Sanity-checks the unpacked rootfs. Repairs a missing /bin/sh from
+     * busybox; anything worse throws with a directory listing for diagnosis.
+     */
+    private fun verifyRootfs(entries: Int) {
+        if (entries < 100) {
+            throw IllegalStateException(
+                "Rootfs unpack suspicious ($entries entries). Top: ${topLevelListing()}",
+            )
+        }
+        if (!File(alpineDir, "bin/busybox").isFile) {
+            throw IllegalStateException(
+                "bin/busybox missing after unpack. Top: ${topLevelListing()}",
+            )
+        }
+        // File.exists() follows symlinks, so this is false for missing AND broken links.
+        if (!File(alpineDir, "bin/sh").exists()) {
+            try {
+                android.system.Os.symlink("busybox", File(alpineDir, "bin/sh").absolutePath)
+            } catch (t: Throwable) {
+                throw IllegalStateException("bin/sh missing and relink failed: ${t.message}")
+            }
+        }
+    }
+
+    private fun topLevelListing(): String {
+        return runCatching {
+            (alpineDir.listFiles()?.take(12)?.map { it.name } ?: emptyList()).toString()
+        }.getOrDefault("?")
+    }
+
+    /** Minimal tar.gz extractor: regular files + dirs + symlinks. Returns entry count. */
+    private fun unpackTarGz(tarGz: File, destDir: File): Int {
+        var count = 0
         GZIPInputStream(BufferedInputStream(FileInputStream(tarGz), 64 * 1024)).buffered().use { gz ->
             val header = ByteArray(512)
             var longName: String? = null
@@ -452,7 +498,10 @@ class ContainerManager private constructor(
                     throw IllegalStateException("Tar entry escapes destination: $name")
                 }
                 when (typeFlag) {
-                    '5' -> target.mkdirs()
+                    '5' -> {
+                        target.mkdirs()
+                        count++
+                    }
                     '2' -> {
                         // Symlink (Alpine links every applet to busybox).
                         // Link target lives at header offset 157, length 100.
@@ -463,6 +512,7 @@ class ContainerManager private constructor(
                         if (target.exists() || target.isDirectory) target.deleteRecursively()
                         try {
                             android.system.Os.symlink(linkTarget, target.absolutePath)
+                            count++
                         } catch (t: Throwable) {
                             throw IllegalStateException("Symlink failed ($name -> $linkTarget): ${t.message}")
                         }
@@ -481,11 +531,13 @@ class ContainerManager private constructor(
                             }
                         }
                         if (mode and 0b001001001 != 0) target.setExecutable(true, false)
+                        count++
                     }
                 }
                 skipPadding(gz, size)
             }
         }
+        return count
     }
 
     private fun skipPadding(gz: java.io.InputStream, size: Long) {
