@@ -128,8 +128,8 @@ class ContainerManager private constructor(
 
     /** Marker exists but was written by an older unpack format → reinstall needed. */
     fun isOutdated(): Boolean {
-        val schema = markerSchema() ?: return false
-        return schema != ROOTFS_SCHEMA && prootBin.isFile
+        if (!File(alpineDir, ".installed").isFile) return false
+        return markerSchema() != ROOTFS_SCHEMA
     }
 
     /** One-shot diagnostics for the on-device state (copy-pasteable). */
