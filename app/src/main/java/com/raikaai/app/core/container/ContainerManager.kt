@@ -50,7 +50,7 @@ class ContainerManager private constructor(
          * (symlinks, permissions, …) so stale on-device rootfs is detected
          * and the UI forces a reinstall instead of failing cryptically.
          */
-        const val ROOTFS_SCHEMA = 2
+        const val ROOTFS_SCHEMA = 3
 
         @Volatile private var instance: ContainerManager? = null
 
@@ -133,7 +133,7 @@ class ContainerManager private constructor(
     }
 
     /** One-shot diagnostics for the on-device state (copy-pasteable). */
-    fun diagnostics(): String {
+    suspend fun diagnostics(): String {
         val sb = StringBuilder()
         sb.appendLine("abi=${android.os.Build.SUPPORTED_ABIS.firstOrNull()}")
         sb.appendLine("marker=${runCatching { File(alpineDir, ".installed").readText().trim() }.getOrDefault("(none)")}")
@@ -146,6 +146,7 @@ class ContainerManager private constructor(
         sb.appendLine("alpineTop=${topLevelListing()}")
         sb.appendLine("alpineEntries=${countEntries(alpineDir, 0)}")
         sb.appendLine("nativeLibs=${nativeLibDir.listFiles()?.map { it.name }?.sorted() ?: "?"}")
+        sb.append(runCatching { engineProbes() }.getOrDefault("probes failed"))
         return sb.toString()
     }
 
@@ -263,23 +264,38 @@ class ContainerManager private constructor(
         }
         val clean = command.trim()
         if (clean.isEmpty()) return RunResult("", "empty command", -1)
+        workspaceDir.mkdirs()
+        return execProot(
+            args = listOf(
+                "-r", alpineDir.absolutePath,
+                "-b", "${workspaceDir.absolutePath}:/workspace",
+                "-b", "/dev",
+                "-b", "/proc",
+                "-0",
+                "-w", "/workspace",
+                "/bin/sh", "-c", clean,
+            ),
+            timeoutSec = timeoutSec,
+        )
+    }
+
+    /**
+     * Raw proot invocation (single-flight). Used by [run] and engine probes.
+     * No install gate: probes must run even on broken installs.
+     */
+    suspend fun execProot(
+        args: List<String>,
+        extraEnv: Map<String, String> = emptyMap(),
+        timeoutSec: Long = 15,
+    ): RunResult {
         return runMutex.withLock {
             withContext(Dispatchers.IO) {
                 var proc: Process? = null
                 try {
-                    workspaceDir.mkdirs()
-                    val pb = ProcessBuilder(
-                        prootBin.absolutePath,
-                        "-r", alpineDir.absolutePath,
-                        "-b", "${workspaceDir.absolutePath}:/workspace",
-                        "-b", "/dev",
-                        "-b", "/proc",
-                        "-0",
-                        "-w", "/workspace",
-                        "/bin/sh", "-c", clean,
-                    )
+                    val pb = ProcessBuilder(listOf(prootBin.absolutePath) + args)
                     pb.redirectErrorStream(false)
                     withContainerEnv(pb)
+                    extraEnv.forEach { (k, v) -> pb.environment()[k] = v }
                     proc = pb.start()
                     currentProc = proc
                     val finished = try {
@@ -303,6 +319,34 @@ class ContainerManager private constructor(
                 }
             }
         }
+    }
+
+    /**
+     * Engine self-test probes (no install gate). Distinguishes engine/linker
+     * failure (P0), rootfs access failure (P1), and shell lookup failure (P2).
+     */
+    suspend fun engineProbes(): String {
+        val sb = StringBuilder()
+        val p0 = execProot(listOf("--version"), timeoutSec = 10)
+        sb.appendLine("P0 engine --version: exit=${p0.exitCode} out=${(p0.stdout.ifBlank { p0.stderr }).take(200)}")
+        if (!File(alpineDir, ".installed").isFile) {
+            sb.appendLine("P1/P2 skipped: no rootfs marker")
+            return sb.toString()
+        }
+        val base = listOf("-r", alpineDir.absolutePath, "-0")
+        val p1 = execProot(base + listOf("/bin/busybox", "echo", "hi"), timeoutSec = 10)
+        sb.appendLine("P1 busybox echo: exit=${p1.exitCode} out=${(p1.stdout.ifBlank { p1.stderr }).take(200)}")
+        val p2 = execProot(base + listOf("/bin/sh", "-c", "echo hi"), timeoutSec = 10)
+        sb.appendLine("P2 sh echo: exit=${p2.exitCode} out=${(p2.stdout.ifBlank { p2.stderr }).take(200)}")
+        if (p2.exitCode != 0) {
+            val pv = execProot(
+                base + listOf("/bin/sh", "-c", "echo hi"),
+                extraEnv = mapOf("PROOT_VERBOSE" to "1"),
+                timeoutSec = 10,
+            )
+            sb.appendLine("P2 verbose: ${(pv.stdout.ifBlank { pv.stderr }).take(1500)}")
+        }
+        return sb.toString()
     }
 
     /** Forcibly stops the currently running command, if any (terminal Ctrl+C). */
@@ -585,6 +629,9 @@ class ContainerManager private constructor(
                 if (!target.canonicalPath.startsWith(destDir.canonicalPath)) {
                     throw IllegalStateException("Tar entry escapes destination: $name")
                 }
+                // Guest-relative name (tar uses ./ prefix): needed to rewrite
+                // absolute symlinks into relative ones below.
+                val guestName = name.removePrefix("./").trimStart('/')
                 when (typeFlag) {
                     '5' -> {
                         target.mkdirs()
@@ -596,13 +643,18 @@ class ContainerManager private constructor(
                         val linkBytes = header.copyOfRange(157, 257).takeWhile { it != 0.toByte() }.toByteArray()
                         val linkTarget = String(linkBytes, Charsets.UTF_8)
                         if (linkTarget.isBlank()) throw IllegalStateException("Empty symlink target: $name")
+                        // Host-side stat() must resolve our links too (proot
+                        // consistency checks run on the host): rewrite absolute
+                        // guest targets into relative ones. Inside the guest
+                        // both forms resolve identically.
+                        val guestTarget = relativizeGuestLink(guestName, linkTarget)
                         target.parentFile?.mkdirs()
                         if (target.exists() || target.isDirectory) target.deleteRecursively()
                         try {
-                            android.system.Os.symlink(linkTarget, target.absolutePath)
+                            android.system.Os.symlink(guestTarget, target.absolutePath)
                             count++
                         } catch (t: Throwable) {
-                            throw IllegalStateException("Symlink failed ($name -> $linkTarget): ${t.message}")
+                            throw IllegalStateException("Symlink failed ($name -> $guestTarget): ${t.message}")
                         }
                     }
                     else -> {
@@ -677,4 +729,28 @@ class ContainerManager private constructor(
             ""
         }
     }
+}
+
+/**
+ * Rewrites an absolute guest symlink target into a relative one so the
+ * link resolves both inside the guest AND on the host (proot stat checks
+ * run host-side, where guest-absolute targets don't exist).
+ * Targets outside the rootfs (/proc, /dev, sys) are kept absolute.
+ */
+internal fun relativizeGuestLink(guestName: String, linkTarget: String): String {
+    if (!linkTarget.startsWith("/")) return linkTarget
+    val destSegs = linkTarget.removePrefix("/").split("/").filter { it.isNotEmpty() }
+    if (destSegs.isEmpty()) return linkTarget
+    // Only rewrite targets that stay inside the rootfs (first segment is
+    // a real top-level dir, not proc/dev/sys).
+    if (destSegs[0] in setOf("proc", "dev", "sys")) return linkTarget
+    val parentSegs = guestName.split("/").filter { it.isNotEmpty() }.dropLast(1)
+    var common = 0
+    while (common < parentSegs.size && common < destSegs.size &&
+        parentSegs[common] == destSegs[common]
+    ) {
+        common++
+    }
+    val up = List(parentSegs.size - common) { ".." }
+    return (up + destSegs.drop(common)).joinToString("/").ifEmpty { "." }
 }
