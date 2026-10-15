@@ -3413,6 +3413,11 @@ class ChatViewModel(
             "You have a Linux (Alpine) sandbox with a persistent /workspace folder. " +
             "To run a shell command, emit EXACTLY one block and then stop:\n" +
             "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"<shell>\"}}</tool_call>\n" +
+            "Keep the ENTIRE tool call on ONE single line — never insert line breaks inside it, " +
+            "even for long commands. Correct examples:\n" +
+            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"ls /workspace\"}}</tool_call>\n" +
+            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"unzip -l '/workspace/my file.zip'\"}}</tool_call>\n" +
+            "Prefer single quotes for paths with spaces (simpler and always valid)."
             "To install a missing program, use:\n" +
             "<tool_call>{\"name\": \"ensure_package\", \"arguments\": {\"command\": \"apk add --no-cache <pkg>\"}}</tool_call>\n" +
             "Rules: only write files under /workspace; keep commands short and non-interactive; " +
