@@ -2,5 +2,6 @@
 <paths xmlns:android="http://schemas.android.com/apk/res/android">
     <files-path name="chat_images" path="chat_images/" />
     <files-path name="avatars" path="avatars/" />
+    <files-path name="workspace" path="workspace/" />
     <cache-path name="cache" path="." />
 </paths>

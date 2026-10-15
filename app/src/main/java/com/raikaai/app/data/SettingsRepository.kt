@@ -111,6 +111,9 @@ data class Settings(
     val captureArtifacts: Boolean = true,
     val enableVision: Boolean = true,
     val enableWebSearch: Boolean = false,
+    // Linux container (Alpine via PRoot) — Fase 0: status only
+    val alpineInstalled: Boolean = false,
+    val alpineVersion: String = "",
 )
 
 /**
@@ -266,6 +269,8 @@ class SettingsRepository(
         val CAPTURE_ARTIFACTS = booleanPreferencesKey("capture_artifacts")
         val ENABLE_VISION = booleanPreferencesKey("enable_vision")
         val ENABLE_WEB_SEARCH = booleanPreferencesKey("enable_web_search")
+        val ALPINE_INSTALLED = booleanPreferencesKey("alpine_installed")
+        val ALPINE_VERSION = stringPreferencesKey("alpine_version")
 
         // Legacy DataStore keys for sensitive tokens. Tokens used to live here in
         // plaintext; they are migrated to EncryptedSharedPreferences on first read
@@ -524,6 +529,8 @@ class SettingsRepository(
                     captureArtifacts = prefs[Keys.CAPTURE_ARTIFACTS] ?: true,
                     enableVision = prefs[Keys.ENABLE_VISION] ?: true,
                     enableWebSearch = prefs[Keys.ENABLE_WEB_SEARCH] ?: false,
+                    alpineInstalled = prefs[Keys.ALPINE_INSTALLED] ?: false,
+                    alpineVersion = prefs[Keys.ALPINE_VERSION] ?: "",
                 )
             }
         }
@@ -779,6 +786,11 @@ class SettingsRepository(
     suspend fun setEnableVision(value: Boolean) = edit { it[Keys.ENABLE_VISION] = value }
 
     suspend fun setEnableWebSearch(value: Boolean) = edit { it[Keys.ENABLE_WEB_SEARCH] = value }
+
+    /** Fase 0: container install status flag (filesystem check lands in Fase 1). */
+    suspend fun setAlpineInstalled(value: Boolean) = edit { it[Keys.ALPINE_INSTALLED] = value }
+
+    suspend fun setAlpineVersion(value: String) = edit { it[Keys.ALPINE_VERSION] = value.take(32) }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit { block(it) }

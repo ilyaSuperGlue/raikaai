@@ -72,6 +72,9 @@ import com.raikaai.app.localai.LocalModelDownloader.DownloadState
 import com.raikaai.app.ui.chat.ChatViewModel
 import com.raikaai.app.ui.component.EmptyState
 import com.raikaai.app.ui.component.SettingsTextField
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 /**
  * Dedicated Models Management Screen cleanly styled with Material 3 uniform cards,
@@ -257,6 +260,110 @@ fun ModelsScreen(
                                             modifier = Modifier.padding(vertical = 10.dp, horizontal = 6.dp),
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                         )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── 2b. Linux Environment (Fase 1: downloadable install) ──
+                item(key = "linux_environment_card") {
+                    val containerState by viewModel.containerInstallState.collectAsState()
+                    val installed = settings.alpineInstalled
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically,
+                            ) {
+                                Text("Linux Environment", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                ) {
+                                    Text(
+                                        text = when {
+                                            containerState is com.raikaai.app.core.container.ContainerManager.InstallState.Ready || installed ->
+                                                "Terpasang ${settings.alpineVersion.ifBlank { "Alpine" }}"
+                                            else -> "Belum terpasang"
+                                        },
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (installed) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    )
+                                }
+                            }
+                            Text(
+                                text = "Alpine via PRoot (tanpa root). Download saat install ±5 MB, tidak termasuk di APK.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            when (val st = containerState) {
+                                is com.raikaai.app.core.container.ContainerManager.InstallState.Downloading -> {
+                                    LinearProgressIndicator(
+                                        progress = { st.progress.coerceIn(0f, 1f) },
+                                        modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)),
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically,
+                                    ) {
+                                        Text(
+                                            "Mengunduh ${st.label}… ${(st.progress * 100).toInt()}%",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        )
+                                        TextButton(onClick = { viewModel.containerManager.cancelInstall() }) {
+                                            Text("Batal", style = MaterialTheme.typography.labelSmall)
+                                        }
+                                    }
+                                }
+                                is com.raikaai.app.core.container.ContainerManager.InstallState.Extracting -> {
+                                    LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
+                                    Text(
+                                        "Mengekstrak ${st.label}…",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    )
+                                }
+                                is com.raikaai.app.core.container.ContainerManager.InstallState.Error -> {
+                                    Text(
+                                        "Gagal: ${st.message}",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = MaterialTheme.colorScheme.error,
+                                    )
+                                    Button(onClick = { viewModel.containerManager.install() }) {
+                                        Text("Coba Lagi")
+                                    }
+                                }
+                                else -> {
+                                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        if (installed) {
+                                            TextButton(onClick = {
+                                                CoroutineScope(Dispatchers.IO).launch {
+                                                    viewModel.containerManager.wipe()
+                                                }
+                                            }) {
+                                                Text("Hapus")
+                                            }
+                                        } else {
+                                            Button(onClick = { viewModel.containerManager.install() }) {
+                                                Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
+                                                Spacer(Modifier.width(6.dp))
+                                                Text("Install Alpine ${com.raikaai.app.core.container.ALPINE_VERSION}")
+                                            }
+                                        }
                                     }
                                 }
                             }

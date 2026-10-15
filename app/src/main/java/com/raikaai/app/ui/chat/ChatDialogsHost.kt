@@ -415,6 +415,58 @@ fun ChatDialogsHost(
         )
     }
 
+    val containerApprovalReq = viewModel.pendingContainerApproval.value
+    if (containerApprovalReq != null) {
+        AlertDialog(
+            onDismissRequest = { viewModel.respondContainerApproval(false) },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Terminal,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(22.dp),
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text("Run in Linux Environment?")
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        "The AI wants to run this command in the Alpine sandbox (files limited to /workspace):",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        modifier = Modifier.fillMaxWidth(),
+                    ) {
+                        Text(
+                            text = containerApprovalReq.command,
+                            style = MaterialTheme.typography.bodySmall,
+                            fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                            modifier = Modifier
+                                .padding(8.dp)
+                                .heightIn(max = 180.dp)
+                                .verticalScroll(rememberScrollState()),
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { viewModel.respondContainerApproval(true) }) { Text(stringResource(R.string.chat_mcp_allow)) }
+            },
+            dismissButton = {
+                TextButton(onClick = { viewModel.respondContainerApproval(false) }) { Text(stringResource(R.string.chat_mcp_deny)) }
+            },
+        )
+    }
+
     if (overlays.showUrlDialog) {
         AlertDialog(
             onDismissRequest = { overlays.showUrlDialog = false },

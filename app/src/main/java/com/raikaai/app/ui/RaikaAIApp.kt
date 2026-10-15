@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
@@ -80,6 +81,7 @@ object NavRoute {
     const val LOGS = "logs"
     const val HISTORY = "history"
     const val MCP = "mcp"
+    const val ENVIRONMENT = "environment"
     const val SETTINGS = "settings"
     const val ABOUT = "about"
 }
@@ -184,6 +186,7 @@ fun RaikaAIApp(
                             DrawerMenuItem(NavRoute.SERVER, "Server", Icons.Outlined.Dns),
                             DrawerMenuItem(NavRoute.SKILLS, "Skills", Icons.Outlined.AutoAwesome),
                             DrawerMenuItem(NavRoute.MCP, "MCP Servers", Icons.Outlined.Build),
+                            DrawerMenuItem(NavRoute.ENVIRONMENT, "Linux Env", Icons.Default.Terminal),
                             DrawerMenuItem(NavRoute.LOGS, "Telemetry Logs", Icons.Outlined.Terminal),
                             DrawerMenuItem(NavRoute.ABOUT, "About", Icons.Outlined.Info),
                         )
@@ -288,6 +291,19 @@ fun RaikaAIApp(
                         viewModel = viewModel,
                         onOpenDrawer = { scope.launch { drawerState.open() } },
                         onBack = { navController.popBackStack() },
+                    )
+                }
+                composable(NavRoute.ENVIRONMENT) {
+                    com.raikaai.app.ui.environment.EnvironmentScreen(
+                        viewModel = viewModel,
+                        onOpenDrawer = { scope.launch { drawerState.open() } },
+                        onNavigateToChat = {
+                            navController.navigate(NavRoute.CHAT) {
+                                popUpTo(navController.graph.findStartDestination().id) { saveState = true }
+                                launchSingleTop = true
+                                restoreState = true
+                            }
+                        },
                     )
                 }
                 composable(NavRoute.SAMPLER) {

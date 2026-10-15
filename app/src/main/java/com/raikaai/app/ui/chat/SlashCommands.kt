@@ -3,11 +3,14 @@ package com.raikaai.app.ui.chat
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material.icons.filled.Translate
 import androidx.compose.ui.graphics.vector.ImageVector
 
@@ -82,5 +85,26 @@ val DEFAULT_SLASH_COMMANDS =
             description = "Rewrite in a professional and clear tone",
             promptTemplate = "Rewrite the following text in a more professional, clear, and persuasive tone:\n\n",
             icon = Icons.Default.AutoAwesome,
+        ),
+        SlashCommand(
+            command = "/run",
+            title = "Run in Linux",
+            description = "Execute shell command in Alpine sandbox",
+            promptTemplate = "/run ",
+            icon = Icons.Default.Terminal,
+        ),
+        SlashCommand(
+            command = "/serve",
+            title = "Serve Workspace",
+            description = "Preview /workspace on localhost",
+            promptTemplate = "/serve ",
+            icon = Icons.Default.Language,
+        ),
+        SlashCommand(
+            command = "/env",
+            title = "Linux Environment",
+            description = "Install or wipe Alpine environment",
+            promptTemplate = "/env ",
+            icon = Icons.Default.CloudDownload,
         ),
     )
