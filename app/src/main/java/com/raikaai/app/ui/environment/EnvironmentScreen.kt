@@ -32,6 +32,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Send
@@ -102,6 +103,8 @@ fun EnvironmentScreen(
     val servedPort by manager.servedPort.collectAsState()
     var tab by remember { mutableIntStateOf(0) }
     var filesTick by remember { mutableIntStateOf(0) }
+    val outdated = remember(settings.alpineInstalled, installState) { manager.isOutdated() }
+    val scope = rememberCoroutineScope()
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
         Column(modifier = Modifier.fillMaxSize().statusBarsPadding().padding(top = 10.dp)) {
@@ -121,10 +124,26 @@ fun EnvironmentScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }
+                IconButton(
+                    onClick = {
+                        scope.launch(Dispatchers.IO) {
+                            val text = manager.diagnostics()
+                            withContext(Dispatchers.Main) {
+                                val cm = context.getSystemService(android.content.ClipboardManager::class.java)
+                                cm?.setPrimaryClip(android.content.ClipData.newPlainText("env-diag", text))
+                                android.widget.Toast.makeText(context, "Diagnostics copied", android.widget.Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.size(36.dp),
+                ) {
+                    Icon(Icons.Default.Info, contentDescription = "Copy diagnostics")
+                }
                 Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
                     Text(
                         text = when {
                             servedPort != null -> "Serving :$servedPort"
+                            outdated -> "Update available"
                             settings.alpineInstalled -> "Ready"
                             else -> "Not installed"
                         },
@@ -136,11 +155,18 @@ fun EnvironmentScreen(
                 }
             }
 
-            if (!settings.alpineInstalled) {
+            if (!settings.alpineInstalled || outdated) {
                 NotInstalledCard(
                     installState = installState,
                     onInstall = { manager.install() },
                     onCancel = { manager.cancelInstall() },
+                    title = if (outdated) "Environment update available" else "Linux Environment not installed",
+                    desc = if (outdated) {
+                        "The on-device rootfs uses an old format. Press Update to reinstall it (downloads ~3 MB, /workspace is kept)."
+                    } else {
+                        "Downloads the Alpine minirootfs (~3 MB). proot ships inside the app and can be removed anytime."
+                    },
+                    actionLabel = if (outdated) "Update Alpine" else "Install Alpine",
                 )
                 return@Column
             }
@@ -187,6 +213,9 @@ private fun NotInstalledCard(
     installState: ContainerManager.InstallState,
     onInstall: () -> Unit,
     onCancel: () -> Unit,
+    title: String = "Linux Environment not installed",
+    desc: String = "Downloads the Alpine minirootfs (~3 MB). proot ships inside the app and can be removed anytime.",
+    actionLabel: String = "Install Alpine",
 ) {
     Card(
         shape = RoundedCornerShape(16.dp),
@@ -194,9 +223,9 @@ private fun NotInstalledCard(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Linux Environment not installed", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Downloads the Alpine minirootfs (~3 MB). proot ships inside the app and can be removed anytime.",
+                desc,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -220,7 +249,7 @@ private fun NotInstalledCard(
                     Button(onClick = onInstall) {
                         Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(6.dp))
-                        Text("Install Alpine")
+                        Text(actionLabel)
                     }
                 }
             }

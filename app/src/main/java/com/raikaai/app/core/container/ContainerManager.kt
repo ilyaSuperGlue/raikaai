@@ -45,6 +45,12 @@ class ContainerManager private constructor(
     companion object {
         private const val TAG = "Container"
         private const val OUTPUT_CAP = 64 * 1024
+        /**
+         * Rootfs layout schema. Bump when the unpack format changes
+         * (symlinks, permissions, …) so stale on-device rootfs is detected
+         * and the UI forces a reinstall instead of failing cryptically.
+         */
+        const val ROOTFS_SCHEMA = 2
 
         @Volatile private var instance: ContainerManager? = null
 
@@ -109,9 +115,48 @@ class ContainerManager private constructor(
     private var installJob: Job? = null
     @Volatile private var currentProc: Process? = null
 
-    /** Filesystem truth: rootfs marker written by [install] on success. */
+    /** Marker content is "<version>#<schema>". Missing/stale → not installed. */
+    private fun markerSchema(): Int? {
+        val text = runCatching { File(alpineDir, ".installed").readText().trim() }.getOrNull()
+            ?: return null
+        return text.substringAfterLast("#", "").toIntOrNull()
+    }
+
+    /** Filesystem truth: rootfs marker with current schema + engine present. */
     fun isInstalled(): Boolean =
-        File(alpineDir, ".installed").isFile && prootBin.isFile
+        markerSchema() == ROOTFS_SCHEMA && prootBin.isFile
+
+    /** Marker exists but was written by an older unpack format → reinstall needed. */
+    fun isOutdated(): Boolean {
+        val schema = markerSchema() ?: return false
+        return schema != ROOTFS_SCHEMA && prootBin.isFile
+    }
+
+    /** One-shot diagnostics for the on-device state (copy-pasteable). */
+    fun diagnostics(): String {
+        val sb = StringBuilder()
+        sb.appendLine("abi=${android.os.Build.SUPPORTED_ABIS.firstOrNull()}")
+        sb.appendLine("marker=${runCatching { File(alpineDir, ".installed").readText().trim() }.getOrDefault("(none)")}")
+        sb.appendLine("schema=$ROOTFS_SCHEMA installed=${isInstalled()} outdated=${isOutdated()}")
+        val bb = File(alpineDir, "bin/busybox")
+        sb.appendLine("busybox exists=${bb.isFile} size=${if (bb.isFile) bb.length() else -1}")
+        val sh = File(alpineDir, "bin/sh")
+        val shTarget = runCatching { android.system.Os.readlink(sh.absolutePath) }.getOrNull()
+        sb.appendLine("bin/sh exists=${sh.exists()} isSymlink=${shTarget != null} target=${shTarget ?: "-"}")
+        sb.appendLine("alpineTop=${topLevelListing()}")
+        sb.appendLine("alpineEntries=${countEntries(alpineDir, 0)}")
+        sb.appendLine("nativeLibs=${nativeLibDir.listFiles()?.map { it.name }?.sorted() ?: "?"}")
+        return sb.toString()
+    }
+
+    private fun countEntries(dir: File, depth: Int): Int {
+        if (depth > 3) return 0
+        val kids = dir.listFiles() ?: return 0
+        var n = kids.size
+        if (n > 2000) return n
+        for (k in kids) if (k.isDirectory) n += countEntries(k, depth + 1)
+        return n
+    }
 
     fun workspaceFiles(): List<File> {
         val dir = workspaceDir
@@ -161,7 +206,7 @@ class ContainerManager private constructor(
                     parentFile?.mkdirs()
                     writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
                 }
-                File(alpineDir, ".installed").writeText(manifest.alpineVersion)
+                File(alpineDir, ".installed").writeText("${manifest.alpineVersion}#$ROOTFS_SCHEMA")
                 settingsRepo.setAlpineInstalled(true)
                 settingsRepo.setAlpineVersion(manifest.alpineVersion)
                 // Smoke test: Ready must mean the shell actually runs.
@@ -209,7 +254,12 @@ class ContainerManager private constructor(
      */
     suspend fun run(command: String, timeoutSec: Long = 15): RunResult {
         if (!isInstalled()) {
-            return RunResult("", "Linux Environment is not installed. Open Models Hub → Linux Environment → Install.", -1)
+            val hint = if (isOutdated()) {
+                "Linux Environment format is outdated. Press Install again to update it."
+            } else {
+                "Linux Environment is not installed. Open Models Hub → Linux Environment → Install."
+            }
+            return RunResult("", hint, -1)
         }
         val clean = command.trim()
         if (clean.isEmpty()) return RunResult("", "empty command", -1)

@@ -271,6 +271,7 @@ fun ModelsScreen(
                 item(key = "linux_environment_card") {
                     val containerState by viewModel.containerInstallState.collectAsState()
                     val installed = settings.alpineInstalled
+                    val outdated = remember(installed) { viewModel.containerManager.isOutdated() }
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
@@ -292,6 +293,7 @@ fun ModelsScreen(
                                 ) {
                                     Text(
                                         text = when {
+                                            outdated -> "Update available"
                                             containerState is com.raikaai.app.core.container.ContainerManager.InstallState.Ready || installed ->
                                                 "Installed ${settings.alpineVersion.ifBlank { "Alpine" }}"
                                             else -> "Not installed"
@@ -349,7 +351,7 @@ fun ModelsScreen(
                                 }
                                 else -> {
                                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        if (installed) {
+                                        if (installed && !outdated) {
                                             TextButton(onClick = {
                                                 CoroutineScope(Dispatchers.IO).launch {
                                                     viewModel.containerManager.wipe()
@@ -361,7 +363,7 @@ fun ModelsScreen(
                                             Button(onClick = { viewModel.containerManager.install() }) {
                                                 Icon(Icons.Default.CloudDownload, contentDescription = null, modifier = Modifier.size(16.dp))
                                                 Spacer(Modifier.width(6.dp))
-                                                Text("Install Alpine ${com.raikaai.app.core.container.ALPINE_VERSION}")
+                                                Text(if (outdated) "Update Alpine" else "Install Alpine ${com.raikaai.app.core.container.ALPINE_VERSION}")
                                             }
                                         }
                                     }
