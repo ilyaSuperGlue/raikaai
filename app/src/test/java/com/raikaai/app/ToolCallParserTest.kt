@@ -108,5 +108,17 @@ class ToolCallParserTest {
         val text = "Run <command>ls</command> in your head, then answer."
         assertEquals(null, ToolCallParser.parseGenericCall(text))
     }
+
+    @Test
+    fun testMultilineBrokenJsonCommand() {
+        val text = "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": " +
+            "{\"command\": \"unzip -l \\\"/workspace/\nkzkt-license-web-main.zip\\\"\"}}</tool_call>"
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("execute_in_container", parsed?.name)
+        val cmd = parsed?.arguments?.get("command")?.asString.orEmpty()
+        assert(cmd.contains("unzip -l"))
+        assert(cmd.contains("kzkt-license-web-main.zip"))
+    }
 }
 

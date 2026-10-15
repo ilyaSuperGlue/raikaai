@@ -225,19 +225,23 @@ object ToolCallParser {
         }
 
         for ((body, raw) in bodies) {
-            parseGenericJson(body, raw)?.let { return it }
-            parseGenericXml(body, raw)?.let { return it }
+            parseGenericFirst(body, raw)?.let { return it }
         }
 
         // Bare JSON object containing a "name" key.
         val nameMatcher = MCP_NAME_PATTERN.matcher(targetText)
         while (nameMatcher.find()) {
             extractBalancedJson(targetText, nameMatcher.start())?.let { jsonStr ->
-                parseGenericJson(jsonStr, jsonStr)?.let { return it }
+                parseGenericFirst(jsonStr, jsonStr)?.let { return it }
             }
         }
         return null
     }
+
+    private fun parseGenericFirst(body: String, raw: String): GenericToolCall? =
+        parseGenericJson(body, raw)
+            ?: parseGenericXml(body, raw)
+            ?: parseGenericJsonLenient(body, raw)
 
     /**
      * Lenient XML shape some models emit instead of JSON:
@@ -272,6 +276,34 @@ object ToolCallParser {
         return s.replace("&lt;", "<").replace("&gt;", ">")
             .replace("&quot;", "\"").replace("&apos;", "'")
             .replace("&amp;", "&")
+    }
+
+    /**
+     * Last resort for model-mangled JSON: literal newlines inside strings,
+     * over-escaped quotes (`\"`), missing closing braces. Extracts
+     * `"name"` plus flat `"key": "string"` pairs with a tolerant regex.
+     * Only reached on text already shaped like a tool call, so prose with
+     * quoted words can't trigger it.
+     */
+    private fun parseGenericJsonLenient(jsonStr: String, rawText: String): GenericToolCall? {
+        val name = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"").find(jsonStr)
+            ?.groupValues?.get(1)?.trim().orEmpty()
+        if (name.isBlank() || name.startsWith("web_search", ignoreCase = true)) return null
+        val args = JsonObject()
+        val pairPattern = Regex("\"([A-Za-z0-9_.-]+)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+        for (m in pairPattern.findAll(jsonStr)) {
+            val key = m.groupValues[1]
+            if (key.equals("name", ignoreCase = true)) continue
+            val value = m.groupValues[2]
+                .replace("\\\\", "\u0000")
+                .replace("\\\"", "\"")
+                .replace("\\n", "\n")
+                .replace("\\t", "\t")
+                .replace("\\r", "\r")
+                .replace("\u0000", "\\")
+            if (!args.has(key)) args.addProperty(key, value)
+        }
+        return GenericToolCall(name, args, rawText)
     }
 
     private fun parseGenericJson(jsonStr: String, rawText: String): GenericToolCall? {

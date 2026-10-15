@@ -127,7 +127,29 @@ object AttachmentProcessor {
     private fun filesDir(context: Context): File =
         File(context.filesDir, "chat_files").apply { if (!exists()) mkdirs() }
 
+    private fun workspaceUploadsDir(context: Context): File =
+        File(context.filesDir, "workspace/chat_uploads").apply { if (!exists()) mkdirs() }
+
+    /**
+     * Mirrors the ORIGINAL attachment bytes into /workspace/chat_uploads with
+     * the original filename, so the Linux sandbox and AI tools can use chat
+     * attachments directly. Never breaks the send flow: failures only log.
+     */
+    private fun mirrorToWorkspace(context: Context, p: PendingAttachment) {
+        runCatching {
+            val safe = p.name.replace(Regex("[^A-Za-z0-9._-]"), "_")
+                .take(com.raikaai.app.data.AppLimits.SAFE_FILENAME_CHARS).ifBlank { "file" }
+            val dir = workspaceUploadsDir(context)
+            var dest = File(dir, safe)
+            if (dest.exists()) dest = File(dir, "${System.currentTimeMillis()}_$safe")
+            context.contentResolver.openInputStream(p.uri)?.use { input ->
+                dest.outputStream().use { input.copyTo(it) }
+            }
+        }.onFailure { KLog.w("Attachments", "Workspace mirror skipped for ${p.name}: ${it.message}") }
+    }
+
     private fun prepareImage(context: Context, p: PendingAttachment): PreparedAttachment? {
+        mirrorToWorkspace(context, p)
         val dest = File(imagesDir(context), "img_${System.currentTimeMillis()}_${p.name.hashCode().toString(16)}.jpg")
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         context.contentResolver.openInputStream(p.uri)?.use { BitmapFactory.decodeStream(it, null, options) }
@@ -467,6 +489,7 @@ object AttachmentProcessor {
         context.contentResolver.openInputStream(p.uri)?.use { input ->
             dest.outputStream().use { input.copyTo(it) }
         }
+        mirrorToWorkspace(context, p)
         return dest
     }
 }
