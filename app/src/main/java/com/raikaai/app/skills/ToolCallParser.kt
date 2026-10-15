@@ -214,7 +214,7 @@ object ToolCallParser {
         }
 
         val mdMatcher = Pattern.compile(
-            "```(?:tool_call|tool)(?:\\s+([\\s\\S]*?))?(?:```|$)",
+            "```(?:tool_call|tool|xml)(?:\\s+([\\s\\S]*?))?(?:```|$)",
             Pattern.CASE_INSENSITIVE,
         ).matcher(targetText)
         while (mdMatcher.find()) {
@@ -226,6 +226,7 @@ object ToolCallParser {
 
         for ((body, raw) in bodies) {
             parseGenericJson(body, raw)?.let { return it }
+            parseGenericXml(body, raw)?.let { return it }
         }
 
         // Bare JSON object containing a "name" key.
@@ -236,6 +237,41 @@ object ToolCallParser {
             }
         }
         return null
+    }
+
+    /**
+     * Lenient XML shape some models emit instead of JSON:
+     * `<tool_call><name>run_command</name><arguments><command>…</command></arguments></tool_call>`.
+     * Only triggers on an explicit `<name>` tag, so prose mentioning tags is ignored.
+     */
+    private fun parseGenericXml(body: String, rawText: String): GenericToolCall? {
+        val name = Regex("<name>([\\s\\S]*?)</name>", RegexOption.IGNORE_CASE)
+            .find(body)?.groupValues?.get(1)?.trim().orEmpty()
+        if (name.isBlank() || name.startsWith("web_search", ignoreCase = true)) return null
+        val scope = Regex("<arguments>([\\s\\S]*?)</arguments>", RegexOption.IGNORE_CASE)
+            .find(body)?.groupValues?.get(1) ?: body
+        val args = JsonObject()
+        val tagPattern = Regex("<([A-Za-z][A-Za-z0-9_.-]*)>([\\s\\S]*?)</\\1>", RegexOption.IGNORE_CASE)
+        for (m in tagPattern.findAll(scope)) {
+            val key = m.groupValues[1]
+            if (key.equals("name", ignoreCase = true) ||
+                key.equals("arguments", ignoreCase = true) ||
+                key.equals("tool_call", ignoreCase = true)
+            ) continue
+            val value = m.groupValues[2].trim().unescapeXml()
+            if (value.isNotEmpty() && !args.has(key)) args.addProperty(key, value)
+        }
+        return GenericToolCall(name, args, rawText)
+    }
+
+    private fun String.unescapeXml(): String {
+        var s = this
+        if (s.startsWith("<![CDATA[") && s.endsWith("]]>")) {
+            s = s.removePrefix("<![CDATA[").removeSuffix("]]>")
+        }
+        return s.replace("&lt;", "<").replace("&gt;", ">")
+            .replace("&quot;", "\"").replace("&apos;", "'")
+            .replace("&amp;", "&")
     }
 
     private fun parseGenericJson(jsonStr: String, rawText: String): GenericToolCall? {

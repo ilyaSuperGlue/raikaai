@@ -77,5 +77,36 @@ class ToolCallParserTest {
         assertEquals("generate_image", parsed?.name)
         assertEquals("A beautiful fluffy pure white cat with bright expressive eyes", parsed?.arguments?.get("prompt")?.asString)
     }
+
+    @Test
+    fun testXmlShapedContainerCall() {
+        val text = "<tool_call><name>execute_in_container</name><arguments><command>fastfetch</command></arguments></tool_call>"
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("execute_in_container", parsed?.name)
+        assertEquals("fastfetch", parsed?.arguments?.get("command")?.asString)
+    }
+
+    @Test
+    fun testXmlShapedRunCommandMultiline() {
+        val text = """
+            <tool_call>
+            <name>run_command</name>
+            <arguments>
+            <command>cat /etc/os-release</command>
+            </arguments>
+            </tool_call>
+        """.trimIndent()
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("run_command", parsed?.name)
+        assertEquals("cat /etc/os-release", parsed?.arguments?.get("command")?.asString)
+    }
+
+    @Test
+    fun testProseWithoutNameTagIsNotAToolCall() {
+        val text = "Run <command>ls</command> in your head, then answer."
+        assertEquals(null, ToolCallParser.parseGenericCall(text))
+    }
 }
 

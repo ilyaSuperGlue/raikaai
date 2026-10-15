@@ -3404,7 +3404,8 @@ class ChatViewModel(
             "<tool_call>{\"name\": \"ensure_package\", \"arguments\": {\"command\": \"apk add --no-cache <pkg>\"}}</tool_call>\n" +
             "Rules: only write files under /workspace; keep commands short and non-interactive; " +
             "never run rm -rf / or --allow-untrusted. Small official packages install automatically; " +
-            "other installs ask the user first. Never invent command results."
+            "other installs ask the user first. Never invent command results. " +
+            "Act directly: emit the tool call instead of asking the user what to run."
     }
 
     /** Records the estimated USD cost of one remote generation (owned by ServerControls). */
