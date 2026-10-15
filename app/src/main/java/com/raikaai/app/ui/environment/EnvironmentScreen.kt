@@ -66,8 +66,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -239,12 +241,26 @@ private fun TerminalTab(
     val lines = remember { mutableStateListOf<TermLine>() }
     val history = remember { mutableStateListOf<String>() }
     var histPos by remember { mutableIntStateOf(-1) }
-    var input by remember { mutableStateOf("") }
+    var input by remember { mutableStateOf(TextFieldValue("")) }
     var running by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
     LaunchedEffect(lines.size) {
         if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+    }
+
+    fun setInputText(text: String) {
+        input = TextFieldValue(text, selection = TextRange(text.length))
+    }
+
+    /** Inserts at the cursor (Termux keys must not jump to the end). */
+    fun insertAtCursor(s: String) {
+        val cur = input
+        val len = cur.text.length
+        val lo = minOf(cur.selection.start, cur.selection.end).coerceIn(0, len)
+        val hi = maxOf(cur.selection.start, cur.selection.end).coerceIn(0, len)
+        val newText = cur.text.substring(0, lo) + s + cur.text.substring(hi)
+        input = cur.copy(text = newText, selection = TextRange(lo + s.length))
     }
 
     fun exec(cmd: String) {
@@ -254,7 +270,7 @@ private fun TerminalTab(
         lines.add(TermLine(TermKind.CMD, clean))
         history.add(clean)
         histPos = -1
-        input = ""
+        input = TextFieldValue("")
         scope.launch(Dispatchers.IO) {
             val res = manager.run(clean, timeoutSec = 60)
             withContext(Dispatchers.Main) {
@@ -270,7 +286,7 @@ private fun TerminalTab(
     fun historyStep(dir: Int) {
         if (history.isEmpty()) return
         histPos = (histPos + dir).coerceIn(-1, history.size - 1)
-        input = if (histPos < 0) "" else history[history.size - 1 - histPos]
+        setInputText(if (histPos < 0) "" else history[history.size - 1 - histPos])
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -338,16 +354,16 @@ private fun TerminalTab(
             modifier = Modifier.fillMaxWidth(),
         ) {
             val keys: List<Pair<String, () -> Unit>> = listOf(
-                "ESC" to { input = "" },
+                "ESC" to { input = TextFieldValue("") },
                 "CTRL+C" to { scope.launch(Dispatchers.IO) { manager.cancelRun() } },
                 "↑" to { historyStep(1) },
                 "↓" to { historyStep(-1) },
-                "/" to { input += "/" },
-                "|" to { input += "|" },
-                "~" to { input += "~" },
-                "-" to { input += "-" },
-                "_" to { input += "_" },
-                "." to { input += "." },
+                "/" to { insertAtCursor("/") },
+                "|" to { insertAtCursor("|") },
+                "~" to { insertAtCursor("~") },
+                "-" to { insertAtCursor("-") },
+                "_" to { insertAtCursor("_") },
+                "." to { insertAtCursor(".") },
             )
             items(keys.size) { i ->
                 TextButton(onClick = keys[i].second) {
@@ -366,7 +382,7 @@ private fun TerminalTab(
                 shape = RoundedCornerShape(12.dp),
             )
             Spacer(Modifier.width(8.dp))
-            IconButton(onClick = { exec(input) }, enabled = !running) {
+            IconButton(onClick = { exec(input.text) }, enabled = !running) {
                 Icon(Icons.Default.Send, contentDescription = "Run")
             }
         }

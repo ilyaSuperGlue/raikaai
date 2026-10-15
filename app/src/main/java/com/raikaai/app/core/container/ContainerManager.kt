@@ -317,8 +317,14 @@ class ContainerManager private constructor(
         env["LD_LIBRARY_PATH"] = if (existing.isBlank()) libDir else "$libDir:$existing"
         env["PROOT_LOADER"] = File(nativeLibDir, "libproot_loader.so").absolutePath
         env["PROOT_LOADER_32"] = File(nativeLibDir, "libproot_loader32.so").absolutePath
-        // Keep shm emulation inside app storage instead of Termux paths.
-        env["PROOT_L2S_DIR"] = File(app.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath
+        // proot's compiled-in tmp points at the Termux prefix: redirect all
+        // temp (glue rootfs, f2fs probe, shm) into app storage.
+        val tmpDir = File(app.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath
+        env["PROOT_TMP_DIR"] = tmpDir
+        env["TMPDIR"] = tmpDir
+        env["TEMP"] = tmpDir
+        env["TMP"] = tmpDir
+        env["PROOT_L2S_DIR"] = tmpDir
     }
 
     /**
@@ -447,7 +453,20 @@ class ContainerManager private constructor(
                 }
                 when (typeFlag) {
                     '5' -> target.mkdirs()
-                    '2' -> { /* symlink: skip in Fase 1 (busybox applets resolve via PATH) */ }
+                    '2' -> {
+                        // Symlink (Alpine links every applet to busybox).
+                        // Link target lives at header offset 157, length 100.
+                        val linkBytes = header.copyOfRange(157, 257).takeWhile { it != 0.toByte() }.toByteArray()
+                        val linkTarget = String(linkBytes, Charsets.UTF_8)
+                        if (linkTarget.isBlank()) throw IllegalStateException("Empty symlink target: $name")
+                        target.parentFile?.mkdirs()
+                        if (target.exists() || target.isDirectory) target.deleteRecursively()
+                        try {
+                            android.system.Os.symlink(linkTarget, target.absolutePath)
+                        } catch (t: Throwable) {
+                            throw IllegalStateException("Symlink failed ($name -> $linkTarget): ${t.message}")
+                        }
+                    }
                     else -> {
                         target.parentFile?.mkdirs()
                         FileOutputStream(target).use { out ->
