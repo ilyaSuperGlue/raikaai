@@ -270,8 +270,10 @@ fun ModelsScreen(
                 // ── 2b. Linux Environment (Fase 1: downloadable install) ──
                 item(key = "linux_environment_card") {
                     val containerState by viewModel.containerInstallState.collectAsState()
-                    val installed = settings.alpineInstalled
-                    val outdated = remember(installed) { viewModel.containerManager.isOutdated() }
+                    // Filesystem truth drives the UI: the settings flag can go
+                    // stale (e.g. failed install), the marker cannot lie.
+                    val installed = remember(settings.alpineInstalled, containerState) { viewModel.containerManager.isInstalled() }
+                    val outdated = remember(settings.alpineInstalled, containerState) { viewModel.containerManager.isOutdated() }
                     Card(
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),

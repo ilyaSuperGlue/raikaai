@@ -104,6 +104,7 @@ fun EnvironmentScreen(
     var tab by remember { mutableIntStateOf(0) }
     var filesTick by remember { mutableIntStateOf(0) }
     val outdated = remember(settings.alpineInstalled, installState) { manager.isOutdated() }
+    val fsInstalled = remember(settings.alpineInstalled, installState) { manager.isInstalled() }
     val scope = rememberCoroutineScope()
 
     Surface(modifier = Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
@@ -119,7 +120,7 @@ fun EnvironmentScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Linux Environment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        if (settings.alpineInstalled) "Alpine ${settings.alpineVersion} · /workspace" else "Alpine via PRoot (no root)",
+                        if (fsInstalled) "Alpine ${settings.alpineVersion} · /workspace" else "Alpine via PRoot (no root)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -144,18 +145,18 @@ fun EnvironmentScreen(
                         text = when {
                             servedPort != null -> "Serving :$servedPort"
                             outdated -> "Update available"
-                            settings.alpineInstalled -> "Ready"
+                            fsInstalled -> "Ready"
                             else -> "Not installed"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
-                        color = if (settings.alpineInstalled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = if (fsInstalled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
                     )
                 }
             }
 
-            if (!settings.alpineInstalled || outdated) {
+            if (!fsInstalled || outdated) {
                 NotInstalledCard(
                     installState = installState,
                     onInstall = { manager.install() },
