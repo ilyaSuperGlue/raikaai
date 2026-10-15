@@ -3422,7 +3422,9 @@ class ChatViewModel(
             "Respond concisely; do not narrate your reasoning steps. " +
             "When the user mentions a file, first run `ls /workspace` to locate it — " +
             "user files live ONLY in the phone's /workspace (never /mnt/data, /sdcard, or home). " +
-            "If the file isn't there, tell the user to add it via the Files tab Import button, then continue."
+            "If the file isn't there, tell the user to add it via the Files tab Import button, then continue. " +
+            "Always quote file paths (filenames may contain spaces): " +
+            "unzip -l \"/workspace/my file.zip\", never bare."
     }
 
     /** Records the estimated USD cost of one remote generation (owned by ServerControls). */
