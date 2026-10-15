@@ -29,13 +29,15 @@ import okhttp3.Request
  * Single gateway to the Alpine PRoot userland (Fase 1–4).
  *
  * Layout under app private storage:
- * - filesDir/bin/proot        → downloaded proot binary (chmod +x)
+ * - filesDir/bin/proot        → bundled proot staged from APK assets (chmod +x)
+ * - filesDir/bin (libtalloc, libandroid-shmem) → bundled proot deps
  * - filesDir/alpine           → unpacked minirootfs (+ .installed marker)
  * - filesDir/workspace        → bind-mounted as /workspace (sole read-write dir for AI)
  *
- * No APK bundling: both artifacts are downloaded on first install with
- * SHA-256 verification. No PTY here (Fase 3 terminal is shell-in-a-box
- * over [run]; full PTY is a later milestone).
+ * Only the Alpine rootfs is downloaded (with SHA-256 verification when the
+ * checksum is pinned). proot itself ships inside the APK, so install works
+ * offline up to the rootfs step. No PTY here (Fase 3 terminal is
+ * shell-in-a-box over [run]; full PTY is a later milestone).
  */
 class ContainerManager private constructor(
     private val app: Application,
@@ -92,7 +94,9 @@ class ContainerManager private constructor(
 
     val alpineDir: File get() = File(app.filesDir, "alpine")
     val workspaceDir: File get() = File(app.filesDir, "workspace")
-    val prootBin: File get() = File(app.filesDir, "bin/proot")
+    val binDir: File get() = File(app.filesDir, "bin")
+    val prootBin: File get() = File(binDir, "proot")
+    private fun depLib(name: String): File = File(binDir, name)
 
     private val _installState = MutableStateFlow<InstallState>(InstallState.Idle)
     val installState: StateFlow<InstallState> = _installState.asStateFlow()
@@ -118,30 +122,23 @@ class ContainerManager private constructor(
     // ── Install / wipe ────────────────────────────────────────────────
 
     /**
-     * Downloads proot + rootfs, verifies SHA-256 (when pinned in manifest),
-     * unpacks to [alpineDir], writes resolv.conf + marker, flips settings.
-     * Safe to call twice; concurrent calls are ignored.
+     * Stages bundled proot + downloads the rootfs, verifies SHA-256 (when
+     * pinned in manifest), unpacks to [alpineDir], writes resolv.conf +
+     * marker, flips settings. Safe to call twice; concurrent calls ignored.
      */
     fun install(manifest: ContainerManifest = ContainerManifest()) {
         if (installJob?.isActive == true) return
         installJob = scope.launch {
             try {
                 workspaceDir.mkdirs()
-                File(app.filesDir, "bin").mkdirs()
+                val binDir = File(app.filesDir, "bin").apply { mkdirs() }
                 val abi = android.os.Build.SUPPORTED_ABIS.firstOrNull() ?: "arm64-v8a"
-                val prootUrl = manifest.prootUrlForAbi(abi)
+                val bundled = bundledProotForAbi(abi)
                     ?: throw IllegalStateException("Unsupported ABI: $abi (need arm64-v8a or x86_64)")
-                val prootSha = if (abi == "arm64-v8a") manifest.prootSha256Arm64 else manifest.prootSha256X8664
 
                 _installState.value = InstallState.Downloading("proot", 0f)
-                downloadToFile(prootUrl, prootBin, expectedSha256 = prootSha.ifBlank { null }) { done, total ->
-                    _installState.value = InstallState.Downloading(
-                        "proot",
-                        if (total > 0) done.toFloat() / total else 0f,
-                    )
-                }
-                prootBin.setExecutable(true)
-                if (!prootBin.canExecute()) throw IllegalStateException("proot is not executable after chmod")
+                stageBundledProot(binDir, bundled)
+                _installState.value = InstallState.Downloading("proot", 1f)
 
                 _installState.value = InstallState.Downloading("alpine-minirootfs", 0f)
                 val tmpTar = File(app.cacheDir, "alpine-minirootfs.tar.gz")
@@ -180,12 +177,16 @@ class ContainerManager private constructor(
         _installState.value = InstallState.Idle
     }
 
-    /** Deletes rootfs + proot but keeps workspace/ (user files survive). */
+    /** Deletes rootfs + staged proot but keeps workspace/ (user files survive). */
     suspend fun wipe() {
         stopServe()
         withContext(Dispatchers.IO) {
             alpineDir.deleteRecursively()
             prootBin.delete()
+            depLib("libtalloc.so.2").delete()
+            depLib("libandroid-shmem.so").delete()
+            depLib("loader").delete()
+            depLib("loader32").delete()
         }
         settingsRepo.setAlpineInstalled(false)
         settingsRepo.setAlpineVersion("")
@@ -220,6 +221,7 @@ class ContainerManager private constructor(
                         "/bin/sh", "-c", clean,
                     )
                     pb.redirectErrorStream(false)
+                    withBinOnLdPath(pb)
                     proc = pb.start()
                     val finished = proc.waitFor(timeoutSec, TimeUnit.SECONDS)
                     if (!finished) {
@@ -264,6 +266,7 @@ class ContainerManager private constructor(
                         "-w", "/workspace",
                         "httpd", "-f", "-p", "127.0.0.1:$port", "-h", "/workspace",
                     )
+                    withBinOnLdPath(pb)
                     val proc = pb.start()
                     // Give httpd a moment; if it exits immediately the port is taken.
                     Thread.sleep(600)
@@ -301,6 +304,62 @@ class ContainerManager private constructor(
     fun close() = scope.cancel()
 
     // ── Internals ─────────────────────────────────────────────────────
+
+    /** Prepends the staged-lib dir so the loader finds libtalloc/shmem,
+     * and points proot at its staged loader helpers. */
+    private fun withBinOnLdPath(pb: ProcessBuilder) {
+        val env = pb.environment()
+        val existing = env["LD_LIBRARY_PATH"].orEmpty()
+        env["LD_LIBRARY_PATH"] = if (existing.isBlank()) {
+            binDir.absolutePath
+        } else {
+            "${binDir.absolutePath}:$existing"
+        }
+        env["PROOT_LOADER"] = File(binDir, "loader").absolutePath
+        env["PROOT_LOADER_32"] = File(binDir, "loader32").absolutePath
+        // Keep shm emulation inside app storage instead of Termux paths.
+        env["PROOT_L2S_DIR"] = File(app.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath
+    }
+
+    /**
+     * Copies bundled proot + deps from APK assets to [binDir], verifying
+     * pinned SHA-256 hashes. Instant and offline (no download).
+     */
+    private suspend fun stageBundledProot(binDir: File, bundled: BundledProot) {
+        withContext(Dispatchers.IO) {
+            copyAssetVerified("container/${bundled.assetDir}/proot", prootBin, bundled.prootSha256)
+            copyAssetVerified("container/${bundled.assetDir}/libtalloc.so.2", depLib("libtalloc.so.2"), bundled.tallocSha256)
+            copyAssetVerified("container/${bundled.assetDir}/libandroid-shmem.so", depLib("libandroid-shmem.so"), bundled.shmemSha256)
+            copyAssetVerified("container/${bundled.assetDir}/loader", depLib("loader"), bundled.loaderSha256)
+            copyAssetVerified("container/${bundled.assetDir}/loader32", depLib("loader32"), bundled.loader32Sha256)
+            prootBin.setExecutable(true, false)
+            depLib("loader").setExecutable(true, false)
+            depLib("loader32").setExecutable(true, false)
+            if (!prootBin.canExecute()) throw IllegalStateException("proot is not executable after chmod")
+        }
+    }
+
+    private fun copyAssetVerified(assetPath: String, dest: File, expectedSha256: String) {
+        if (!isValidSha256Hex(expectedSha256)) throw IllegalStateException("Bad pinned SHA-256 for $assetPath")
+        dest.parentFile?.mkdirs()
+        val digest = MessageDigest.getInstance("SHA-256")
+        app.assets.open(assetPath).use { input ->
+            FileOutputStream(dest).use { out ->
+                val buf = ByteArray(64 * 1024)
+                while (true) {
+                    val n = input.read(buf)
+                    if (n < 0) break
+                    digest.update(buf, 0, n)
+                    out.write(buf, 0, n)
+                }
+            }
+        }
+        val got = digest.digest().joinToString("") { "%02x".format(it) }
+        if (!got.equals(expectedSha256, ignoreCase = true)) {
+            dest.delete()
+            throw IllegalStateException("SHA-256 mismatch for bundled $assetPath")
+        }
+    }
 
     private suspend fun downloadToFile(
         url: String,

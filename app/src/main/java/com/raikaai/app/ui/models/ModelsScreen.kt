@@ -293,8 +293,8 @@ fun ModelsScreen(
                                     Text(
                                         text = when {
                                             containerState is com.raikaai.app.core.container.ContainerManager.InstallState.Ready || installed ->
-                                                "Terpasang ${settings.alpineVersion.ifBlank { "Alpine" }}"
-                                            else -> "Belum terpasang"
+                                                "Installed ${settings.alpineVersion.ifBlank { "Alpine" }}"
+                                            else -> "Not installed"
                                         },
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
@@ -304,7 +304,7 @@ fun ModelsScreen(
                                 }
                             }
                             Text(
-                                text = "Alpine via PRoot (tanpa root). Download saat install ±5 MB, tidak termasuk di APK.",
+                                text = "Alpine via PRoot (no root). Rootfs downloads on install (~3 MB); proot ships inside the app.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                             )
@@ -320,31 +320,31 @@ fun ModelsScreen(
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Text(
-                                            "Mengunduh ${st.label}… ${(st.progress * 100).toInt()}%",
+                                            "Downloading ${st.label}… ${(st.progress * 100).toInt()}%",
                                             style = MaterialTheme.typography.labelSmall,
                                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                                         )
                                         TextButton(onClick = { viewModel.containerManager.cancelInstall() }) {
-                                            Text("Batal", style = MaterialTheme.typography.labelSmall)
+                                            Text("Cancel", style = MaterialTheme.typography.labelSmall)
                                         }
                                     }
                                 }
                                 is com.raikaai.app.core.container.ContainerManager.InstallState.Extracting -> {
                                     LinearProgressIndicator(modifier = Modifier.fillMaxWidth().height(6.dp).clip(RoundedCornerShape(3.dp)))
                                     Text(
-                                        "Mengekstrak ${st.label}…",
+                                        "Extracting ${st.label}…",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                                     )
                                 }
                                 is com.raikaai.app.core.container.ContainerManager.InstallState.Error -> {
                                     Text(
-                                        "Gagal: ${st.message}",
+                                        "Failed: ${st.message}",
                                         style = MaterialTheme.typography.labelSmall,
                                         color = MaterialTheme.colorScheme.error,
                                     )
                                     Button(onClick = { viewModel.containerManager.install() }) {
-                                        Text("Coba Lagi")
+                                        Text("Retry")
                                     }
                                 }
                                 else -> {
@@ -355,7 +355,7 @@ fun ModelsScreen(
                                                     viewModel.containerManager.wipe()
                                                 }
                                             }) {
-                                                Text("Hapus")
+                                                Text("Remove")
                                             }
                                         } else {
                                             Button(onClick = { viewModel.containerManager.install() }) {

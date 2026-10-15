@@ -1,14 +1,16 @@
 package com.raikaai.app.core.container
 
 /**
- * Fase 0: manifest + status only. No download, no exec.
+ * Alpine PRoot environment manifest.
  *
- * Two downloadable artifacts (never bundled in APK):
- *  - proot binary per-ABI, hosted on our own GitHub Release
- *  - alpine minirootfs tarball, hosted upstream (dl-cdn.alpinelinux.org)
+ * - proot + its two shared libs are BUNDLED in the APK
+ *   (`assets/container/<abi>/`, see ATTRIBUTION.md) and staged to
+ *   `filesDir/bin/` on install. No download, works offline.
+ * - Only the Alpine minirootfs tarball is downloaded, from upstream
+ *   (dl-cdn.alpinelinux.org).
  */
 
-/** Alpine release pinned for Fase 0. Bump in one place. */
+/** Alpine release pinned for the rootfs download. Bump in one place. */
 const val ALPINE_VERSION = "3.21"
 const val ALPINE_ARCH = "aarch64"
 
@@ -16,37 +18,62 @@ const val ALPINE_ARCH = "aarch64"
 const val ALPINE_ROOTFS_URL =
     "https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/alpine-minirootfs-3.21.0-aarch64.tar.gz"
 
-/** Our own GitHub Release base for the proot binary (per-ABI). */
-const val PROOT_RELEASE_BASE = "https://github.com/kouzen-neo/raikaai/releases/download/container-proot-v1"
+/** Bundled proot build provenance (see assets/container/ATTRIBUTION.md). */
+const val PROOT_VERSION = "5.1.107.96 (Termux NDK build)"
 
 /** Reserved ports. 8080 is taken by the embedded OpenAI server. */
 const val OPENAI_SERVER_PORT = 8080
 const val DEFAULT_PREVIEW_PORT = 8081
 
+/**
+ * Bundled proot payload for one Android ABI.
+ *
+ * @param assetDir subfolder under `assets/container/`
+ * @param prootSha256 SHA-256 of the `proot` asset (verified after staging)
+ */
+data class BundledProot(
+    val assetDir: String,
+    val prootSha256: String,
+    val tallocSha256: String,
+    val shmemSha256: String,
+    val loaderSha256: String,
+    val loader32Sha256: String,
+)
+
 data class ContainerManifest(
     val alpineVersion: String = ALPINE_VERSION,
     val rootfsUrl: String = ALPINE_ROOTFS_URL,
-    val rootfsSha256: String = "", // filled when release checksum is pinned (Fase 1)
-    val prootUrlArm64: String = "$PROOT_RELEASE_BASE/proot-arm64-v8a",
-    val prootSha256Arm64: String = "", // filled when binary is published (Fase 1)
-    val prootUrlX8664: String = "$PROOT_RELEASE_BASE/proot-x86_64",
-    val prootSha256X8664: String = "",
-) {
-    /** Resolves the proot URL for an Android ABI. Null = unsupported in Fase 0. */
-    fun prootUrlForAbi(abi: String): String? = when (abi) {
-        "arm64-v8a" -> prootUrlArm64
-        "x86_64" -> prootUrlX8664
-        else -> null
-    }
+    val rootfsSha256: String = "", // pin when the release checksum is known
+)
+
+/** Resolves the bundled proot payload for an Android ABI. Null = unsupported. */
+fun bundledProotForAbi(abi: String): BundledProot? = when (abi) {
+    "arm64-v8a" -> BundledProot(
+        assetDir = "arm64-v8a",
+        prootSha256 = "1545b85b312505db6eb6908ff8b2ded0a77a3bd689c50ae85aa7c1d8445dd717",
+        tallocSha256 = "742b438c4d09e276985a61d44164c9de207b6d8cc268f3018cb3001961bcb309",
+        shmemSha256 = "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731",
+        loaderSha256 = "cbdef0e652c2b78af25d867e1719fdebbb0915e25aae2dd35b3b5c1835f6b551",
+        loader32Sha256 = "c429996fee730e1a4fe12625b22dab5a5bc2847a4cae274d36fd4a19cd8299a8",
+    )
+    "x86_64" -> BundledProot(
+        assetDir = "x86_64",
+        prootSha256 = "9a1303a51e69b89d78beaf40e4ec829c5c2ca98cbd5672411bdb15eebd871316",
+        tallocSha256 = "7fa6722a4320495b1b85832fc7fd02de0cb367b45f116c1921b2830a6936da90",
+        shmemSha256 = "092926060298acd3778e6239033d7aef1280dcb59aebe021a3719612e6a3465f",
+        loaderSha256 = "a836b0569c84b1661333d16bacf6b396ff08fea816a5c936a82e08ddeeca8341",
+        loader32Sha256 = "fd5b394aa0801619e293b76fe6e830a3beb363aed4fa4b9a5a41f1388a0cb9b9",
+    )
+    else -> null
 }
 
-/** Container install status, derived from Settings + filesystem check (Fase 1). */
+/** Container install status, derived from Settings + filesystem check. */
 enum class ContainerStatus {
     NOT_INSTALLED,
     INSTALLED,
 }
 
-/** SHA-256 hex format check (64 lowercase hex chars). Does not hash anything. */
+/** SHA-256 hex format check (64 hex chars). Does not hash anything. */
 fun isValidSha256Hex(s: String): Boolean {
     if (s.length != 64) return false
     return s.all { it in '0'..'9' || it in 'a'..'f' || it in 'A'..'F' }
@@ -60,7 +87,7 @@ fun isValidServePort(port: Int): Boolean {
 }
 
 /**
- * Fase 2 policy gate (pure function, no Android deps so it is unit-testable now).
+ * Fase 2 policy gate (pure function, no Android deps so it is unit-testable).
  * - DENY: destructive or untrusted-source installs.
  * - ASK: package managers that pull arbitrary code (pip/npm), big packages,
  *   or third-party repos.

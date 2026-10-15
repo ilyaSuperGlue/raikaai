@@ -111,7 +111,7 @@ fun EnvironmentScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Linux Environment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        if (settings.alpineInstalled) "Alpine ${settings.alpineVersion} · /workspace" else "Alpine via PRoot (tanpa root)",
+                        if (settings.alpineInstalled) "Alpine ${settings.alpineVersion} · /workspace" else "Alpine via PRoot (no root)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -121,7 +121,7 @@ fun EnvironmentScreen(
                         text = when {
                             servedPort != null -> "Serving :$servedPort"
                             settings.alpineInstalled -> "Ready"
-                            else -> "Belum terpasang"
+                            else -> "Not installed"
                         },
                         style = MaterialTheme.typography.labelSmall,
                         fontWeight = FontWeight.Bold,
@@ -190,27 +190,27 @@ private fun NotInstalledCard(
         modifier = Modifier.fillMaxWidth().padding(16.dp),
     ) {
         Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Linux Environment belum terpasang", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+            Text("Linux Environment not installed", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text(
-                "Download Alpine minirootfs + proot (±5 MB). Tidak termasuk di APK, bisa dihapus kapan saja.",
+                "Downloads the Alpine minirootfs (~3 MB). proot ships inside the app and can be removed anytime.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
             when (val st = installState) {
                 is ContainerManager.InstallState.Downloading -> {
-                    Text("Mengunduh ${st.label}… ${(st.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
-                    TextButton(onClick = onCancel) { Text("Batal") }
+                    Text("Downloading ${st.label}… ${(st.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall)
+                    TextButton(onClick = onCancel) { Text("Cancel") }
                 }
                 is ContainerManager.InstallState.Extracting -> {
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp))
                         Spacer(Modifier.width(8.dp))
-                        Text("Mengekstrak ${st.label}…", style = MaterialTheme.typography.labelSmall)
+                        Text("Extracting ${st.label}…", style = MaterialTheme.typography.labelSmall)
                     }
                 }
                 is ContainerManager.InstallState.Error -> {
-                    Text("Gagal: ${st.message}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
-                    Button(onClick = onInstall) { Text("Coba Lagi") }
+                    Text("Failed: ${st.message}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.error)
+                    Button(onClick = onInstall) { Text("Retry") }
                 }
                 else -> {
                     Button(onClick = onInstall) {
@@ -269,12 +269,12 @@ private fun TerminalTab(
             if (lines.isEmpty()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "Terminal /workspace — ketik perintah non-interaktif (ls, cat, python3, ffmpeg).",
+                        "Terminal /workspace — run non-interactive commands (ls, cat, python3, ffmpeg).",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Text(
-                        "Contoh: ls -la /workspace",
+                        "Example: ls -la /workspace",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -298,7 +298,7 @@ private fun TerminalTab(
             OutlinedTextField(
                 value = input,
                 onValueChange = { input = it },
-                placeholder = { Text("perintah…") },
+                placeholder = { Text("command…") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp),
@@ -332,7 +332,7 @@ private fun TerminalTab(
                     TextButton(onClick = {
                         context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("http://127.0.0.1:$servedPort")))
                     }) {
-                        Text("Buka :$servedPort", maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        Text("Open :$servedPort", maxLines = 1, overflow = TextOverflow.Ellipsis)
                     }
                     Spacer(Modifier.width(4.dp))
                     IconButton(onClick = { scope.launch(Dispatchers.IO) { manager.stopServe() } }) {
@@ -388,13 +388,13 @@ private fun FilesTab(
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("/workspace (${files.size} file)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text("/workspace (${files.size} files)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
             TextButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) { Text("Import") }
         }
         Spacer(Modifier.height(4.dp))
         if (files.isEmpty()) {
             Text(
-                "Kosong. Import file atau minta AI menyimpan hasil ke /workspace.",
+                "Empty. Import a file or ask the AI to save results to /workspace.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -419,7 +419,7 @@ private fun FilesTab(
                                             }
                                             sb.toString()
                                         }
-                                    }.getOrNull() ?: "(tidak bisa dibaca)"
+                                    }.getOrNull() ?: "(unreadable)"
                                     withContext(Dispatchers.Main) {
                                         previewFile = f
                                         previewText = text
@@ -462,7 +462,7 @@ private fun FilesTab(
                                 viewModel.addAttachments(listOf(uri))
                                 onNavigateToChat()
                             }) {
-                                Icon(Icons.Default.Send, contentDescription = "Kirim ke Chat", modifier = Modifier.size(18.dp))
+                                Icon(Icons.Default.Send, contentDescription = "Send to Chat", modifier = Modifier.size(18.dp))
                             }
                             IconButton(onClick = {
                                 scope.launch(Dispatchers.IO) {
@@ -485,14 +485,14 @@ private fun FilesTab(
             title = { Text(previewFile!!.name, maxLines = 1, overflow = TextOverflow.Ellipsis) },
             text = {
                 Text(
-                    previewText ?: "Memuat…",
+                    previewText ?: "Loading…",
                     style = MaterialTheme.typography.bodySmall,
                     fontFamily = FontFamily.Monospace,
                     modifier = Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
                 )
             },
             confirmButton = {
-                TextButton(onClick = { previewFile = null; previewText = null }) { Text("Tutup") }
+                TextButton(onClick = { previewFile = null; previewText = null }) { Text("Close") }
             },
         )
     }
@@ -537,7 +537,7 @@ private fun openWith(context: Context, f: File) {
             setDataAndType(uri, mime)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Buka ${f.name}"))
+        context.startActivity(Intent.createChooser(intent, "Open ${f.name}"))
     }
 }
 
@@ -549,7 +549,7 @@ private fun shareFile(context: Context, f: File) {
             putExtra(Intent.EXTRA_STREAM, uri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
         }
-        context.startActivity(Intent.createChooser(intent, "Bagikan ${f.name}"))
+        context.startActivity(Intent.createChooser(intent, "Share ${f.name}"))
     }
 }
 

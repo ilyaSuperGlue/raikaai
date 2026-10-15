@@ -16,11 +16,18 @@ class ContainerManifestTest {
     }
 
     @Test
-    fun prootUrlResolvesPerAbi() {
-        val m = ContainerManifest()
-        assertTrue(m.prootUrlForAbi("arm64-v8a")!!.contains("arm64"))
-        assertTrue(m.prootUrlForAbi("x86_64")!!.contains("x86_64"))
-        assertEquals(null, m.prootUrlForAbi("armeabi-v7a"))
+    fun bundledProotResolvesPerAbiWithPinnedHashes() {
+        val arm64 = bundledProotForAbi("arm64-v8a")!!
+        assertEquals("arm64-v8a", arm64.assetDir)
+        assertTrue(isValidSha256Hex(arm64.prootSha256))
+        assertTrue(isValidSha256Hex(arm64.tallocSha256))
+        assertTrue(isValidSha256Hex(arm64.shmemSha256))
+        assertTrue(isValidSha256Hex(arm64.loaderSha256))
+        assertTrue(isValidSha256Hex(arm64.loader32Sha256))
+        val x86 = bundledProotForAbi("x86_64")!!
+        assertEquals("x86_64", x86.assetDir)
+        assertTrue(isValidSha256Hex(x86.prootSha256))
+        assertEquals(null, bundledProotForAbi("armeabi-v7a"))
     }
 
     @Test

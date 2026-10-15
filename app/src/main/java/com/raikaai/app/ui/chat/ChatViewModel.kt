@@ -1907,38 +1907,38 @@ class ChatViewModel(
                 trimmed.startsWith("/run", ignoreCase = true) -> {
                     val cmd = Regex("^/run\\s+(.+)", RegexOption.IGNORE_CASE)
                         .find(trimmed)?.groupValues?.get(1)?.trim().orEmpty()
-                    if (cmd.isBlank()) "Usage: /run <shell command>  (contoh: /run ls /workspace)" else {
+                    if (cmd.isBlank()) "Usage: /run <shell command>  (example: /run ls /workspace)" else {
                         val policy = com.raikaai.app.core.container.installPolicyFor(cmd)
                         if (policy == com.raikaai.app.core.container.InstallPolicy.DENY) {
-                            "⛔ Command diblokir policy (destruktif / untrusted source)."
+                            "⛔ Command blocked by policy (destructive / untrusted source)."
                         } else {
                             val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK) {
                                 requestContainerApproval(cmd)
                             } else true
-                            if (!approved) "Dibatalkan." else containerManager.run(cmd).render()
+                            if (!approved) "Cancelled." else containerManager.run(cmd).render()
                         }
                     }
                 }
                 trimmed.startsWith("/stop-serve", ignoreCase = true) -> {
                     containerManager.stopServe()
-                    "Preview server dihentikan."
+                    "Preview server stopped."
                 }
                 trimmed.startsWith("/serve", ignoreCase = true) -> {
                     val arg = trimmed.drop("/serve".length).trim().toIntOrNull()
                     val url = containerManager.serve(arg ?: com.raikaai.app.core.container.DEFAULT_PREVIEW_PORT)
                     if (url.startsWith("ERROR:")) "❌ ${url.removePrefix("ERROR:")}"
-                    else "🌐 Serving /workspace di:\n$url\nBuka di browser HP. Hentikan dengan /stop-serve."
+                    else "🌐 Serving /workspace at:\n$url\nOpen it in the phone browser. Stop with /stop-serve."
                 }
                 else -> {
                     val sub = trimmed.drop("/env".length).trim().lowercase()
                     when (sub) {
                         "install" -> {
                             containerManager.install()
-                            "Mengunduh Alpine… pantau di Models Hub → Linux Environment."
+                            "Downloading Alpine… watch progress in Models Hub → Linux Environment."
                         }
                         "wipe", "uninstall", "hapus" -> {
                             containerManager.wipe()
-                            "Linux Environment dihapus (workspace dipertahankan)."
+                            "Linux Environment removed (workspace kept)."
                         }
                         else -> "Usage: /env install | /env wipe"
                     }
