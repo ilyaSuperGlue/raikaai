@@ -39,7 +39,10 @@ class BenchmarkRunner(
     private val _latestBenchmark = mutableStateOf<BenchmarkResult?>(null)
     val latestBenchmark: State<BenchmarkResult?> = _latestBenchmark
 
-    private val _remoteModels = mutableStateOf<List<RemoteModelItem>>(emptyList())
+    private val _remoteModels =
+        mutableStateOf<List<RemoteModelItem>>(
+            com.raikaai.app.data.parseCachedRemoteModels(settings.value.cachedRemoteModelsJson)
+        )
     val remoteModels: State<List<RemoteModelItem>> = _remoteModels
 
     private val _isFetchingRemoteModels = mutableStateOf(false)
@@ -47,6 +50,16 @@ class BenchmarkRunner(
 
     private val _isDetectingContextWindow = mutableStateOf(false)
     val isDetectingContextWindow: State<Boolean> = _isDetectingContextWindow
+
+    init {
+        scope.launch {
+            // Auto-refresh in background if remote URL is configured
+            val s = settings.value
+            if (s.remoteBaseUrl.isNotBlank()) {
+                fetchRemoteModels(s.remoteBaseUrl, s.remoteApiKey, silent = true)
+            }
+        }
+    }
 
     /**
      * Best-effort detection of the selected remote model's context window
@@ -90,17 +103,21 @@ class BenchmarkRunner(
         }
     }
 
-    fun fetchRemoteModels(baseUrl: String, apiKey: String = "") {
+    fun fetchRemoteModels(baseUrl: String, apiKey: String = "", silent: Boolean = false) {
+        if (baseUrl.isBlank()) return
         _isFetchingRemoteModels.value = true
         scope.launch {
             val res = RemoteAiClient.fetchModels(baseUrl, apiKey)
             res.onSuccess {
                 _remoteModels.value = it
+                settingsRepo.setCachedRemoteModelsJson(com.raikaai.app.data.cachedRemoteModelsToJson(it))
                 if (it.isNotEmpty() && settings.value.remoteModelId.isBlank()) {
                     setRemoteModelId(it.first().id)
                 }
             }.onFailure {
-                onError("Failed to connect to remote server: ${it.message}")
+                if (!silent) {
+                    onError("Failed to connect to remote server: ${it.message}")
+                }
             }
             // Best-effort: cache per-model pricing for cost estimates (OpenRouter only).
             runCatching {

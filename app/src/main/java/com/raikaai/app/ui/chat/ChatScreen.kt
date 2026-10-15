@@ -564,30 +564,22 @@ fun ChatScreen(
                                     ),
                                 ) {
                                     Row(
-                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp),
                                         verticalAlignment = Alignment.CenterVertically,
                                     ) {
                                         Icon(
                                             cmd.icon,
                                             contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            modifier = Modifier.size(14.dp),
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(15.dp),
                                         )
                                         Spacer(Modifier.width(6.dp))
-                                        Column {
-                                            Text(
-                                                cmd.command,
-                                                style = MaterialTheme.typography.labelMedium,
-                                                fontWeight = FontWeight.Bold,
-                                                color = MaterialTheme.colorScheme.primary,
-                                            )
-                                            Text(
-                                                cmd.description,
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                                fontSize = 11.sp,
-                                            )
-                                        }
+                                        Text(
+                                            cmd.command,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                        )
                                     }
                                 }
                             }
@@ -995,26 +987,6 @@ fun ChatScreen(
                                             onClick = {
                                                 overlays.showAttachmentMenu = false
                                                 filePickerLauncher.launch(arrayOf("*/*"))
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.chat_attach_summarize_link), style = MaterialTheme.typography.bodySmall) },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.Link, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                            },
-                                            onClick = {
-                                                overlays.showAttachmentMenu = false
-                                                overlays.showUrlDialog = true
-                                            },
-                                        )
-                                        DropdownMenuItem(
-                                            text = { Text(stringResource(R.string.chat_attach_generate_image), style = MaterialTheme.typography.bodySmall) },
-                                            leadingIcon = {
-                                                Icon(Icons.Default.AutoAwesome, contentDescription = null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(18.dp))
-                                            },
-                                            onClick = {
-                                                overlays.showAttachmentMenu = false
-                                                overlays.showImageGenDialog = true
                                             },
                                         )
                                         DropdownMenuItem(

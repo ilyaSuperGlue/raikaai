@@ -44,8 +44,8 @@ data class PreparedAttachment(
  */
 object AttachmentProcessor {
     const val MAX_IMAGE_DIM = 1024
-    const val MAX_TEXT_CHARS_PER_FILE = 40_000
-    const val MAX_TOTAL_TEXT_CHARS = 100_000
+    const val MAX_TEXT_CHARS_PER_FILE = 1_000_000
+    const val MAX_TOTAL_TEXT_CHARS = 2_000_000
     const val MAX_PDF_PAGES = 5
     const val PDF_RENDER_WIDTH = 1024
 
@@ -225,7 +225,7 @@ object AttachmentProcessor {
     fun extractPdfText(file: File, maxChars: Int): String? {
         if (!file.exists() || file.length() == 0L) return null
         return try {
-            val maxScanBytes = minOf(file.length(), 8 * 1024 * 1024L).toInt()
+            val maxScanBytes = minOf(file.length(), 32 * 1024 * 1024L).toInt()
             val bytes = ByteArray(maxScanBytes)
             val readCount = file.inputStream().use { it.read(bytes) }
             if (readCount <= 0) return null

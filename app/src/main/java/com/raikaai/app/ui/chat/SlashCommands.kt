@@ -4,6 +4,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.FormatListBulleted
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Code
+import androidx.compose.material.icons.filled.Compress
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.Psychology
@@ -26,6 +27,13 @@ data class SlashCommand(
  */
 val DEFAULT_SLASH_COMMANDS =
     listOf(
+        SlashCommand(
+            command = "/compact",
+            title = "Compact Context",
+            description = "Compact earlier dialogue into structured memory",
+            promptTemplate = "/compact ",
+            icon = Icons.Default.Compress,
+        ),
         SlashCommand(
             command = "/summarize",
             title = "Summarize",

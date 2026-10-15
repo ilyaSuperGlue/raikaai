@@ -175,6 +175,7 @@ fun RaikaAIApp(
                         listOf(
                             DrawerMenuItem(NavRoute.CHARACTERS, "Characters", Icons.Outlined.Psychology),
                             DrawerMenuItem(NavRoute.MODELS, "Models", Icons.Outlined.Memory),
+                            DrawerMenuItem(NavRoute.SAMPLER, "Generation Parameters", Icons.Outlined.Tune),
                             DrawerMenuItem(NavRoute.HISTORY, "History", Icons.Outlined.History),
                             DrawerMenuItem(NavRoute.SETTINGS, "Settings", Icons.Outlined.Settings),
                         )
@@ -183,7 +184,6 @@ fun RaikaAIApp(
                             DrawerMenuItem(NavRoute.SERVER, "Server", Icons.Outlined.Dns),
                             DrawerMenuItem(NavRoute.SKILLS, "Skills", Icons.Outlined.AutoAwesome),
                             DrawerMenuItem(NavRoute.MCP, "MCP Servers", Icons.Outlined.Build),
-                            DrawerMenuItem(NavRoute.SAMPLER, "Generation Parameters", Icons.Outlined.Tune),
                             DrawerMenuItem(NavRoute.LOGS, "Telemetry Logs", Icons.Outlined.Terminal),
                             DrawerMenuItem(NavRoute.ABOUT, "About", Icons.Outlined.Info),
                         )

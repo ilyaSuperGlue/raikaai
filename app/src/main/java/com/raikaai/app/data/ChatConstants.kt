@@ -9,6 +9,7 @@ object ChatConstants {
     const val ROLE_USER = "user"
     const val ROLE_ASSISTANT = "assistant"
     const val ROLE_SYSTEM = "system"
+    const val ROLE_COMPACTION = "compaction"
 
     // ── Model Sources ────────────────────────────────────────────────
     const val SOURCE_LOCAL = "local"

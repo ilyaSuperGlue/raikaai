@@ -34,11 +34,11 @@
     <string name="chat_hint_audio">Ask about this audio clip…</string>
     <string name="chat_hint_message">Message %1$s…</string>
     <string name="chat_add_attachment">Add attachment or tool</string>
-    <string name="chat_attach_images">Attach Images (Vision)</string>
-    <string name="chat_attach_file">Attach File (PDF/TXT/MD)</string>
+    <string name="chat_attach_images">Attach Images</string>
+    <string name="chat_attach_file">Attach File</string>
     <string name="chat_attach_summarize_link">Summarize Link</string>
     <string name="chat_attach_generate_image">Generate Image</string>
-    <string name="chat_attach_knowledge">Knowledge Base (RAG Docs)</string>
+    <string name="chat_attach_knowledge">Knowledge Base</string>
     <string name="chat_pinned_model">Pinned model</string>
     <string name="chat_select_model">Select Model</string>
     <string name="chat_docs_count">Docs (%1$d)</string>
@@ -111,4 +111,6 @@
     <string name="chat_exported_files">Exported %1$d file(s) to Download/RaikaAI/%2$s</string>
     <string name="chat_export_failed">Export failed</string>
     <string name="chat_close_preview">Close preview</string>
+    <string name="chat_attachment_loading_or_binary">Loading preview or binary document…</string>
+    <string name="chat_attachment_preview">Attachment Preview</string>
 </resources>

@@ -24,6 +24,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -71,6 +72,8 @@ data class Settings(
     val remoteModelPricingJson: String = "{}",
     /** Cumulative estimated remote API spend, in USD micro-units (1e-6). */
     val remoteSpendMicros: Long = 0L,
+    /** JSON array of cached [com.raikaai.app.core.remote.RemoteModelItem]. */
+    val cachedRemoteModelsJson: String = "[]",
     // Compare mode: run each prompt on the active model (A) and a challenger (B)
     /** Master switch for compare mode. */
     val compareMode: Boolean = false,
@@ -171,6 +174,41 @@ fun remoteModelPricingToJson(map: Map<String, com.raikaai.app.core.remote.ModelP
     }.toString()
 }
 
+/** Parses cached remote models JSON array. */
+fun parseCachedRemoteModels(json: String): List<com.raikaai.app.core.remote.RemoteModelItem> {
+    if (json.isBlank() || json == "[]") return emptyList()
+    return runCatching {
+        val arr = JSONArray(json)
+        val list = mutableListOf<com.raikaai.app.core.remote.RemoteModelItem>()
+        for (i in 0 until arr.length()) {
+            val obj = arr.getJSONObject(i)
+            val id = obj.optString("id", "")
+            val name = obj.optString("name", id)
+            val provider = obj.optString("provider", "Remote")
+            val desc = obj.optString("description", "")
+            if (id.isNotBlank()) {
+                list.add(com.raikaai.app.core.remote.RemoteModelItem(id = id, name = name, provider = provider, description = desc))
+            }
+        }
+        list
+    }.getOrDefault(emptyList())
+}
+
+/** Serializes remote model items to JSON array. */
+fun cachedRemoteModelsToJson(list: List<com.raikaai.app.core.remote.RemoteModelItem>): String {
+    val arr = JSONArray()
+    list.forEach { item ->
+        val obj = JSONObject().apply {
+            put("id", item.id)
+            put("name", item.name)
+            put("provider", item.provider)
+            put("description", item.description)
+        }
+        arr.put(obj)
+    }
+    return arr.toString()
+}
+
 /**
  * Effective context window for a remote model: per-model override wins,
  * otherwise the global remote default. Never confused with the on-device
@@ -207,6 +245,7 @@ class SettingsRepository(
         val REMOTE_MODEL_CONTEXT_WINDOWS = stringPreferencesKey("remote_model_context_windows_json")
         val REMOTE_MODEL_PRICING = stringPreferencesKey("remote_model_pricing_json")
         val REMOTE_SPEND_MICROS = longPreferencesKey("remote_spend_micros")
+        val CACHED_REMOTE_MODELS = stringPreferencesKey("cached_remote_models_json")
         val COMPARE_MODE = booleanPreferencesKey("compare_mode")
         val COMPARE_SOURCE = stringPreferencesKey("compare_source")
         val COMPARE_MODEL_ID = stringPreferencesKey("compare_model_id")
@@ -462,6 +501,7 @@ class SettingsRepository(
                     remoteModelContextWindowsJson = prefs[Keys.REMOTE_MODEL_CONTEXT_WINDOWS] ?: "{}",
                     remoteModelPricingJson = prefs[Keys.REMOTE_MODEL_PRICING] ?: "{}",
                     remoteSpendMicros = prefs[Keys.REMOTE_SPEND_MICROS] ?: 0L,
+                    cachedRemoteModelsJson = prefs[Keys.CACHED_REMOTE_MODELS] ?: "[]",
                     compareMode = prefs[Keys.COMPARE_MODE] ?: false,
                     compareSource = prefs[Keys.COMPARE_SOURCE] ?: "",
                     compareModelId = prefs[Keys.COMPARE_MODEL_ID] ?: "",
@@ -524,7 +564,10 @@ class SettingsRepository(
 
     suspend fun setMaxTokens(value: Int) = edit { it[Keys.MAX_TOKENS] = value }
 
-    suspend fun setContextWindowTokens(value: Int) = edit { it[Keys.CONTEXT_WINDOW_TOKENS] = value }
+    suspend fun setContextWindowTokens(value: Int) = edit {
+        it[Keys.CONTEXT_WINDOW_TOKENS] = value
+        it[Keys.REMOTE_CONTEXT_WINDOW_TOKENS] = value
+    }
 
     suspend fun setPromptTemplateFormat(value: String) = edit { it[Keys.PROMPT_TEMPLATE_FORMAT] = value }
 
@@ -560,6 +603,10 @@ class SettingsRepository(
     /** Replaces the cached per-model pricing map (model id → per-token USD). */
     suspend fun setRemoteModelPricingJson(json: String) =
         edit { it[Keys.REMOTE_MODEL_PRICING] = json.take(200_000) }
+
+    /** Replaces the cached remote models list. */
+    suspend fun setCachedRemoteModelsJson(json: String) =
+        edit { it[Keys.CACHED_REMOTE_MODELS] = json.take(500_000) }
 
     /** Adds to the cumulative estimated remote spend (USD micro-units). */
     suspend fun addRemoteSpendMicros(deltaMicros: Long) {

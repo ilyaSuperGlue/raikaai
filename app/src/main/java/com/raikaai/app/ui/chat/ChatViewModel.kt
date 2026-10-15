@@ -478,7 +478,7 @@ class ChatViewModel(
                 return@launch
             }
             sendMessage(
-                "Ringkas halaman web berikut.\nJudul: ${page.title}\nURL: ${page.url}\n\n" +
+                "Summarize the following web page.\nTitle: ${page.title}\nURL: ${page.url}\n\n" +
                     "Provide a summary in English with key bullet points:\n\n${page.text}",
             )
         }
@@ -718,8 +718,10 @@ class ChatViewModel(
      */
     private fun promptWindowMessages(): List<ChatMessageEntry> {
         val summary = conversation?.summary
-        if (summary.isNullOrBlank()) return messages.toList()
-        return unfoldedMessages()
+        val base = if (summary.isNullOrBlank()) messages.toList() else unfoldedMessages()
+        return base.filter {
+            it.role != ChatConstants.ROLE_COMPACTION && it.role != ChatConstants.ROLE_SYSTEM
+        }
     }
 
     /**
@@ -755,7 +757,9 @@ class ChatViewModel(
     /** Tokens the model effectively sees right now (summary + unfolded tail). */
     fun effectiveContextTokens(): Int {
         val summary = conversation?.summary
-        val unfolded = unfoldedMessages()
+        val unfolded = unfoldedMessages().filter {
+            it.role != ChatConstants.ROLE_COMPACTION && it.role != ChatConstants.ROLE_SYSTEM
+        }
         return unfolded.sumOf { estimateTokens(it.content) } +
             (summary?.let { estimateTokens(it) } ?: 0)
     }
@@ -818,9 +822,8 @@ class ChatViewModel(
             if (unfolded.size > COMPRESS_KEEP_RECENT) unfolded.dropLast(COMPRESS_KEEP_RECENT) else emptyList()
         if (foldable.isEmpty()) return summary
 
-        // Remote mode without a local model: cannot run the summarizer, so
-        // leave the summary untouched — the caller trims the request instead.
-        if (modelPath == null) return summary
+        // Remote mode without a local model or remote provider configured: cannot run the summarizer
+        if (modelPath == null && s.modelSource != ChatConstants.SOURCE_REMOTE) return summary
 
         isCompressing.value = true
         try {
@@ -851,19 +854,9 @@ class ChatViewModel(
                     appendLine()
                     appendLine("Write ONE updated compact summary paragraph (max 180 words) preserving key facts, names, decisions, code/file topics, and open questions. Output ONLY the summary text.")
                 }
-            val params =
-                LiteRtEngineManager.engineParamsFromSettings(
-                    s = s,
-                    modelPath = modelPath,
-                    temperature = SamplingDefaults.LOCAL_TEMPERATURE,
-                    topK = SamplingDefaults.TOP_K,
-                    topP = SamplingDefaults.TOP_P,
-                    maxTokens = SamplingDefaults.SUMMARY_MAX_TOKENS,
-                    contextWindow = maxOf(1024, windowTokens),
-                )
             val generated =
                 try {
-                    stripThinking(engine.generateResponse(prompt, params))
+                    stripThinking(generateCompactedSummary(s, prompt, windowTokens))
                 } catch (t: Throwable) {
                     KLog.w("ChatVM", "Compression failed: ${t.message}")
                     ""
@@ -1746,7 +1739,7 @@ class ChatViewModel(
         val spec = ReminderParser.parse(trimmed) ?: return false
         scheduleReminder(app, spec)
         val whenStr =
-            java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale("id"))
+            java.text.SimpleDateFormat("d MMM yyyy, HH:mm", java.util.Locale.US)
                 .format(java.util.Date(spec.triggerAtMillis))
         appendLocalExchange(
             trimmed,
@@ -1835,16 +1828,227 @@ class ChatViewModel(
             messages.clear()
             refreshPinState()
         }
-        val userEntry = ChatMessageEntry(role = ChatConstants.ROLE_USER, content = userText)
+        val userEntry =
+            ChatMessageEntry(
+                role = ChatConstants.ROLE_USER,
+                content = userText,
+                parentId = messages.lastOrNull()?.id,
+            )
         messages.add(userEntry)
-        messages.add(
+        registerActiveChild(userEntry)
+        val assistantEntry =
             ChatMessageEntry(
                 role = ChatConstants.ROLE_ASSISTANT,
                 content = assistantText,
                 parentId = userEntry.id,
-            ),
-        )
+            )
+        messages.add(assistantEntry)
+        registerActiveChild(assistantEntry)
         persist()
+    }
+
+    private suspend fun generateCompactedSummary(
+        s: Settings,
+        prompt: String,
+        windowTokens: Int,
+    ): String {
+        if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
+            val cleanUrl = s.remoteBaseUrl.trim()
+            if (cleanUrl.isBlank() || s.remoteModelId.isBlank()) {
+                throw IllegalStateException("Remote Provider URL or model ID is not configured.")
+            }
+            val remoteMessages =
+                listOf(
+                    RemoteChatMessage(
+                        role = "system",
+                        text = "You maintain a rolling memory summary of an ongoing conversation. Output ONLY the summary text concisely.",
+                    ),
+                    RemoteChatMessage(role = "user", text = prompt),
+                )
+            val sb = StringBuilder()
+            RemoteAiClient.streamChat(
+                baseUrl = cleanUrl,
+                apiKey = s.remoteApiKey,
+                model = s.remoteModelId,
+                messages = remoteMessages,
+                temperature = SamplingDefaults.LOCAL_TEMPERATURE,
+                topP = SamplingDefaults.TOP_P,
+                maxTokens = SamplingDefaults.SUMMARY_MAX_TOKENS,
+            ).collect { delta ->
+                sb.append(delta)
+            }
+            return sb.toString()
+        } else {
+            val modelPath =
+                ChatServerService.resolveModelPath(app, s)
+                    ?: throw IllegalStateException("No on-device model selected or found.")
+            val params =
+                LiteRtEngineManager.engineParamsFromSettings(
+                    s = s,
+                    modelPath = modelPath,
+                    temperature = SamplingDefaults.LOCAL_TEMPERATURE,
+                    topK = SamplingDefaults.TOP_K,
+                    topP = SamplingDefaults.TOP_P,
+                    maxTokens = SamplingDefaults.SUMMARY_MAX_TOKENS,
+                    contextWindow = maxOf(1024, windowTokens),
+                )
+            return engine.generateResponse(prompt, params)
+        }
+    }
+
+    /**
+     * Handles manual compaction slash command "/compact [optional focus instructions]".
+     * Forces folding of older conversation turns into the rolling memory summary immediately.
+     */
+    private fun tryHandleCompactCommand(body: String): Boolean {
+        val trimmed = body.trim()
+        val regex = Regex("""^/compact(?:\s+(.*))?$""", RegexOption.IGNORE_CASE)
+        val match = regex.find(trimmed) ?: return false
+        val customFocus = match.groupValues.getOrNull(1)?.trim().orEmpty()
+        executeManualCompaction(trimmed, customFocus)
+        return true
+    }
+
+    private fun executeManualCompaction(commandText: String, customFocus: String) {
+        val conv = conversation
+        val unfolded = unfoldedMessages().filter {
+            it.role != ChatConstants.ROLE_COMPACTION && it.role != ChatConstants.ROLE_SYSTEM
+        }
+        if (conv == null || unfolded.size < 2) {
+            appendLocalExchange(
+                commandText,
+                "⚠️ Conversation is too short to compact (at least 2 messages required).",
+            )
+            return
+        }
+
+        val s = effectiveSettings()
+        val beforeTokens = effectiveContextTokens()
+        val foldable = unfolded
+
+        isGenerating.value = true
+        isCompressing.value = true
+        errorMessage.value = null
+
+        genJob =
+            viewModelScope.launch {
+                try {
+                    val clean =
+                        foldable.mapNotNull { m ->
+                            stripThinking(m.content).takeIf { it.isNotBlank() }?.let { "[${m.role}] $it" }
+                        }
+                    if (clean.isEmpty()) {
+                        conv.summarizedUntilId = foldable.last().id
+                        persist()
+                        updateContextTokens()
+                        return@launch
+                    }
+
+                    if (s.useChatMemory) {
+                        runCatching {
+                            rag.addChatMemory(
+                                conv.id,
+                                conv.title.ifBlank { "chat" },
+                                clean.joinToString("\n\n").take(200_000),
+                            )
+                        }
+                    }
+
+                    val prev = conv.summary
+                    val prompt =
+                        buildString {
+                            appendLine("You are an expert conversation summarizer compressing chat memory into an OpenCode-style briefing.")
+                            appendLine("Review the ongoing conversation and output a structured compaction markdown summary with EXACTLY these sections:")
+                            appendLine("## Objective")
+                            appendLine("- Primary goals, core questions, or user intent.")
+                            appendLine()
+                            appendLine("## Requirements")
+                            appendLine("- Explicit constraints, requested formats, libraries, or specifications.")
+                            appendLine()
+                            appendLine("## Decisions")
+                            appendLine("- Key choices made, code changes, architectures discussed, or solutions agreed upon.")
+                            appendLine()
+                            appendLine("## Work State")
+                            appendLine("### Completed")
+                            appendLine("- Tasks, answers, or points implemented so far.")
+                            appendLine("### In Progress / Next")
+                            appendLine("- Pending items, open questions, or immediate next steps.")
+                            appendLine()
+                            if (!prev.isNullOrBlank()) {
+                                appendLine("Prior rolling summary to incorporate:")
+                                appendLine(prev)
+                                appendLine()
+                            }
+                            appendLine("Dialogue to compact into the summary:")
+                            appendLine(clean.joinToString("\n"))
+                            appendLine()
+                            if (customFocus.isNotBlank()) {
+                                appendLine("Special user focus:")
+                                appendLine(customFocus)
+                                appendLine()
+                            }
+                            appendLine("Rules:")
+                            appendLine("- Write in English.")
+                            appendLine("- Output ONLY the markdown text starting directly with \"## Objective\". No conversational chatter.")
+                        }
+
+                    val windowTokens =
+                        if (s.modelSource == ChatConstants.SOURCE_REMOTE) {
+                            s.effectiveRemoteContextWindow(s.remoteModelId)
+                        } else {
+                            s.contextWindowTokens
+                        }
+
+                    val generatedRaw = generateCompactedSummary(s, prompt, windowTokens)
+                    val generated = stripThinking(generatedRaw).trim()
+                    val merged = generated.ifBlank { prev.orEmpty() }
+
+                    conv.summary = merged.ifBlank { null }
+                    val outTokens = estimateTokens(merged)
+                    val statsLabel = "Compaction · ${formatCompactTokens(beforeTokens)} in · ${formatCompactTokens(outTokens)} out"
+
+                    val compactionEntry =
+                        ChatMessageEntry(
+                            role = ChatConstants.ROLE_COMPACTION,
+                            content = merged,
+                            stats = statsLabel,
+                            parentId = messages.lastOrNull()?.id,
+                        )
+                    messages.add(compactionEntry)
+                    registerActiveChild(compactionEntry)
+
+                    conv.summarizedUntilId = compactionEntry.id
+                    compressionTick.value++
+                    persist()
+                    updateContextTokens()
+                } catch (t: Throwable) {
+                    if (t !is kotlinx.coroutines.CancellationException) {
+                        KLog.w("ChatVM", "Manual compact failed: ${t.message}")
+                        errorMessage.value = "Compaction failed: ${t.message}"
+                        appendLocalExchange(
+                            commandText,
+                            "❌ Compaction failed: ${t.message ?: "Model inference error"}",
+                        )
+                    }
+                } finally {
+                    isCompressing.value = false
+                    isGenerating.value = false
+                }
+            }
+    }
+
+    private fun formatCompactTokens(tokens: Int): String {
+        return when {
+            tokens >= 1_000_000 -> {
+                val m = tokens / 1_000_000.0
+                if (m == m.toLong().toDouble()) "${m.toLong()}M" else String.format(java.util.Locale.US, "%.1fM", m)
+            }
+            tokens >= 1000 -> {
+                val k = tokens / 1000.0
+                String.format(java.util.Locale.US, "%.1fK", k)
+            }
+            else -> "$tokens"
+        }
     }
 
     fun sendMessage(userText: String) {
@@ -1856,6 +2060,7 @@ class ChatViewModel(
         // without a model call.
         if (pending.isEmpty() && currentAudioFile == null && tryHandleReminderCommand(body)) return
         if (pending.isEmpty() && currentAudioFile == null && tryHandleImageCommand(body)) return
+        if (pending.isEmpty() && currentAudioFile == null && tryHandleCompactCommand(body)) return
         // Set flag immediately to prevent double-send race condition
         isGenerating.value = true
         errorMessage.value = null
@@ -2263,9 +2468,12 @@ class ChatViewModel(
         if (oldMsg.role != ChatConstants.ROLE_USER) return
         val s = effectiveSettings()
 
+        val payload = AttachmentPipeline.extractAttachedFilesPayload(oldMsg.content)
+        val fullContent = if (payload.isNotBlank()) newText.trim() + payload else newText.trim()
+
         val forked =
             oldMsg.copy(
-                content = newText.trim(),
+                content = fullContent,
                 timestamp = System.currentTimeMillis(),
                 stats = null,
                 variants = emptyList(),
@@ -2570,7 +2778,12 @@ class ChatViewModel(
         }
     }
 
-    fun setContextWindowTokens(tokens: Int) = launchSetting { settingsRepo.setContextWindowTokens(tokens) }
+    fun setContextWindowTokens(tokens: Int) = launchSetting {
+        settingsRepo.setContextWindowTokens(tokens)
+        if (settings.value.remoteModelId.isNotBlank()) {
+            settingsRepo.clearRemoteModelContextWindow(settings.value.remoteModelId)
+        }
+    }
 
     fun setPromptTemplateFormat(format: String) = launchSetting { settingsRepo.setPromptTemplateFormat(format) }
 

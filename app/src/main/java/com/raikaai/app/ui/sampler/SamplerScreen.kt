@@ -160,23 +160,26 @@ fun SamplerScreen(
                             modifier = Modifier.fillMaxWidth(),
                         ) {
                             Column(modifier = Modifier.padding(16.dp)) {
+                                val currentTokens = settings.contextWindowTokens
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
-                                    Column {
+                                    Column(modifier = Modifier.weight(1f)) {
                                         Text(
-                                            "Context Allocation (${settings.contextWindowTokens} Tokens)",
+                                            "Context Allocation",
                                             style = MaterialTheme.typography.titleMedium,
                                             fontWeight = FontWeight.Bold,
                                         )
                                         val ramHint =
                                             when {
-                                                settings.contextWindowTokens <= 2048 -> "Fast inference · ~150-300MB KV RAM"
-                                                settings.contextWindowTokens <= 8192 -> "Standard & Long · ~600MB-1.2GB KV RAM"
-                                                settings.contextWindowTokens <= 16384 -> "High context · ~2.4GB KV RAM"
-                                                else -> "Ultra 32K Context · ~4.8GB KV RAM"
+                                                currentTokens <= 2048 -> "Fast inference · ~150-300MB KV RAM"
+                                                currentTokens <= 8192 -> "Standard & Long · ~600MB-1.2GB KV RAM"
+                                                currentTokens <= 16384 -> "High context · ~2.4GB KV RAM"
+                                                currentTokens <= 32768 -> "Ultra 32K Context · ~4.8GB KV RAM (Local limit)"
+                                                currentTokens <= 131072 -> "Extended Cloud / Remote Window (128K)"
+                                                else -> "Ultra Large Context Window (${formatContextTokens(currentTokens)})"
                                             }
                                         Text(
                                             ramHint,
@@ -185,9 +188,45 @@ fun SamplerScreen(
                                             fontWeight = FontWeight.SemiBold,
                                         )
                                     }
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                                    ) {
+                                        Text(
+                                            text = "${formatContextTokens(currentTokens)} ($currentTokens)",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        )
+                                    }
                                 }
 
-                                Spacer(Modifier.height(12.dp))
+                                Spacer(Modifier.height(8.dp))
+
+                                // Continuous slider up to 1M (1,000,000) tokens
+                                Slider(
+                                    value = tokensToSliderPos(currentTokens),
+                                    onValueChange = { pos ->
+                                        val newTokens = sliderPosToTokens(pos)
+                                        viewModel.setContextWindowTokens(newTokens)
+                                    },
+                                    valueRange = 0f..1f,
+                                    modifier = Modifier.fillMaxWidth(),
+                                )
+
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                ) {
+                                    Text("1K", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("8K", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("32K", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("128K", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Text("1M", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+
+                                Spacer(Modifier.height(14.dp))
 
                                 // Row 1: 1K, 2K, 4K
                                 Row(
@@ -199,7 +238,7 @@ fun SamplerScreen(
                                         Pair(2048, "2K Standard"),
                                         Pair(4096, "4K Extended"),
                                     ).forEach { (tokens, label) ->
-                                        val isSelected = settings.contextWindowTokens == tokens
+                                        val isSelected = currentTokens == tokens
                                         Surface(
                                             onClick = { viewModel.setContextWindowTokens(tokens) },
                                             shape = RoundedCornerShape(12.dp),
@@ -230,7 +269,7 @@ fun SamplerScreen(
                                         Pair(16384, "16K Deep"),
                                         Pair(32768, "32K Max"),
                                     ).forEach { (tokens, label) ->
-                                        val isSelected = settings.contextWindowTokens == tokens
+                                        val isSelected = currentTokens == tokens
                                         Surface(
                                             onClick = { viewModel.setContextWindowTokens(tokens) },
                                             shape = RoundedCornerShape(12.dp),
@@ -601,4 +640,37 @@ private fun SamplerSliderField(
             steps = steps,
         )
     }
+}
+
+private fun formatContextTokens(tokens: Int): String {
+    return when {
+        tokens >= 1_000_000 -> {
+            val m = tokens / 1_000_000.0
+            if (m == m.toLong().toDouble()) "${m.toLong()}M" else String.format(Locale.US, "%.1fM", m)
+        }
+        tokens >= 1024 -> "${tokens / 1024}K"
+        else -> "$tokens"
+    }
+}
+
+private fun tokensToSliderPos(tokens: Int): Float {
+    val minLog = 6.931471805599453 // ln(1024.0)
+    val maxLog = 13.815510557964274 // ln(1000000.0)
+    val clamped = tokens.coerceIn(1024, 1_000_000).toDouble()
+    return ((kotlin.math.ln(clamped) - minLog) / (maxLog - minLog)).toFloat().coerceIn(0f, 1f)
+}
+
+private fun sliderPosToTokens(pos: Float): Int {
+    if (pos <= 0f) return 1024
+    if (pos >= 1f) return 1_000_000
+    val minLog = 6.931471805599453
+    val maxLog = 13.815510557964274
+    val raw = kotlin.math.exp(minLog + pos * (maxLog - minLog)).toInt()
+    return when {
+        raw <= 8192 -> (raw / 512) * 512
+        raw <= 32768 -> (raw / 1024) * 1024
+        raw <= 131072 -> (raw / 4096) * 4096
+        raw <= 524288 -> (raw / 16384) * 16384
+        else -> minOf(1_000_000, (raw / 32768) * 32768)
+    }.coerceIn(1024, 1_000_000)
 }

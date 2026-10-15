@@ -120,4 +120,58 @@ class PdfAttachmentTest {
         assertTrue(fullPrompt.contains("Please analyze this"))
         assertTrue(fullPrompt.contains("[Note: attached file(s) \"binary.pdf\" could not be read as text.]"))
     }
+
+    @Test
+    fun `extractUserDisplayText strips attached file dump and leaves clean user prompt`() {
+        val raw = "Pahami ini\n\n[Attached file \"Deskripsi Visual.txt\":]\nIni deskripsi karakter 50000 kata..."
+        val clean = AttachmentPipeline.extractUserDisplayText(raw)
+        assertEquals("Pahami ini", clean)
+
+        val multipleFiles = "Pahami ini\n\n[Attached file \"a.txt\":]\nText A\n\n[Attached file \"b.txt\":]\nText B"
+        val cleanMultiple = AttachmentPipeline.extractUserDisplayText(multipleFiles)
+        assertEquals("Pahami ini", cleanMultiple)
+
+        val unreadable = "Tolong baca ini\n\n[Note: attached file(s) \"bad.bin\" could not be read as text.]"
+        assertEquals("Tolong baca ini", AttachmentPipeline.extractUserDisplayText(unreadable))
+
+        val noAttachments = "Halo apa kabar?"
+        assertEquals("Halo apa kabar?", AttachmentPipeline.extractUserDisplayText(noAttachments))
+
+        val onlyAttachment = "[Attached file \"doc.txt\":]\nKonten saja"
+        assertEquals("", AttachmentPipeline.extractUserDisplayText(onlyAttachment))
+    }
+
+    @Test
+    fun `extractAttachedFilesPayload preserves file payloads on user edit`() {
+        val raw = "Pahami ini\n\n[Attached file \"Deskripsi.txt\":]\nKonten dokumen"
+        val payload = AttachmentPipeline.extractAttachedFilesPayload(raw)
+        assertEquals("\n\n[Attached file \"Deskripsi.txt\":]\nKonten dokumen", payload)
+
+        val editedPrompt = "Analisis bab 1"
+        val reassembled = editedPrompt + payload
+        assertEquals("Analisis bab 1\n\n[Attached file \"Deskripsi.txt\":]\nKonten dokumen", reassembled)
+    }
+
+    @Test
+    fun `resolveFileAttachments extracts attachments from message or falls back to content regex`() {
+        val msgWithAttachments = com.raikaai.app.data.ChatMessageEntry(
+            role = "user",
+            content = "Pahami ini",
+            attachments = listOf(
+                ChatAttachment(type = "file", path = "/tmp/a.txt", name = "a.txt"),
+            ),
+        )
+        val resolved = AttachmentPipeline.resolveFileAttachments(msgWithAttachments)
+        assertEquals(1, resolved.size)
+        assertEquals("a.txt", resolved[0].name)
+
+        val legacyMsgWithoutAttachments = com.raikaai.app.data.ChatMessageEntry(
+            role = "user",
+            content = "Pahami ini\n\n[Attached file \"Prompt Notebook.txt\":]\nKonten notebook",
+            attachments = emptyList(),
+        )
+        val legacyResolved = AttachmentPipeline.resolveFileAttachments(legacyMsgWithoutAttachments)
+        assertEquals(1, legacyResolved.size)
+        assertEquals("Prompt Notebook.txt", legacyResolved[0].name)
+    }
 }

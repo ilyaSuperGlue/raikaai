@@ -21,6 +21,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -34,14 +35,20 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
@@ -70,6 +77,7 @@ import androidx.compose.material.icons.automirrored.outlined.VolumeOff
 import androidx.compose.material.icons.automirrored.outlined.VolumeUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -97,6 +105,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -104,6 +113,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.sp
 import com.raikaai.app.data.AttachmentType
+import com.raikaai.app.data.ChatAttachment
 import com.raikaai.app.data.ChatConstants
 import com.raikaai.app.data.ChatMessageEntry
 import com.raikaai.app.ui.component.MarkdownText
@@ -181,6 +191,92 @@ internal fun BranchNavRow(
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }
+        }
+    }
+}
+
+/**
+ * Claude-style card for attached documents and text files.
+ * Shows file type badge, file size, truncated file name, and is tap-inspectable.
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+internal fun AttachmentFileCard(
+    file: ChatAttachment,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val ext = remember(file.name) {
+        val raw = file.name.substringAfterLast('.', "").uppercase()
+        if (raw.isNotBlank() && raw.length <= 4) raw else "FILE"
+    }
+    val sizeStr: String? = remember(file.path) {
+        if (file.path.isNotBlank()) {
+            val f = File(file.path)
+            if (f.exists()) formatFileSize(f.length()) else null
+        } else null
+    }
+
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = MaterialTheme.colorScheme.surfaceContainer,
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+        modifier = modifier
+            .width(140.dp)
+            .height(105.dp)
+            .clip(RoundedCornerShape(14.dp))
+            .combinedClickable(
+                onClick = onClick,
+                onLongClick = onLongClick,
+            ),
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(12.dp),
+            verticalArrangement = Arrangement.SpaceBetween,
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(6.dp),
+                    color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                ) {
+                    Text(
+                        text = ext,
+                        style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 10.sp,
+                            fontFamily = FontFamily.Monospace,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    )
+                }
+                if (sizeStr != null) {
+                    Text(
+                        text = sizeStr,
+                        fontSize = 10.sp,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    )
+                }
+            }
+
+            Text(
+                text = file.name,
+                style = MaterialTheme.typography.bodySmall.copy(
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 16.sp,
+                ),
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 3,
+                overflow = TextOverflow.Ellipsis,
+            )
         }
     }
 }
@@ -369,11 +465,64 @@ internal fun MessageBubble(
     onPreviewHtml: (String) -> Unit = {},
     onPreviewImage: (String) -> Unit = {},
 ) {
+    if (message.role == ChatConstants.ROLE_COMPACTION) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(vertical = 10.dp, horizontal = 2.dp),
+        ) {
+            // ── OpenCode-style Compaction Divider ──
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+                Spacer(Modifier.width(10.dp))
+                Text(
+                    text = message.stats ?: "Compaction",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    fontWeight = FontWeight.SemiBold,
+                )
+                Spacer(Modifier.width(10.dp))
+                HorizontalDivider(
+                    modifier = Modifier.weight(1f),
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f),
+                )
+            }
+
+            // ── Structured Markdown Briefing ──
+            Surface(
+                shape = RoundedCornerShape(12.dp),
+                color = MaterialTheme.colorScheme.surfaceContainerLow.copy(alpha = 0.6f),
+                border = BorderStroke(
+                    1.dp,
+                    MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
+                ),
+                modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
+            ) {
+                Column(modifier = Modifier.padding(14.dp)) {
+                    MarkdownText(
+                        markdown = message.content,
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            }
+        }
+        return
+    }
+
     val isUser = message.role == ChatConstants.ROLE_USER
     val clipboard = LocalClipboardManager.current
     val context = LocalContext.current
     var copied by remember { mutableStateOf(false) }
     var showEditDialog by remember { mutableStateOf(false) }
+    var previewFile by remember { mutableStateOf<ChatAttachment?>(null) }
     val scope = rememberCoroutineScope()
 
     Column(
@@ -431,117 +580,95 @@ internal fun MessageBubble(
 
         // Message Text Content
         if (isUser) {
-            Row(
-                Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.End,
+            Column(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalAlignment = Alignment.End,
             ) {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                    modifier =
-                        Modifier
-                            .fillMaxWidth(0.85f)
-                            .combinedClickable(
-                                onClick = {},
-                                onLongClick = { showEditDialog = true },
-                            ),
-                ) {
-                    Column {
-                // Attachments: images (multi) + document chips.
-                // Falls back to legacy single imagePath for old conversations.
+                // Attachments: Claude-style Document Cards + Images
+                val attachmentFiles =
+                    remember(message.attachments, message.content) {
+                        AttachmentPipeline.resolveFileAttachments(message)
+                    }
                 val attachmentImages =
                     remember(message.attachments, message.imagePath) {
                         val fromList = message.attachments.orEmpty().filter { it.kind == AttachmentType.IMAGE }.map { it.path }
                         if (fromList.isNotEmpty()) fromList
                         else listOfNotNull(message.imagePath?.takeIf { it.isNotBlank() })
                     }
-                val attachmentFiles =
-                    remember(message.attachments) {
-                        message.attachments.orEmpty().filter { it.kind == AttachmentType.FILE }
+
+                // 1. Attached document cards carousel (Claude-style)
+                if (attachmentFiles.isNotEmpty()) {
+                    LazyRow(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
+                        contentPadding = PaddingValues(horizontal = 2.dp),
+                    ) {
+                        items(attachmentFiles) { file ->
+                            AttachmentFileCard(
+                                file = file,
+                                onClick = { previewFile = file },
+                                onLongClick = { showEditDialog = true },
+                            )
+                        }
                     }
+                }
+
+                // 2. Attached images
                 attachmentImages.forEach { imagePath ->
-                    // B38: decode off the main thread, downsampled to bubble
-                    // width (was: main-thread full-size decode in remember).
                     val bitmap by produceState<Bitmap?>(initialValue = null, imagePath) {
                         value =
                             withContext(Dispatchers.IO) {
                                 decodeSampledBitmapFromFile(File(imagePath), reqSizePx = 1024)
                             }
                     }
-                    // NOTE: no manual bitmap.recycle() — the bitmap is still
-                    // referenced by the Image below; racy recycling crashes
-                    // with "Canvas: trying to use a recycled bitmap".
-                    // Copy to a local val first: smart cast doesn't work on
-                    // delegated properties.
                     val currentBitmap = bitmap
                     if (currentBitmap != null) {
                         Image(
                             bitmap = currentBitmap.asImageBitmap(),
                             contentDescription = stringResource(R.string.chat_attached_image),
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .fillMaxWidth(0.85f)
+                                .padding(vertical = 4.dp)
                                 .clip(RoundedCornerShape(12.dp))
                                 .clickable { onPreviewImage(imagePath) },
                             contentScale = ContentScale.FillWidth,
                         )
                     }
                 }
-                if (attachmentFiles.isNotEmpty()) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 10.dp, vertical = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    ) {
-                        attachmentFiles.take(3).forEach { file ->
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant,
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                ) {
-                                    Icon(
-                                        Icons.Default.Description,
-                                        contentDescription = null,
-                                        modifier = Modifier.size(14.dp),
-                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    )
-                                    Spacer(Modifier.width(4.dp))
-                                    Text(
-                                        file.name.take(16),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                        maxLines = 1,
-                                    )
-                                }
-                            }
-                        }
-                        if (attachmentFiles.size > 3) {
-                            Text(
-                                "+${attachmentFiles.size - 3}",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.align(Alignment.CenterVertically),
-                            )
-                        }
-                    }
+
+                // 3. User message text bubble
+                val userDisplayText = remember(message.content) {
+                    AttachmentPipeline.extractUserDisplayText(message.content)
+                }
+                val isDefaultSummary = remember(userDisplayText) {
+                    AttachmentPipeline.isDefaultAttachmentPrompt(userDisplayText)
                 }
 
-                // Message Text Content
+                if (userDisplayText.isNotBlank() && (!isDefaultSummary || attachmentFiles.isEmpty())) {
+                    Surface(
+                        shape = RoundedCornerShape(16.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
+                        modifier =
+                            Modifier
+                                .wrapContentWidth()
+                                .widthIn(max = 340.dp)
+                                .combinedClickable(
+                                    onClick = {},
+                                    onLongClick = { showEditDialog = true },
+                                ),
+                    ) {
                         Text(
-                            message.content,
+                            text = userDisplayText,
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurface,
-                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
                         )
                     }
                 }
             }
-            // Edit via long-press on the bubble (no visible button, saves
-            // vertical space). The edit dialog below is kept.
+            // Edit via long-press on the bubble or card
         } else {
             MarkdownText(
                 markdown = message.content.ifBlank { "…" },
@@ -780,7 +907,10 @@ internal fun MessageBubble(
     }
 
     if (showEditDialog) {
-        var editInput by remember { mutableStateOf(message.content) }
+        val initialPrompt = remember(message.content) {
+            AttachmentPipeline.extractUserDisplayText(message.content)
+        }
+        var editInput by remember(initialPrompt) { mutableStateOf(initialPrompt) }
         AlertDialog(
             onDismissRequest = { showEditDialog = false },
             icon = { Icon(Icons.Outlined.Edit, contentDescription = null, tint = MaterialTheme.colorScheme.primary) },
@@ -824,6 +954,58 @@ internal fun MessageBubble(
             },
         )
     }
+
+    if (previewFile != null) {
+        val target = previewFile!!
+        var contentText by remember(target.path) { mutableStateOf<String?>(null) }
+        LaunchedEffect(target.path) {
+            contentText = withContext(Dispatchers.IO) {
+                try {
+                    if (target.path.isNotBlank()) {
+                        val f = File(target.path)
+                        if (f.exists()) {
+                            f.readText().take(50_000)
+                        } else null
+                    } else null
+                } catch (_: Exception) {
+                    null
+                }
+            }
+        }
+        AlertDialog(
+            onDismissRequest = { previewFile = null },
+            title = {
+                Text(
+                    text = target.name,
+                    style = MaterialTheme.typography.titleMedium,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                )
+            },
+            text = {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 100.dp, max = 360.dp)
+                        .verticalScroll(rememberScrollState()),
+                ) {
+                    Text(
+                        text = contentText ?: stringResource(R.string.chat_attachment_loading_or_binary),
+                        style = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 12.sp,
+                        ),
+                        color = MaterialTheme.colorScheme.onSurface,
+                    )
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { previewFile = null }) {
+                    Text(stringResource(R.string.chat_action_close))
+                }
+            },
+        )
+    }
 }
 
 /**
@@ -846,9 +1028,12 @@ internal fun getIconVector(iconType: String): ImageVector =
  * Formats file size in human-readable format.
  */
 internal fun formatFileSize(bytes: Long): String {
-    val gb = bytes / (1024.0 * 1024.0 * 1024.0)
-    return if (gb >= 1.0) String.format(Locale.US, "%.1f GB", gb)
-    else String.format(Locale.US, "%.0f MB", bytes / (1024.0 * 1024.0))
+    return when {
+        bytes < 1024 -> "$bytes B"
+        bytes < 1024 * 1024 -> String.format(Locale.US, "%.1f KB", bytes / 1024.0)
+        bytes < 1024 * 1024 * 1024 -> String.format(Locale.US, "%.1f MB", bytes / (1024.0 * 1024.0))
+        else -> String.format(Locale.US, "%.1f GB", bytes / (1024.0 * 1024.0 * 1024.0))
+    }
 }
 
 /**

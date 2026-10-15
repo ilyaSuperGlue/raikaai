@@ -34,7 +34,11 @@ object PromptBuilder {
             system = if (system.isNotBlank()) "$system\n$noThinkDirective" else noThinkDirective
         }
 
-        val rawDialogue = messages.filterNot { it.role.equals(ChatConstants.ROLE_SYSTEM, ignoreCase = true) }
+        val rawDialogue =
+            messages.filterNot {
+                it.role.equals(ChatConstants.ROLE_SYSTEM, ignoreCase = true) ||
+                    it.role.equals(ChatConstants.ROLE_COMPACTION, ignoreCase = true)
+            }
         val dialogue = rawDialogue.map { msg ->
             var content = msg.content
             if (!enableThinking && msg.role.equals(ChatConstants.ROLE_ASSISTANT, ignoreCase = true)) {
@@ -57,6 +61,28 @@ object PromptBuilder {
         val kept = ArrayDeque(dialogue)
         while (kept.size > 1 && estimateTotalPromptTokens(listOfNotNull(system), kept) > budgetTokens) {
             kept.removeFirst()
+        }
+
+        // Safeguard on-device engine: if the solitary remaining turn exceeds budgetTokens,
+        // cap its content to avoid overflowing the native LiteRT KV-cache sequence capacity.
+        if (kept.isNotEmpty() && estimateTotalPromptTokens(listOfNotNull(system), kept) > budgetTokens) {
+            val single = kept.removeFirst()
+            val sysTokens = estimateTokens(system)
+            val availableTokens = maxOf(128, budgetTokens - sysTokens)
+            val maxChars = availableTokens * 4
+            val trimmedContent = if (single.content.length > maxChars) {
+                val fileMarker = single.content.indexOf("\n\n[Attached file \"")
+                if (fileMarker in 1 until maxChars) {
+                    val promptPart = single.content.substring(0, fileMarker)
+                    val docPart = single.content.substring(fileMarker).take(maxChars - fileMarker)
+                    "$promptPart$docPart\n\n[... truncated to fit ${contextWindow} token window ...]"
+                } else {
+                    single.content.take(maxChars) + "\n\n[... truncated to fit ${contextWindow} token window ...]"
+                }
+            } else {
+                single.content
+            }
+            kept.addFirst(single.copy(content = trimmedContent))
         }
 
         val effectiveFormat = resolveTemplateFormat(templateFormat, modelPath)
