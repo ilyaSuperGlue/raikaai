@@ -1609,9 +1609,45 @@ class ChatViewModel(
         return updatedSources
     }
 
-    private fun isContainerToolCall(name: String): Boolean =
-        name.equals("execute_in_container", ignoreCase = true) ||
-            name.equals("ensure_package", ignoreCase = true)
+    private fun isContainerToolCall(name: String): Boolean {
+        val n = name.lowercase()
+        return n in CONTAINER_EXEC_NAMES || n in CONTAINER_INSTALL_NAMES
+    }
+
+    /** Models invent their own names (run_command, shell, exec…): normalize all. */
+    private val CONTAINER_EXEC_NAMES = setOf(
+        "execute_in_container", "run_command", "run", "shell", "exec",
+        "bash", "terminal", "command",
+    )
+    private val CONTAINER_INSTALL_NAMES = setOf(
+        "ensure_package", "install_package", "apk_add",
+    )
+
+    /** Models also vary the argument key (command/cmd/script/code…): try all. */
+    private fun extractToolCommand(
+        args: com.google.gson.JsonObject,
+        toolName: String,
+    ): String {
+        for (key in listOf("command", "cmd", "commandline", "script", "code", "input", "query")) {
+            val v = runCatching { args.get(key) }.getOrNull()
+            if (v != null && v.isJsonPrimitive) {
+                val t = v.asString.trim()
+                if (t.isNotBlank()) {
+                    return if (toolName.lowercase() in CONTAINER_INSTALL_NAMES && !t.startsWith("apk") && !t.contains(" ")) {
+                        "apk add --no-cache $t"
+                    } else t
+                }
+            }
+        }
+        // ensure_package with {"package": "ffmpeg"}
+        if (toolName.lowercase() in CONTAINER_INSTALL_NAMES) {
+            val pkg = runCatching { args.get("package") }.getOrNull()
+            if (pkg != null && pkg.isJsonPrimitive && pkg.asString.isNotBlank()) {
+                return "apk add --no-cache ${pkg.asString.trim()}"
+            }
+        }
+        return ""
+    }
 
     /**
      * Executes one autonomous container tool call round: policy gate
@@ -1629,12 +1665,7 @@ class ChatViewModel(
         onMetricsUpdate: (LiteRtEngineManager.InferenceMetrics) -> Unit,
     ): List<String>? {
         val idx = messages.lastIndex
-        val rawCommand = call.arguments.get("command")?.asString?.trim().orEmpty()
-        val command = if (call.name.equals("ensure_package", ignoreCase = true) && rawCommand.isBlank()) {
-            call.arguments.get("package")?.asString?.trim().orEmpty().let {
-                if (it.isNotBlank()) "apk add --no-cache $it" else ""
-            }
-        } else rawCommand
+        val command = extractToolCommand(call.arguments, call.name)
         val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
 
         val toolContext: String
@@ -2570,6 +2601,16 @@ class ChatViewModel(
                             if (firstChunkAt == 0L) firstChunkAt = System.currentTimeMillis()
                         },
                     )
+                    // One autonomous container round (mirrors generate_image handling
+                    // in finally): execute + stream a single follow-up, never re-parsed.
+                    handleRemoteContainerFollowUp(
+                        s = s,
+                        targetChatId = targetRemoteChatId,
+                        finalSystem = finalSystem,
+                        remoteWindow = remoteWindow,
+                        onUsageTokens = { usageCompletionTokens = it },
+                        onPromptCounted = { promptTokensEstimate = it },
+                    )
                 } catch (e: Exception) {
                     // Drop compare state: a failed/cancelled/switched pass 1 must not chain pass 2.
                     pendingComparePass = null
@@ -2642,6 +2683,80 @@ class ChatViewModel(
     }
 
     // ── Chat UX: Edit User Message & Swiping Variants ────────────────
+
+    /**
+     * Executes one autonomous container round on the remote path: parse →
+     * policy gate (ASK → approval) → run → single follow-up stream with the
+     * result injected into the last user turn. Never re-parsed: no loops.
+     */
+    private suspend fun handleRemoteContainerFollowUp(
+        s: Settings,
+        targetChatId: String?,
+        finalSystem: String,
+        remoteWindow: Int,
+        onUsageTokens: (Int) -> Unit,
+        onPromptCounted: (Int) -> Unit,
+    ) {
+        val idx = messages.lastIndex
+        if (idx < 0 || messages[idx].role != ChatConstants.ROLE_ASSISTANT) return
+        if (currentConversationId != targetChatId) return
+        val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
+        if (!isContainerToolCall(call.name) || !s.alpineInstalled) return
+        val command = extractToolCommand(call.arguments, call.name)
+        val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
+        val toolContext: String = when {
+            command.isBlank() ->
+                "[CONTAINER TOOL ERROR]\nEmpty command. Provide the shell to run."
+            policy == com.raikaai.app.core.container.InstallPolicy.DENY -> {
+                KLog.w("ChatVM", "Remote container call denied by policy: $command")
+                "[CONTAINER TOOL DENIED]\nThat command is blocked by policy (destructive or untrusted source). Apologize briefly and offer a safe alternative under /workspace."
+            }
+            else -> {
+                messages[idx] = messages[idx].copy(content = "Running `$command` in Linux Environment…")
+                val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK) {
+                    requestContainerApproval(command)
+                } else true
+                if (!approved) {
+                    "[CONTAINER TOOL CALL DENIED]\nThe user denied running `$command`. Apologize briefly and ask how to proceed without the sandbox."
+                } else {
+                    val res = containerManager.run(command)
+                    KLog.d("ChatVM", "Remote container tool exit=${res.exitCode}")
+                    "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
+                        "stdout:\n${res.stdout.take(4000)}\n" +
+                        (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
+                        "Summarize the result for the user. Never claim you ran anything else."
+                }
+            }
+        }
+        if (currentConversationId != targetChatId) return
+        val windowed = promptWindowMessages().dropLast(1)
+        val lastUser = windowed.indexOfLast { it.role == ChatConstants.ROLE_USER }
+        val follow = mutableListOf<RemoteChatMessage>()
+        if (finalSystem.isNotBlank()) follow.add(RemoteChatMessage(role = "system", text = finalSystem))
+        windowed.forEachIndexed { i, m ->
+            val text = if (i == lastUser) "${m.content}\n\n$toolContext" else m.content
+            follow.add(RemoteChatMessage(role = m.role, text = text))
+        }
+        val counts = follow.map { estimateTokens(it.text) }
+        val cappedFollow = capMessagesToWindow(follow, counts, remoteWindow, s.maxTokens + 256)
+        onPromptCounted(counts.sum())
+        messages[idx] = messages[idx].copy(content = "")
+        collectStreamIntoMessage(
+            deltas =
+                RemoteAiClient.streamChat(
+                    baseUrl = s.remoteBaseUrl,
+                    apiKey = s.remoteApiKey,
+                    model = s.remoteModelId,
+                    messages = cappedFollow,
+                    temperature = effectiveTemperature(s),
+                    topP = s.topP,
+                    maxTokens = s.maxTokens,
+                    onUsageTokens = onUsageTokens,
+                ),
+            targetChatId = targetChatId,
+            onDelta = {},
+        )
+    }
 
     /**
      * Edits a user message by forking a new branch at that point. The old
@@ -3280,7 +3395,7 @@ class ChatViewModel(
      * local generation. Only present when the environment is installed.
      */
     private fun containerToolsPromptBlock(s: Settings): String {
-        if (!s.alpineInstalled || s.modelSource != ChatConstants.SOURCE_LOCAL) return ""
+        if (!s.alpineInstalled) return ""
         return "\n\n[CONTAINER TOOLS]\n" +
             "You have a Linux (Alpine) sandbox with a persistent /workspace folder. " +
             "To run a shell command, emit EXACTLY one block and then stop:\n" +
