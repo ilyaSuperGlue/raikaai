@@ -1474,7 +1474,7 @@ class ChatViewModel(
                     }
                     return currentSources
                 }
-                if (isContainerToolCall(genericCall.name) && s.alpineInstalled) {
+                if (isContainerToolCall(genericCall.name) && containerReady(s)) {
                     return handleContainerToolCall(
                         call = genericCall,
                         modelPath = modelPath,
@@ -2701,7 +2701,7 @@ class ChatViewModel(
         if (idx < 0 || messages[idx].role != ChatConstants.ROLE_ASSISTANT) return
         if (currentConversationId != targetChatId) return
         val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
-        if (!isContainerToolCall(call.name) || !s.alpineInstalled) return
+        if (!isContainerToolCall(call.name) || !containerReady(s)) return
         val command = extractToolCommand(call.arguments, call.name)
         val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
         val toolContext: String = when {
@@ -3394,8 +3394,21 @@ class ChatViewModel(
      * Builds the Linux container section injected into the system prompt for
      * local generation. Only present when the environment is installed.
      */
+    /**
+     * Filesystem truth with settings fallback — the settings flag can go stale
+     * after a failed install while the marker tells the truth. Heals the flag
+     * when they disagree so prompt, tools, and UI converge.
+     */
+    private fun containerReady(s: Settings): Boolean {
+        if (containerManager.isInstalled()) {
+            if (!s.alpineInstalled) launchSetting { settingsRepo.setAlpineInstalled(true) }
+            return true
+        }
+        return s.alpineInstalled
+    }
+
     private fun containerToolsPromptBlock(s: Settings): String {
-        if (!s.alpineInstalled) return ""
+        if (!containerReady(s)) return ""
         return "\n\n[CONTAINER TOOLS]\n" +
             "You have a Linux (Alpine) sandbox with a persistent /workspace folder. " +
             "To run a shell command, emit EXACTLY one block and then stop:\n" +
@@ -3405,7 +3418,8 @@ class ChatViewModel(
             "Rules: only write files under /workspace; keep commands short and non-interactive; " +
             "never run rm -rf / or --allow-untrusted. Small official packages install automatically; " +
             "other installs ask the user first. Never invent command results. " +
-            "Act directly: emit the tool call instead of asking the user what to run."
+            "Act directly: emit the tool call instead of asking the user what to run. " +
+            "Respond concisely; do not narrate your reasoning steps."
     }
 
     /** Records the estimated USD cost of one remote generation (owned by ServerControls). */

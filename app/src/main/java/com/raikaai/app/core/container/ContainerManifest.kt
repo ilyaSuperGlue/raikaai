@@ -105,12 +105,31 @@ private val allowlistedApkPackages = setOf(
     "nodejs", "npm", "git", "ripgrep", "imagemagick",
 )
 
+/** Harmless read-only binaries that never mutate state. */
+private val safeReadonlyBinaries = setOf(
+    "ls", "cat", "pwd", "whoami", "uname", "echo", "df", "free",
+    "uptime", "hostname", "date", "printenv", "id", "arch",
+    "fastfetch", "neofetch", "screenfetch", "lsblk", "du", "wc",
+    "head", "tail", "which", "lsb_release",
+)
+
+/** Shell metacharacters that can smuggle side effects into "read-only" calls. */
+private val shellOperators = setOf(";", "&", "|", "`", "$", "(", ")", "<", ">", "\\", "\n")
+
 fun installPolicyFor(command: String): InstallPolicy {
     val cmd = command.trim()
     if (cmd.isEmpty()) return InstallPolicy.DENY
     // Destructive patterns are never auto-run.
     if (cmd.contains("rm -rf /") || cmd.contains("--allow-untrusted")) return InstallPolicy.DENY
     if (cmd.contains("--repository") && !cmd.contains("dl-cdn.alpinelinux.org")) return InstallPolicy.DENY
+    // Single safe read-only invocation with plain args: no prompt fatigue.
+    val parts = cmd.split(Regex("\\s+"))
+    val base = parts.first().substringAfterLast("/")
+    if (base in safeReadonlyBinaries &&
+        parts.drop(1).none { arg -> shellOperators.any { op -> arg.contains(op) } }
+    ) {
+        return InstallPolicy.ALLOW
+    }
     // Arbitrary code managers always ask.
     if (cmd.startsWith("pip install") || cmd.startsWith("pip3 install")) return InstallPolicy.ASK
     if (cmd.startsWith("npm i") || cmd.startsWith("npm install")) return InstallPolicy.ASK

@@ -49,6 +49,12 @@ class ContainerManifestTest {
     fun installPolicyGate() {
         assertEquals(InstallPolicy.ALLOW, installPolicyFor("apk add --no-cache ffmpeg"))
         assertEquals(InstallPolicy.ALLOW, installPolicyFor("apk add curl"))
+        assertEquals(InstallPolicy.ALLOW, installPolicyFor("fastfetch"))
+        assertEquals(InstallPolicy.ALLOW, installPolicyFor("ls -la /workspace"))
+        assertEquals(InstallPolicy.ALLOW, installPolicyFor("cat /etc/os-release"))
+        assertEquals(InstallPolicy.ASK, installPolicyFor("echo hi > out.txt"))
+        assertEquals(InstallPolicy.ASK, installPolicyFor("ls /tmp; echo done"))
+        assertEquals(InstallPolicy.DENY, installPolicyFor("ls; rm -rf /tmp/x"))
         assertEquals(InstallPolicy.ASK, installPolicyFor("apk add --no-cache some-unknown-pkg"))
         assertEquals(InstallPolicy.ASK, installPolicyFor("pip install requests"))
         assertEquals(InstallPolicy.ASK, installPolicyFor("npm install -g server"))
