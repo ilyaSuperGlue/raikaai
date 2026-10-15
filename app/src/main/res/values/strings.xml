@@ -50,6 +50,7 @@
     <string name="chat_model_none_selected">No Model Selected</string>
     <string name="chat_branch_prev">Previous branch</string>
     <string name="chat_branch_next">Next branch</string>
+    <string name="chat_branch_to_new_chat">Branch in new chat</string>
     <string name="chat_scroll_bottom">Scroll to bottom</string>
     <string name="chat_attached_image">Attached Image</string>
     <string name="chat_variant_prev">Previous variant</string>

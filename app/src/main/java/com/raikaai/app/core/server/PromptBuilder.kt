@@ -51,10 +51,11 @@ object PromptBuilder {
             msg.copy(content = content)
         }
 
-        // Drop oldest turns until we fit the context window budget (leaving ~512 tokens for output generation).
-        val budgetTokens = maxOf(1024, contextWindow - 512)
+        // Drop oldest turns until we fit the context window budget, reserving headroom for generation.
+        val reservedOutput = minOf(1024, maxOf(384, (contextWindow * 0.25f).toInt()))
+        val budgetTokens = maxOf(256, contextWindow - reservedOutput)
         val kept = ArrayDeque(dialogue)
-        while (kept.size > 1 && totalChars(listOfNotNull(system), kept) > budgetTokens * 4) {
+        while (kept.size > 1 && estimateTotalPromptTokens(listOfNotNull(system), kept) > budgetTokens) {
             kept.removeFirst()
         }
 
@@ -163,8 +164,22 @@ object PromptBuilder {
         return sb.toString()
     }
 
-    private fun totalChars(
+    private fun estimateTokens(text: String): Int {
+        if (text.isBlank()) return 0
+        return maxOf(1, Math.round(text.length / 3.2).toInt())
+    }
+
+    private fun estimateTotalPromptTokens(
         extras: List<String>,
         dialogue: ArrayDeque<ChatMessage>,
-    ): Int = extras.sumOf { it.length } + dialogue.sumOf { it.content.length + 12 }
+    ): Int {
+        var count = 0
+        for (extra in extras) {
+            count += estimateTokens(extra)
+        }
+        for (msg in dialogue) {
+            count += estimateTokens(msg.content) + 6
+        }
+        return count
+    }
 }

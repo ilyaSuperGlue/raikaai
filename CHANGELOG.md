@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.1] - 2026-10-15
+
+### Added
+- **Branch in New Chat (`CallSplit`)**: Fork and duplicate active conversation history up to any selected turn into a brand-new chat session directly from Assistant action buttons, multi-branch navigation row (`BranchNavRow`), or User edit dialog.
+- **On-Device PDF Text Extraction**: Pure Kotlin PDF content stream parser extracting text from `/FlateDecode` compressed and uncompressed streams without third-party dependencies, allowing text-only on-device LLMs to read and summarize PDF attachments.
+- **Real-Time Context Bar**: Live token usage counter and percentage bar updates smoothly during streaming generation via reactive Compose snapshot states.
+
+### Fixed
+- **PDF Attachment Loss & Fallback Prompt Bug**: Resolved issue where attaching PDF files failed silently due to non-seekable ContentProvider file descriptors in Android's `PdfRenderer`, causing the attachment to vanish and triggering the generic fallback prompt. PDF files are now staged to seekable app storage and always retained in the message.
+- **LiteRT Generation Stopping Mid-Turn**: Fixed generation cutting off prematurely on long turns by actively tracking `activeTokenBudget`, enforcing dynamic output headroom reservation (384–1024 tokens) in `PromptBuilder`, and reloading engine configurations on context budget shifts.
+- **Context Bar Inactivity During Inference**: Fixed context bar progress and token count freezing during token streaming due to wall-clock throttling and non-reactive variables.
+
+---
+
 ## [0.1.0] - 2026-10-14
 
 ### Initial Release — RaikaAI (On-Device AI Engine & Local LLM Server)

@@ -192,6 +192,7 @@ class LiteRtEngineManager private constructor(
     private var engine: Engine? = null
     private var activeModelPath: String? = null
     private var activeBackend: String? = null
+    private var activeTokenBudget: Int = 0
     private var activeVisionSupported: Boolean = false
     private var activeAudioSupported: Boolean = false
 
@@ -532,19 +533,21 @@ class LiteRtEngineManager private constructor(
 
             val needsAudioReload = requireAudio && !activeAudioSupported && isAudioCandidate(params.modelPath)
             val needsVisionReload = requireVision && !activeVisionSupported && isVisionCandidate(params.modelPath)
+            val tokenBudget = minOf(maxOf(1024, maxOf(params.contextWindow, params.maxTokens)), 8192)
+            val needsBudgetReload = activeTokenBudget > 0 && activeTokenBudget != tokenBudget
 
             val needsReload =
                 engine == null ||
                     activeModelPath != params.modelPath ||
                     (activeBackend != null && !activeBackend!!.startsWith(params.backend, ignoreCase = true)) ||
                     needsAudioReload ||
-                    needsVisionReload
+                    needsVisionReload ||
+                    needsBudgetReload
 
             if (needsReload) {
                 unloadLocked()
                 val specs = getSystemSpecs(context)
                 val fileSizeStr = formatBytes(file.length())
-                val tokenBudget = minOf(maxOf(1024, maxOf(params.contextWindow, params.maxTokens)), 8192)
 
                 logEngine("[LiteRT Device] ${specs.deviceModel} (${specs.chipset}) · ${specs.cores} Cores · ${specs.abi}")
                 logEngine(
@@ -578,6 +581,7 @@ class LiteRtEngineManager private constructor(
                         )
                     engine = initResult.engine
                     activeBackend = params.backend
+                    activeTokenBudget = tokenBudget
                     activeVisionSupported = initResult.visionSupported
                     activeAudioSupported = initResult.audioSupported
                     val initDuration = System.currentTimeMillis() - startInit
@@ -602,6 +606,7 @@ class LiteRtEngineManager private constructor(
                                 )
                             engine = initResult.engine
                             activeBackend = "CPU (Fallback)"
+                            activeTokenBudget = tokenBudget
                             activeVisionSupported = initResult.visionSupported
                             activeAudioSupported = initResult.audioSupported
                             val fallbackDuration = System.currentTimeMillis() - startInit
@@ -762,6 +767,7 @@ class LiteRtEngineManager private constructor(
             engine = null
             activeModelPath = null
             activeBackend = null
+            activeTokenBudget = 0
             activeVisionSupported = false
             activeAudioSupported = false
             _activeBackendState.value = null

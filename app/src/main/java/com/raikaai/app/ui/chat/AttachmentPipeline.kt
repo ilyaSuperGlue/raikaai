@@ -27,13 +27,15 @@ object AttachmentPipeline {
 
     /** Default prompt when the user sends only attachment(s) without text. */
     fun defaultPromptForAttachments(prepared: List<PreparedAttachment>): String {
-        val hasImages = prepared.any { it.attachment.kind == AttachmentType.IMAGE }
+        val standaloneImages = prepared.filter { it.attachment.kind == AttachmentType.IMAGE && !it.attachment.name.contains(" (p") }
         val hasDocs = prepared.any { it.attachment.kind == AttachmentType.FILE && it.extractedText != null }
+        val hasAnyImages = prepared.any { it.attachment.kind == AttachmentType.IMAGE }
         return when {
-            hasImages && hasDocs -> "Describe the images and summarize the attached documents."
-            hasImages -> if (prepared.count { it.attachment.kind == AttachmentType.IMAGE } > 1) "Describe these images." else "Describe this image."
+            standaloneImages.isNotEmpty() && hasDocs -> "Describe the images and summarize the attached documents."
             hasDocs -> "Summarize the attached document(s)."
-            else -> "What can you tell me about the attached file(s)?"
+            hasAnyImages -> if (prepared.count { it.attachment.kind == AttachmentType.IMAGE } > 1) "Describe these images." else "Describe this image."
+            prepared.any { it.attachment.kind == AttachmentType.FILE } -> "What can you tell me about the attached file(s)?"
+            else -> "Hello"
         }
     }
 

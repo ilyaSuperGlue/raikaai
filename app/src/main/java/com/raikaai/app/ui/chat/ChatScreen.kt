@@ -425,15 +425,6 @@ fun ChatScreen(
             }
         }
 
-    // Token context calculation (effective: summary + unfolded tail).
-    // P2: throttled — the full walk is O(n) over every message.
-    val totalContextTokens by remember {
-        derivedStateOf {
-            viewModel.compressionTick.value
-            viewModel.effectiveContextTokensThrottled()
-        }
-    }
-
     val modelPin by viewModel.modelPinState
 
     val ollamaLanLabel = stringResource(R.string.chat_model_ollama_lan)
@@ -474,6 +465,7 @@ fun ChatScreen(
             ) {
                 // Token Context indicator (Subtle status with dynamic progress line)
                 if (hasMessages || input.isNotBlank()) {
+                    val totalContextTokens = viewModel.liveContextTokens.intValue
                     val maxTokens = settings.contextWindowTokens
                     val ratio = if (maxTokens > 0) (totalContextTokens.toFloat() / maxTokens.toFloat()) * 100f else 0f
                     val progressFraction = (ratio / 100f).coerceIn(0.01f, 1f)

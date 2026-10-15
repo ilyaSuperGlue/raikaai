@@ -43,6 +43,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.CallSplit
 import androidx.compose.material.icons.automirrored.filled.NavigateBefore
 import androidx.compose.material.icons.automirrored.filled.NavigateNext
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
@@ -128,6 +129,7 @@ internal fun BranchNavRow(
     total: Int,
     onPrev: () -> Unit,
     onNext: () -> Unit,
+    onBranch: (() -> Unit)? = null,
 ) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -165,6 +167,20 @@ internal fun BranchNavRow(
                 contentDescription = stringResource(R.string.chat_branch_next),
                 modifier = Modifier.size(14.dp),
             )
+        }
+        if (onBranch != null) {
+            Spacer(Modifier.width(2.dp))
+            IconButton(
+                onClick = onBranch,
+                modifier = Modifier.size(18.dp),
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.CallSplit,
+                    contentDescription = stringResource(R.string.chat_branch_to_new_chat),
+                    modifier = Modifier.size(12.dp),
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
         }
     }
 }
@@ -287,6 +303,7 @@ internal fun MessageList(
                     onEditUserMessage = { newText -> viewModel.editUserMessageAndRegenerate(reversedIndex, newText) },
                     onSelectVariant = { varIndex -> viewModel.selectMessageVariant(reversedIndex, varIndex) },
                     onSwitchBranch = { delta -> viewModel.switchBranch(reversedIndex, delta) },
+                    onBranchToNewChat = { viewModel.branchToNewChat(reversedIndex) },
                     onRegenerate = { viewModel.regenerateLastResponse() },
                     onPreviewHtml = onPreviewHtml,
                     onPreviewImage = onPreviewImage,
@@ -347,6 +364,7 @@ internal fun MessageBubble(
     onEditUserMessage: (String) -> Unit,
     onSelectVariant: (Int) -> Unit,
     onSwitchBranch: (Int) -> Unit,
+    onBranchToNewChat: () -> Unit = {},
     onRegenerate: () -> Unit,
     onPreviewHtml: (String) -> Unit = {},
     onPreviewImage: (String) -> Unit = {},
@@ -718,6 +736,19 @@ internal fun MessageBubble(
                         )
                     }
 
+                    // Branch in New Chat Action
+                    IconButton(
+                        onClick = onBranchToNewChat,
+                        modifier = Modifier.size(26.dp),
+                    ) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.CallSplit,
+                            contentDescription = stringResource(R.string.chat_branch_to_new_chat),
+                            modifier = Modifier.size(13.dp),
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+
                     // Regenerate Action (only on last assistant message when not generating)
                     if (isLastMessage && !isGenerating) {
                         IconButton(
@@ -743,6 +774,7 @@ internal fun MessageBubble(
                 total = branchInfo.second,
                 onPrev = { onSwitchBranch(-1) },
                 onNext = { onSwitchBranch(1) },
+                onBranch = onBranchToNewChat,
             )
         }
     }
@@ -778,8 +810,16 @@ internal fun MessageBubble(
                 }
             },
             dismissButton = {
-                TextButton(onClick = { showEditDialog = false }) {
-                    Text(stringResource(R.string.chat_action_cancel))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TextButton(onClick = {
+                        onBranchToNewChat()
+                        showEditDialog = false
+                    }) {
+                        Text(stringResource(R.string.chat_branch_to_new_chat))
+                    }
+                    TextButton(onClick = { showEditDialog = false }) {
+                        Text(stringResource(R.string.chat_action_cancel))
+                    }
                 }
             },
         )

@@ -12,6 +12,7 @@ import com.raikaai.app.data.ChatConstants
 import com.raikaai.app.web.UrlSummarizer
 import java.io.File
 import androidx.compose.runtime.State
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.snapshots.SnapshotStateList
@@ -208,6 +209,7 @@ class ChatViewModel(
     val artifacts: StateFlow<List<com.raikaai.app.artifacts.Artifact>> get() = artifactStore.artifacts
     val isCompressing = mutableStateOf(false)
     val compressionTick = mutableStateOf(0)
+    val liveContextTokens = mutableIntStateOf(0)
 
     val ragDocuments: StateFlow<List<com.raikaai.app.rag.RagDocument>> get() = rag.documents
 
@@ -535,6 +537,7 @@ class ChatViewModel(
         nodes = conv.messages.toMutableList()
         messages.clear()
         messages.addAll(chatRepo.resolveActivePath(conv))
+        updateContextTokens()
     }
 
     /** Position (1-based) and total of sibling branches at [index], or null when single. */
@@ -563,6 +566,63 @@ class ChatViewModel(
         map[target.parentId ?: ChatRepository.ROOT_KEY] = nextId
         rebuildFromTree()
         persist()
+    }
+
+    /**
+     * Forks the conversation from message 0 up to [upToIndex] into a brand-new
+     * conversation session and opens it immediately. The original chat stays intact.
+     */
+    fun branchToNewChat(upToIndex: Int) {
+        if (isGenerating.value) return
+        val conv = conversation ?: return
+        if (upToIndex !in messages.indices) return
+        val selectedMessages = messages.subList(0, upToIndex + 1).toList()
+        if (selectedMessages.isEmpty()) return
+
+        viewModelScope.launch {
+            stopGeneration()
+            val newConvId = java.util.UUID.randomUUID().toString()
+            var prevId: String? = null
+            val clonedNodes = mutableListOf<ChatMessageEntry>()
+            for (orig in selectedMessages) {
+                val newId = java.util.UUID.randomUUID().toString()
+                clonedNodes.add(
+                    orig.copy(
+                        id = newId,
+                        parentId = prevId,
+                    ),
+                )
+                prevId = newId
+            }
+
+            val baseTitle = conv.title.ifBlank { "Chat" }
+            val newTitle = "$baseTitle (Branch)"
+            val newConv =
+                Conversation(
+                    id = newConvId,
+                    title = newTitle,
+                    createdAt = System.currentTimeMillis(),
+                    updatedAt = System.currentTimeMillis(),
+                    messages = clonedNodes,
+                    personaId = conv.personaId,
+                    pinnedModelSource = conv.pinnedModelSource,
+                    pinnedModelId = conv.pinnedModelId,
+                    folder = conv.folder,
+                    tags = conv.tags,
+                )
+
+            chatRepo.save(newConv)
+            refreshConversations()
+
+            conversation = newConv
+            currentConversationId = newConv.id
+            rebuildFromTree()
+            val resolved = personaStore.resolvePersona(newConv.personaId)
+            personaStore.applyPersona(resolved)
+            personaStore.pendingPersonaRestoreId =
+                if (newConv.personaId != null && resolved.id != newConv.personaId) newConv.id else null
+            refreshPinState()
+        }
     }
 
     // ── RAG (Knowledge Documents) ────────────────────────────────────
@@ -700,22 +760,15 @@ class ChatViewModel(
             (summary?.let { estimateTokens(it) } ?: 0)
     }
 
-    private var cachedContextTokens = 0
-    private var cachedContextTokensAt = 0L
+    fun updateContextTokens() {
+        liveContextTokens.intValue = effectiveContextTokens()
+    }
 
     /**
-     * Throttled variant of [effectiveContextTokens] for UI display. The full
-     * walk is O(n) over every message, so recomputing on each ~50ms token
-     * batch visibly degrades long chats. The status-bar counter converges
-     * within ~1s, which is plenty for display purposes.
+     * Backward-compatible variant of [liveContextTokens] for UI display.
      */
     fun effectiveContextTokensThrottled(): Int {
-        val now = System.currentTimeMillis()
-        if (now - cachedContextTokensAt >= 1_000L) {
-            cachedContextTokens = effectiveContextTokens()
-            cachedContextTokensAt = now
-        }
-        return cachedContextTokens
+        return liveContextTokens.intValue
     }
 
     private fun injectSummary(
@@ -819,6 +872,7 @@ class ChatViewModel(
             conv.summary = merged.ifBlank { null }
             conv.summarizedUntilId = foldable.last().id
             compressionTick.value++
+            updateContextTokens()
             viewModelScope.launch { runCatching { chatRepo.save(conv) } }
             return conv.summary
         } finally {
@@ -925,6 +979,7 @@ class ChatViewModel(
         refreshInstalledModels()
         refreshConversations()
         refreshFreeDiskSpace()
+        updateContextTokens()
     }
 
     fun refreshFreeDiskSpace() {
@@ -1120,6 +1175,7 @@ class ChatViewModel(
                 ),
             )
         }
+        updateContextTokens()
         // No immediate save: the session is written lazily on the first real
         // message, so Delete All / New Conversation leaves no ghost entries.
         refreshConversations()
@@ -1129,6 +1185,7 @@ class ChatViewModel(
         stopGeneration()
         messages.clear()
         nodes.clear()
+        updateContextTokens()
         val conv = conversation
         conv?.messages = emptyList()
         conv?.branchActive = null
@@ -1248,7 +1305,10 @@ class ChatViewModel(
             }
         }
         flushTokenBuffer(tokenBuffer)
+        updateContextTokens()
     }
+
+    private var lastLiveTokenUpdate = 0L
 
     /** Appends the buffered text to the trailing assistant message, if any. */
     private fun flushTokenBuffer(tokenBuffer: StringBuilder) {
@@ -1258,6 +1318,11 @@ class ChatViewModel(
             val current = messages[idx]
             messages[idx] = current.copy(content = current.content + tokenBuffer.toString())
             tokenBuffer.setLength(0)
+            val now = System.currentTimeMillis()
+            if (now - lastLiveTokenUpdate >= 150L) {
+                lastLiveTokenUpdate = now
+                updateContextTokens()
+            }
         }
     }
 
@@ -1855,6 +1920,7 @@ class ChatViewModel(
             val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = userEntry.id)
             messages.add(assistant)
             registerActiveChild(assistant)
+            updateContextTokens()
 
             var lastMetrics: LiteRtEngineManager.InferenceMetrics? = null
             var ragSources: List<String>? = null
@@ -2035,6 +2101,7 @@ class ChatViewModel(
         val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = userEntry.id)
         messages.add(assistant)
         registerActiveChild(assistant)
+        updateContextTokens()
         isGenerating.value = true
 
         val start = System.currentTimeMillis()
@@ -2342,6 +2409,7 @@ class ChatViewModel(
         val assistant = ChatMessageEntry(role = ChatConstants.ROLE_ASSISTANT, content = "", parentId = lastUser.id)
         messages.add(assistant)
         registerActiveChild(assistant)
+        updateContextTokens()
         isGenerating.value = true
 
         var lastMetrics: LiteRtEngineManager.InferenceMetrics? = null
