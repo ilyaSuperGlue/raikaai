@@ -142,7 +142,7 @@ class ContainerManager private constructor(
         sb.appendLine("busybox exists=${bb.isFile} size=${if (bb.isFile) bb.length() else -1}")
         val sh = File(alpineDir, "bin/sh")
         val shTarget = runCatching { android.system.Os.readlink(sh.absolutePath) }.getOrNull()
-        sb.appendLine("bin/sh exists=${sh.exists()} isSymlink=${shTarget != null} target=${shTarget ?: "-"}")
+        sb.appendLine("bin/sh exists=${sh.exists()} isSymlink=${shTarget != null} target=${shTarget ?: "-"} guestResolves=${guestResolves("bin/sh")}")
         sb.appendLine("alpineTop=${topLevelListing()}")
         sb.appendLine("alpineEntries=${countEntries(alpineDir, 0)}")
         sb.appendLine("nativeLibs=${nativeLibDir.listFiles()?.map { it.name }?.sorted() ?: "?"}")
@@ -472,6 +472,10 @@ class ContainerManager private constructor(
     /**
      * Sanity-checks the unpacked rootfs. Repairs a missing /bin/sh from
      * busybox; anything worse throws with a directory listing for diagnosis.
+     *
+     * NOTE: guest symlinks are usually absolute (/bin/busybox), so plain
+     * File.exists() — which resolves on the HOST — lies about them. All
+     * checks here resolve guest-side via lstat/readlink.
      */
     private fun verifyRootfs(entries: Int) {
         if (entries < 100) {
@@ -479,19 +483,53 @@ class ContainerManager private constructor(
                 "Rootfs unpack suspicious ($entries entries). Top: ${topLevelListing()}",
             )
         }
-        if (!File(alpineDir, "bin/busybox").isFile) {
+        if (!guestResolves("bin/busybox")) {
             throw IllegalStateException(
                 "bin/busybox missing after unpack. Top: ${topLevelListing()}",
             )
         }
-        // File.exists() follows symlinks, so this is false for missing AND broken links.
-        if (!File(alpineDir, "bin/sh").exists()) {
+        if (!guestResolves("bin/sh")) {
             try {
-                android.system.Os.symlink("busybox", File(alpineDir, "bin/sh").absolutePath)
+                val sh = File(alpineDir, "bin/sh")
+                if (sh.exists() || runCatching { android.system.Os.lstat(sh.absolutePath) }.isSuccess) {
+                    sh.delete()
+                }
+                android.system.Os.symlink("busybox", sh.absolutePath)
             } catch (t: Throwable) {
                 throw IllegalStateException("bin/sh missing and relink failed: ${t.message}")
             }
+            if (!guestResolves("bin/sh")) {
+                throw IllegalStateException("bin/sh still unresolvable after relink")
+            }
         }
+    }
+
+    /**
+     * Guest-side existence: lstat must succeed and symlink chains (absolute
+     * targets re-rooted at [alpineDir]) must land on a real file.
+     */
+    private fun guestResolves(relative: String): Boolean {
+        var cur = File(alpineDir, relative)
+        try {
+            android.system.Os.lstat(cur.absolutePath)
+        } catch (_: Throwable) {
+            return false
+        }
+        repeat(8) {
+            val target = runCatching { android.system.Os.readlink(cur.absolutePath) }.getOrNull()
+                ?: return cur.isFile
+            cur = if (target.startsWith("/")) {
+                File(alpineDir, target.removePrefix("/"))
+            } else {
+                File(cur.parentFile, target)
+            }
+            try {
+                android.system.Os.lstat(cur.absolutePath)
+            } catch (_: Throwable) {
+                return false
+            }
+        }
+        return cur.isFile
     }
 
     private fun topLevelListing(): String {
