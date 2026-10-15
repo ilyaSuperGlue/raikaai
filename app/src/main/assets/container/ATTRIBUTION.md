@@ -1,7 +1,11 @@
 # Bundled Linux container helpers
 
-These binaries are bundled so the Linux Environment works fully offline
-except for the Alpine rootfs download. Total ~300 KB per ABI.
+The proot engine ships as native libs (`app/src/main/jniLibs/<abi>/lib*.so`)
+so the package manager extracts them with exec permission — executing
+binaries from `filesDir` is denied (EACCES) on HyperOS / newer Android.
+This requires `android:extractNativeLibs="true"`. Total ~350 KB per ABI.
+
+Only the Alpine rootfs (~3 MB) is downloaded at install time.
 
 ## proot (user-mode chroot / bind-mount engine, no root required)
 
@@ -32,10 +36,16 @@ except for the Alpine rootfs download. Total ~300 KB per ABI.
 
 1. Download the three `.deb` files above for the wanted arch.
 2. `ar x package.deb` then `tar -xf data.tar.xz`.
-3. Copy `usr/bin/proot`, `usr/lib/libtalloc.so.2`,
-   `usr/lib/libandroid-shmem.so`, `usr/libexec/proot/loader`,
-   `usr/libexec/proot/loader32` into `container/<abi>/`
-   (rename to flat names: `proot`, `libtalloc.so.2`,
-   `libandroid-shmem.so`, `loader`, `loader32`).
-4. Update the pinned SHA-256 hashes in
+3. Rename into jniLibs flat names:
+   - `usr/bin/proot` → `libproot.so` (then patchelf, see below)
+   - `usr/lib/libtalloc.so.2` → `libtalloc_prt.so`
+   - `usr/lib/libandroid-shmem.so` → `libshmem_prt.so`
+   - `usr/libexec/proot/loader` → `libproot_loader.so`
+   - `usr/libexec/proot/loader32` → `libproot_loader32.so`
+4. Repoint the engine at its siblings (the Termux RUNPATH does not exist here):
+   `patchelf --replace-needed libtalloc.so.2 libtalloc_prt.so libproot.so`
+   `patchelf --replace-needed libandroid-shmem.so libshmem_prt.so libproot.so`
+   At runtime the app additionally sets `LD_LIBRARY_PATH=<nativeLibDir>`
+   and `PROOT_LOADER(_32)=<nativeLibDir>/libproot_loader*.so`.
+5. Update the pinned SHA-256 hashes in
    `app/src/main/java/com/raikaai/app/core/container/ContainerManifest.kt`.

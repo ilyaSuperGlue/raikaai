@@ -112,6 +112,11 @@ android {
     }
 
     packaging {
+        // Extract .so to nativeLibraryDir at install so the bundled proot
+        // engine can be executed (exec from inside the APK is impossible).
+        jniLibs {
+            useLegacyPackaging = true
+        }
         resources {
             excludes +=
                 setOf(

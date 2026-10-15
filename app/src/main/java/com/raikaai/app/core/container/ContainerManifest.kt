@@ -3,11 +3,11 @@ package com.raikaai.app.core.container
 /**
  * Alpine PRoot environment manifest.
  *
- * - proot + its two shared libs are BUNDLED in the APK
- *   (`assets/container/<abi>/`, see ATTRIBUTION.md) and staged to
- *   `filesDir/bin/` on install. No download, works offline.
- * - Only the Alpine minirootfs tarball is downloaded, from upstream
- *   (dl-cdn.alpinelinux.org).
+ * proot + helpers + deps ship as native libs (`jniLibs/<abi>/lib*.so`) so
+ * the package manager extracts them with exec permission — running
+ * binaries from `filesDir` is blocked (EACCES) on HyperOS / newer Android.
+ * Only the Alpine minirootfs tarball is downloaded, from upstream
+ * (dl-cdn.alpinelinux.org).
  */
 
 /** Alpine release pinned for the rootfs download. Bump in one place. */
@@ -26,19 +26,20 @@ const val OPENAI_SERVER_PORT = 8080
 const val DEFAULT_PREVIEW_PORT = 8081
 
 /**
- * Bundled proot payload for one Android ABI.
- *
- * @param assetDir subfolder under `assets/container/`
- * @param prootSha256 SHA-256 of the `proot` asset (verified after staging)
+ * One bundled native lib (shipped in jniLibs, extracted by the installer
+ * with exec permission).
  */
-data class BundledProot(
-    val assetDir: String,
-    val prootSha256: String,
-    val tallocSha256: String,
-    val shmemSha256: String,
-    val loaderSha256: String,
-    val loader32Sha256: String,
+data class BundledLib(
+    val fileName: String,
+    val sha256: String,
 )
+
+data class BundledProot(
+    val abi: String,
+    val libs: List<BundledLib>,
+) {
+    fun allHashesValid(): Boolean = libs.all { isValidSha256Hex(it.sha256) }
+}
 
 data class ContainerManifest(
     val alpineVersion: String = ALPINE_VERSION,
@@ -49,20 +50,24 @@ data class ContainerManifest(
 /** Resolves the bundled proot payload for an Android ABI. Null = unsupported. */
 fun bundledProotForAbi(abi: String): BundledProot? = when (abi) {
     "arm64-v8a" -> BundledProot(
-        assetDir = "arm64-v8a",
-        prootSha256 = "1545b85b312505db6eb6908ff8b2ded0a77a3bd689c50ae85aa7c1d8445dd717",
-        tallocSha256 = "742b438c4d09e276985a61d44164c9de207b6d8cc268f3018cb3001961bcb309",
-        shmemSha256 = "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731",
-        loaderSha256 = "cbdef0e652c2b78af25d867e1719fdebbb0915e25aae2dd35b3b5c1835f6b551",
-        loader32Sha256 = "c429996fee730e1a4fe12625b22dab5a5bc2847a4cae274d36fd4a19cd8299a8",
+        abi = "arm64-v8a",
+        libs = listOf(
+            BundledLib("libproot.so", "fae5a21c8e144ac5e5509758d110017c8777a35af43dced2fdf1f943c9c22f3f"),
+            BundledLib("libtalloc_prt.so", "742b438c4d09e276985a61d44164c9de207b6d8cc268f3018cb3001961bcb309"),
+            BundledLib("libshmem_prt.so", "84475798e07c8174dbbfaec70a827fdb02f19ffa69a589380c13e7507fd0e731"),
+            BundledLib("libproot_loader.so", "cbdef0e652c2b78af25d867e1719fdebbb0915e25aae2dd35b3b5c1835f6b551"),
+            BundledLib("libproot_loader32.so", "c429996fee730e1a4fe12625b22dab5a5bc2847a4cae274d36fd4a19cd8299a8"),
+        ),
     )
     "x86_64" -> BundledProot(
-        assetDir = "x86_64",
-        prootSha256 = "9a1303a51e69b89d78beaf40e4ec829c5c2ca98cbd5672411bdb15eebd871316",
-        tallocSha256 = "7fa6722a4320495b1b85832fc7fd02de0cb367b45f116c1921b2830a6936da90",
-        shmemSha256 = "092926060298acd3778e6239033d7aef1280dcb59aebe021a3719612e6a3465f",
-        loaderSha256 = "a836b0569c84b1661333d16bacf6b396ff08fea816a5c936a82e08ddeeca8341",
-        loader32Sha256 = "fd5b394aa0801619e293b76fe6e830a3beb363aed4fa4b9a5a41f1388a0cb9b9",
+        abi = "x86_64",
+        libs = listOf(
+            BundledLib("libproot.so", "af4b41a25abe601ca2128acf74bdf1aa87286fc1293a288977961b5cce7a433f"),
+            BundledLib("libtalloc_prt.so", "7fa6722a4320495b1b85832fc7fd02de0cb367b45f116c1921b2830a6936da90"),
+            BundledLib("libshmem_prt.so", "092926060298acd3778e6239033d7aef1280dcb59aebe021a3719612e6a3465f"),
+            BundledLib("libproot_loader.so", "a836b0569c84b1661333d16bacf6b396ff08fea816a5c936a82e08ddeeca8341"),
+            BundledLib("libproot_loader32.so", "fd5b394aa0801619e293b76fe6e830a3beb363aed4fa4b9a5a41f1388a0cb9b9"),
+        ),
     )
     else -> null
 }

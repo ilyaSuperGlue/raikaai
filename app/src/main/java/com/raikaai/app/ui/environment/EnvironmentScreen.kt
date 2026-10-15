@@ -16,11 +16,13 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
@@ -32,10 +34,8 @@ import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.InsertDriveFile
 import androidx.compose.material.icons.filled.Menu
-import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Send
 import androidx.compose.material.icons.filled.Share
-import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -64,6 +64,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -163,7 +164,6 @@ fun EnvironmentScreen(
             if (tab == 0) {
                 TerminalTab(
                     manager = manager,
-                    servedPort = servedPort,
                     onCommandDone = { filesTick++ },
                 )
             } else {
@@ -224,18 +224,23 @@ private fun NotInstalledCard(
     }
 }
 
+/** One terminal transcript line (Termux-style coloring). */
+private data class TermLine(val kind: TermKind, val text: String)
+private enum class TermKind { CMD, OUT, ERR, SYS }
+
+private val TermGreen = Color(0xFF4CAF50)
+
 @Composable
 private fun TerminalTab(
     manager: ContainerManager,
-    servedPort: Int?,
     onCommandDone: () -> Unit,
 ) {
-    val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val lines = remember { mutableStateListOf<String>() }
+    val lines = remember { mutableStateListOf<TermLine>() }
+    val history = remember { mutableStateListOf<String>() }
+    var histPos by remember { mutableIntStateOf(-1) }
     var input by remember { mutableStateOf("") }
     var running by remember { mutableStateOf(false) }
-    var servePortInput by remember { mutableStateOf("8081") }
     val listState = rememberLazyListState()
 
     LaunchedEffect(lines.size) {
@@ -246,59 +251,116 @@ private fun TerminalTab(
         val clean = cmd.trim()
         if (clean.isEmpty() || running) return
         running = true
-        lines.add("$ $clean")
+        lines.add(TermLine(TermKind.CMD, clean))
+        history.add(clean)
+        histPos = -1
         input = ""
         scope.launch(Dispatchers.IO) {
             val res = manager.run(clean, timeoutSec = 60)
             withContext(Dispatchers.Main) {
-                if (res.stdout.isNotBlank()) lines.add(res.stdout.take(3000))
-                if (res.stderr.isNotBlank()) lines.add("[stderr] ${res.stderr.take(1000)}")
-                lines.add("[exit=${res.exitCode}${if (res.timedOut) " timed out" else ""}]")
+                if (res.stdout.isNotBlank()) lines.add(TermLine(TermKind.OUT, res.stdout.take(3000)))
+                if (res.stderr.isNotBlank()) lines.add(TermLine(TermKind.ERR, res.stderr.take(1000)))
+                if (res.timedOut) lines.add(TermLine(TermKind.SYS, "[timed out after 60s]"))
                 running = false
                 onCommandDone()
             }
         }
     }
 
-    Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
+    fun historyStep(dir: Int) {
+        if (history.isEmpty()) return
+        histPos = (histPos + dir).coerceIn(-1, history.size - 1)
+        input = if (histPos < 0) "" else history[history.size - 1 - histPos]
+    }
+
+    Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Card(
             shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+            colors = CardDefaults.cardColors(containerColor = Color.Black),
             modifier = Modifier.fillMaxWidth().weight(1f),
         ) {
             if (lines.isEmpty()) {
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
-                        "Terminal /workspace — run non-interactive commands (ls, cat, python3, ffmpeg).",
+                        "Alpine shell — run non-interactive commands.",
                         style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color.White.copy(alpha = 0.7f),
                     )
                     Text(
                         "Example: ls -la /workspace",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        color = Color.White.copy(alpha = 0.7f),
                     )
                 }
             } else {
                 LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(12.dp)) {
                     items(lines.size) { i ->
-                        Text(
-                            lines[i],
-                            style = MaterialTheme.typography.bodySmall,
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                        )
+                        val line = lines[i]
+                        when (line.kind) {
+                            TermKind.CMD -> Text(
+                                "$ ${line.text}",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = TermGreen,
+                            )
+                            TermKind.ERR -> Text(
+                                line.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.error,
+                            )
+                            TermKind.SYS -> Text(
+                                line.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = Color.White.copy(alpha = 0.6f),
+                            )
+                            TermKind.OUT -> Text(
+                                line.text,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontFamily = FontFamily.Monospace,
+                                fontSize = 12.sp,
+                                color = Color.White,
+                            )
+                        }
                     }
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
+        // Termux-style extra keys: history, interrupt, shell characters.
+        LazyRow(
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            val keys: List<Pair<String, () -> Unit>> = listOf(
+                "ESC" to { input = "" },
+                "CTRL+C" to { scope.launch(Dispatchers.IO) { manager.cancelRun() } },
+                "↑" to { historyStep(1) },
+                "↓" to { historyStep(-1) },
+                "/" to { input += "/" },
+                "|" to { input += "|" },
+                "~" to { input += "~" },
+                "-" to { input += "-" },
+                "_" to { input += "_" },
+                "." to { input += "." },
+            )
+            items(keys.size) { i ->
+                TextButton(onClick = keys[i].second) {
+                    Text(keys[i].first, fontFamily = FontFamily.Monospace)
+                }
+            }
+        }
+        Spacer(Modifier.height(4.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
             OutlinedTextField(
                 value = input,
-                onValueChange = { input = it },
-                placeholder = { Text("command…") },
+                onValueChange = { input = it; histPos = -1 },
+                placeholder = { Text("$") },
                 singleLine = true,
                 modifier = Modifier.weight(1f),
                 shape = RoundedCornerShape(12.dp),
@@ -306,46 +368,6 @@ private fun TerminalTab(
             Spacer(Modifier.width(8.dp))
             IconButton(onClick = { exec(input) }, enabled = !running) {
                 Icon(Icons.Default.Send, contentDescription = "Run")
-            }
-        }
-        Spacer(Modifier.height(8.dp))
-        // Serve row (Fase 4)
-        Card(
-            shape = RoundedCornerShape(12.dp),
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            Row(
-                modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                OutlinedTextField(
-                    value = servePortInput,
-                    onValueChange = { servePortInput = it.filter { c -> c.isDigit() }.take(5) },
-                    label = { Text("Port") },
-                    singleLine = true,
-                    modifier = Modifier.width(110.dp),
-                    shape = RoundedCornerShape(10.dp),
-                )
-                Spacer(Modifier.width(8.dp))
-                if (servedPort != null) {
-                    TextButton(onClick = {
-                        context.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("http://127.0.0.1:$servedPort")))
-                    }) {
-                        Text("Open :$servedPort", maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    Spacer(Modifier.width(4.dp))
-                    IconButton(onClick = { scope.launch(Dispatchers.IO) { manager.stopServe() } }) {
-                        Icon(Icons.Default.Stop, contentDescription = "Stop server")
-                    }
-                } else {
-                    IconButton(onClick = {
-                        val p = servePortInput.toIntOrNull() ?: 8081
-                        scope.launch(Dispatchers.IO) { manager.serve(p) }
-                    }) {
-                        Icon(Icons.Default.PlayArrow, contentDescription = "Serve /workspace")
-                    }
-                }
             }
         }
     }

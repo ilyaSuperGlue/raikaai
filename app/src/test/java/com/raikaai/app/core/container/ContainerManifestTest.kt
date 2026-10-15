@@ -18,15 +18,12 @@ class ContainerManifestTest {
     @Test
     fun bundledProotResolvesPerAbiWithPinnedHashes() {
         val arm64 = bundledProotForAbi("arm64-v8a")!!
-        assertEquals("arm64-v8a", arm64.assetDir)
-        assertTrue(isValidSha256Hex(arm64.prootSha256))
-        assertTrue(isValidSha256Hex(arm64.tallocSha256))
-        assertTrue(isValidSha256Hex(arm64.shmemSha256))
-        assertTrue(isValidSha256Hex(arm64.loaderSha256))
-        assertTrue(isValidSha256Hex(arm64.loader32Sha256))
+        assertEquals("arm64-v8a", arm64.abi)
+        assertEquals(5, arm64.libs.size)
+        assertTrue(arm64.allHashesValid())
+        assertTrue(arm64.libs.any { it.fileName == "libproot.so" })
         val x86 = bundledProotForAbi("x86_64")!!
-        assertEquals("x86_64", x86.assetDir)
-        assertTrue(isValidSha256Hex(x86.prootSha256))
+        assertTrue(x86.allHashesValid())
         assertEquals(null, bundledProotForAbi("armeabi-v7a"))
     }
 
