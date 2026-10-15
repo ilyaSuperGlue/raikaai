@@ -7,6 +7,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [Unreleased]
+
+### Added (branch `feat/alpine-proot`, not merged)
+- **Alpine Linux Environment (PRoot, no root)**: On-demand Alpine userland with a persistent `/workspace` folder shared between chat, terminal, and AI.
+- **Bundled proot Engine**: proot 5.1.107.96 + deps ship as native libs (`jniLibs`) so the installer extracts them executable; only the ~3 MB Alpine minirootfs downloads from upstream.
+- **Linux Env Screen**: Termux-style terminal (command history, extra-keys row, Ctrl+C interrupt) plus a Files tab (preview, Share, save to Download, send to chat, SAF import).
+- **AI Sandbox Tools**: `execute_in_container` / `ensure_package` with ALLOW/ASK/DENY policy gate and explicit approval dialog, working in both local and remote model modes.
+- **Tolerant Tool-Call Parsing**: Accepts JSON and XML-shaped tool calls plus model-invented names (`run_command`, `shell`, `exec`…) and argument keys.
+- **Slash Commands**: `/run`, `/serve`, `/env`, `/stop-serve`; localhost preview of `/workspace` via busybox httpd.
+
+## [0.1.2] - 2026-10-15
+
+### Added
+- **OpenCode-Style Context Compaction (`/compact`)**: Summarizes multi-turn history into a structured briefing (`Objective`, `Requirements`, `Decisions`, `Work State`) rendered as divider-style cards that don't inflate context; live token counter drops immediately after compacting.
+- **Logarithmic Context Slider (1K – 1M Tokens)**: Continuous context allocation slider in Generation Parameters with quick preset buttons; local and remote settings stay independent.
+- **Claude-Style Attachment Cards**: Document attachments render as compact file chips with metadata and a text inspector modal instead of dumping raw text into chat bubbles.
+- **Remote Model Caching**: Detected remote models persist to DataStore and are available instantly on restart with background refresh.
+
+### Changed
+- **Model Quick Switch Menu**: Pure model switcher — removed Pin, Compare, and Hub buttons; shows all on-device and remote models with a correct active indicator per mode.
+- **Slash Command Suggestions**: Compact single-line popup without descriptions.
+- **Drawer Navigation**: Generation Parameters moved above History.
+- **Localization**: Slash commands, compaction output, and container strings standardized to English.
+
+### Fixed
+- **Model Switcher Active Indicator**: Local model no longer stays checked while in remote mode.
+- **Attachment Context Retention**: Document payloads survive message edit and regeneration.
+
 ## [0.1.1] - 2026-10-15
 
 ### Added
