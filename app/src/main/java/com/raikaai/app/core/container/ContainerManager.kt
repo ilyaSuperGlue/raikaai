@@ -207,6 +207,10 @@ class ContainerManager private constructor(
                     parentFile?.mkdirs()
                     writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
                 }
+                // apk expects these to exist (minirootfs omits some).
+                listOf("tmp", "var/cache/apk", "etc/apk", "lib/apk/db", "root").forEach {
+                    File(alpineDir, it).mkdirs()
+                }
                 File(alpineDir, ".installed").writeText("${manifest.alpineVersion}#$ROOTFS_SCHEMA")
                 settingsRepo.setAlpineInstalled(true)
                 settingsRepo.setAlpineVersion(manifest.alpineVersion)
@@ -266,16 +270,21 @@ class ContainerManager private constructor(
         if (clean.isEmpty()) return RunResult("", "empty command", -1)
         workspaceDir.mkdirs()
         return execProot(
-            args = listOf(
-                "-r", alpineDir.absolutePath,
-                "-b", "${workspaceDir.absolutePath}:/workspace",
-                "-b", "/dev",
-                "-b", "/proc",
-                "-0",
-                "-w", "/workspace",
-                "/bin/sh", "-c", clean,
-            ),
+            args = baseArgs() + listOf("/bin/sh", "-c", clean),
             timeoutSec = timeoutSec,
+        )
+    }
+
+    /** Shared proot invocation prefix: rootfs + binds + fake root + workdir. */
+    private fun baseArgs(): List<String> {
+        workspaceDir.mkdirs()
+        return listOf(
+            "-r", alpineDir.absolutePath,
+            "-b", "${workspaceDir.absolutePath}:/workspace",
+            "-b", "/dev",
+            "-b", "/proc",
+            "-0",
+            "-w", "/workspace",
         )
     }
 
@@ -330,10 +339,10 @@ class ContainerManager private constructor(
         val p0 = execProot(listOf("--version"), timeoutSec = 10)
         sb.appendLine("P0 engine --version: exit=${p0.exitCode} out=${(p0.stdout.ifBlank { p0.stderr }).take(200)}")
         if (!File(alpineDir, ".installed").isFile) {
-            sb.appendLine("P1/P2 skipped: no rootfs marker")
+            sb.appendLine("P1-P4 skipped: no rootfs marker")
             return sb.toString()
         }
-        val base = listOf("-r", alpineDir.absolutePath, "-0")
+        val base = baseArgs()
         val p1 = execProot(base + listOf("/bin/busybox", "echo", "hi"), timeoutSec = 10)
         sb.appendLine("P1 busybox echo: exit=${p1.exitCode} out=${(p1.stdout.ifBlank { p1.stderr }).take(200)}")
         val p2 = execProot(base + listOf("/bin/sh", "-c", "echo hi"), timeoutSec = 10)
@@ -346,6 +355,15 @@ class ContainerManager private constructor(
             )
             sb.appendLine("P2 verbose: ${(pv.stdout.ifBlank { pv.stderr }).take(1500)}")
         }
+        // P3: what does the GUEST see for the busybox links?
+        val p3 = execProot(base + listOf("/bin/busybox", "ls", "-l", "/bin/sh", "/usr/bin/zipinfo"), timeoutSec = 10)
+        sb.appendLine("P3 guest ls: exit=${p3.exitCode} out=${(p3.stdout.ifBlank { p3.stderr }).take(300)}")
+        // P4: can the guest write where apk needs to (exact failing area)?
+        val p4 = execProot(
+            base + listOf("/bin/sh", "-c", "touch /usr/bin/_wtest && ls -l /usr/bin/_wtest && rm /usr/bin/_wtest && echo TOUCH_OK"),
+            timeoutSec = 10,
+        )
+        sb.appendLine("P4 touch test: exit=${p4.exitCode} out=${(p4.stdout.ifBlank { p4.stderr }).take(300)}")
         return sb.toString()
     }
 
@@ -427,8 +445,13 @@ class ContainerManager private constructor(
         env["PROOT_LOADER_32"] = File(nativeLibDir, "libproot_loader32.so").absolutePath
         // Guest shells inherit an empty PATH through proot: set Alpine's
         // default so apk/ls/busybox applets resolve without full paths.
+        // Guest TMPDIR points inside the guest (/tmp is created on install);
+        // PROOT_TMP_DIR stays host-side for proot's own glue files.
         env["PATH"] = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
         env["HOME"] = "/root"
+        env["TMPDIR"] = "/tmp"
+        env["TEMP"] = "/tmp"
+        env["TMP"] = "/tmp"
         // proot's compiled-in tmp points at the Termux prefix: redirect all
         // temp (glue rootfs, f2fs probe, shm) into app storage.
         val tmpDir = File(app.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath
