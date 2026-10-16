@@ -8,6 +8,7 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -18,14 +19,17 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -40,6 +44,7 @@ import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -47,7 +52,6 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.SecondaryTabRow
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
@@ -68,10 +72,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -120,7 +126,8 @@ fun EnvironmentScreen(
                 Column(modifier = Modifier.weight(1f)) {
                     Text("Linux Environment", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.Bold)
                     Text(
-                        if (fsInstalled) "Alpine ${settings.alpineVersion} · /workspace" else "Alpine via PRoot (no root)",
+                        text = servedPort?.let { "Serving :$it · /workspace" }
+                            ?: if (fsInstalled) "Alpine ${settings.alpineVersion} · /workspace" else "Alpine via PRoot (no root)",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -139,20 +146,6 @@ fun EnvironmentScreen(
                     modifier = Modifier.size(36.dp),
                 ) {
                     Icon(Icons.Default.Info, contentDescription = "Copy diagnostics")
-                }
-                Surface(shape = RoundedCornerShape(8.dp), color = MaterialTheme.colorScheme.surfaceContainerHigh) {
-                    Text(
-                        text = when {
-                            servedPort != null -> "Serving :$servedPort"
-                            outdated -> "Update available"
-                            fsInstalled -> "Ready"
-                            else -> "Not installed"
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (fsInstalled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                    )
                 }
             }
 
@@ -275,6 +268,8 @@ private fun TerminalTab(
     var histPos by remember { mutableIntStateOf(-1) }
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var running by remember { mutableStateOf(false) }
+    // Sticky CTRL like Termux: tap CTRL, then tap a combo key (or type a letter).
+    var ctrlActive by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     // Termux keys must hand focus back to the input, otherwise the IME keeps
     // a stale buffer and typed text appears to vanish.
@@ -319,6 +314,12 @@ private fun TerminalTab(
         }
     }
 
+    fun moveCursor(delta: Int) {
+        val pos = (input.selection.end + delta).coerceIn(0, input.text.length)
+        input = input.copy(selection = TextRange(pos))
+        fieldFocus.requestFocus()
+    }
+
     fun historyStep(dir: Int) {
         if (history.isEmpty()) return
         histPos = (histPos + dir).coerceIn(-1, history.size - 1)
@@ -326,103 +327,159 @@ private fun TerminalTab(
         fieldFocus.requestFocus()
     }
 
+    /** Sticky-CTRL combo from a typed letter (CTRL then `c` on the keyboard). */
+    fun onInputChange(v: TextFieldValue) {
+        if (ctrlActive && v.text.length > input.text.length) {
+            ctrlActive = false
+            when (v.text.last().lowercaseChar()) {
+                'c' -> {
+                    scope.launch(Dispatchers.IO) { manager.cancelRun() }
+                    lines.add(TermLine(TermKind.SYS, "^C"))
+                }
+                'l' -> lines.clear()
+                'u' -> setInputText("")
+                else -> {
+                    input = v
+                    histPos = -1
+                }
+            }
+            fieldFocus.requestFocus()
+            return
+        }
+        input = v
+        histPos = -1
+    }
+
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color.Black),
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f).clickable { fieldFocus.requestFocus() },
         ) {
-            if (lines.isEmpty()) {
-                Column(modifier = Modifier.padding(16.dp)) {
+            Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                if (lines.isEmpty()) {
                     Text(
-                        "Alpine shell — run non-interactive commands.",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = Color.White.copy(alpha = 0.7f),
-                    )
-                    Text(
-                        "Example: ls -la /workspace",
+                        "Alpine shell — type below. ↑↓ history, CTRL combos, ESC clears.",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
                         color = Color.White.copy(alpha = 0.7f),
                     )
-                }
-            } else {
-                LazyColumn(state = listState, modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                    items(lines.size) { i ->
-                        val line = lines[i]
-                        when (line.kind) {
-                            TermKind.CMD -> Text(
-                                "$ ${line.text}",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = TermGreen,
-                            )
-                            TermKind.ERR -> Text(
-                                line.text,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.error,
-                            )
-                            TermKind.SYS -> Text(
-                                line.text,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = Color.White.copy(alpha = 0.6f),
-                            )
-                            TermKind.OUT -> Text(
-                                line.text,
-                                style = MaterialTheme.typography.bodySmall,
-                                fontFamily = FontFamily.Monospace,
-                                fontSize = 12.sp,
-                                color = Color.White,
-                            )
+                } else {
+                    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f)) {
+                        items(lines.size) { i ->
+                            val line = lines[i]
+                            when (line.kind) {
+                                TermKind.CMD -> Text(
+                                    "$ ${line.text}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = TermGreen,
+                                )
+                                TermKind.ERR -> Text(
+                                    line.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                TermKind.SYS -> Text(
+                                    line.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = Color.White.copy(alpha = 0.6f),
+                                )
+                                TermKind.OUT -> Text(
+                                    line.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = Color.White,
+                                )
+                            }
                         }
                     }
+                }
+                // Inline shell prompt (Termux-style: type directly in the shell).
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (running) "… " else "$ ",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        color = if (running) Color(0xFFFFC107) else TermGreen,
+                    )
+                    BasicTextField(
+                        value = input,
+                        onValueChange = ::onInputChange,
+                        modifier = Modifier.weight(1f).focusRequester(fieldFocus),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            color = Color.White,
+                        ),
+                        cursorBrush = SolidColor(Color.White),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { exec(input.text) }),
+                    )
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
-        // Termux-style extra keys: history, interrupt, shell characters.
-        LazyRow(
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            modifier = Modifier.fillMaxWidth(),
-        ) {
-            val keys: List<Pair<String, () -> Unit>> = listOf(
-                "ESC" to { input = TextFieldValue(""); fieldFocus.requestFocus() },
-                "CTRL+C" to { scope.launch(Dispatchers.IO) { manager.cancelRun() } },
-                "↑" to { historyStep(1) },
-                "↓" to { historyStep(-1) },
-                "/" to { insertAtCursor("/") },
-                "|" to { insertAtCursor("|") },
-                "~" to { insertAtCursor("~") },
-                "-" to { insertAtCursor("-") },
-                "_" to { insertAtCursor("_") },
-                "." to { insertAtCursor(".") },
-            )
-            items(keys.size) { i ->
-                TextButton(onClick = keys[i].second) {
-                    Text(keys[i].first, fontFamily = FontFamily.Monospace)
-                }
-            }
+        // Termux-style extra keys, two rows. CTRL is sticky: tap it, then a combo.
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            termKey("ESC") { input = TextFieldValue(""); fieldFocus.requestFocus() }
+            termKey("/") { insertAtCursor("/") }
+            termKey("|") { insertAtCursor("|") }
+            termKey("~") { insertAtCursor("~") }
+            termKey("-") { insertAtCursor("-") }
+            termKey("_") { insertAtCursor("_") }
+            termKey("↑") { historyStep(1) }
+            termKey("↓") { historyStep(-1) }
         }
-        Spacer(Modifier.height(4.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            OutlinedTextField(
-                value = input,
-                onValueChange = { input = it; histPos = -1 },
-                placeholder = { Text("$") },
-                singleLine = true,
-                modifier = Modifier.weight(1f).focusRequester(fieldFocus),
-                shape = RoundedCornerShape(12.dp),
-            )
-            Spacer(Modifier.width(8.dp))
-            IconButton(onClick = { exec(input.text) }, enabled = !running) {
-                Icon(Icons.Default.Send, contentDescription = "Run")
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            termKey("CTRL", active = ctrlActive) { ctrlActive = !ctrlActive; fieldFocus.requestFocus() }
+            termKey("←") { moveCursor(-1) }
+            termKey("→") { moveCursor(1) }
+            termKey("END") {
+                input = input.copy(selection = TextRange(input.text.length))
+                fieldFocus.requestFocus()
             }
+            termKey("PGUP") { scope.launch { listState.animateScrollToItem(0) } }
+            termKey("PGDN") { scope.launch { if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1) } }
+            termKey(".") { insertAtCursor(".") }
+            termKey("*") { insertAtCursor("*") }
         }
+    }
+}
+
+@Composable
+private fun termKey(label: String, active: Boolean = false, onTap: () -> Unit) {
+    TextButton(
+        onClick = onTap,
+        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+        colors = ButtonDefaults.textButtonColors(
+            contentColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+        ),
+    ) {
+        Text(
+            label,
+            fontFamily = FontFamily.Monospace,
+            fontSize = 12.sp,
+            fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+        )
     }
 }
 
