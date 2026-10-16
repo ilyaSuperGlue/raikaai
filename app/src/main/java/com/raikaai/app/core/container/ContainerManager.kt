@@ -50,7 +50,7 @@ class ContainerManager private constructor(
          * (symlinks, permissions, …) so stale on-device rootfs is detected
          * and the UI forces a reinstall instead of failing cryptically.
          */
-        const val ROOTFS_SCHEMA = 3
+        const val ROOTFS_SCHEMA = 4
 
         @Volatile private var instance: ContainerManager? = null
 
@@ -150,12 +150,20 @@ class ContainerManager private constructor(
         return sb.toString()
     }
 
+    private fun isSymlink(f: File): Boolean {
+        return runCatching {
+            val st = android.system.Os.lstat(f.absolutePath)
+            android.system.OsConstants.S_ISLNK(st.st_mode)
+        }.getOrDefault(false)
+    }
+
     private fun countEntries(dir: File, depth: Int): Int {
-        if (depth > 3) return 0
+        if (depth > 4) return 0
         val kids = dir.listFiles() ?: return 0
         var n = kids.size
-        if (n > 2000) return n
-        for (k in kids) if (k.isDirectory) n += countEntries(k, depth + 1)
+        if (n > 3000) return n
+        // Never follow symlinks: avoids double counts and link cycles.
+        for (k in kids) if (k.isDirectory && !isSymlink(k)) n += countEntries(k, depth + 1)
         return n
     }
 
@@ -364,6 +372,18 @@ class ContainerManager private constructor(
             timeoutSec = 10,
         )
         sb.appendLine("P4 touch test: exit=${p4.exitCode} out=${(p4.stdout.ifBlank { p4.stderr }).take(300)}")
+        // P5: dotfile create (apk temp-file style).
+        val p5 = execProot(
+            base + listOf("/bin/sh", "-c", "touch /usr/bin/.apk.probe && ls -l /usr/bin/.apk.probe && rm /usr/bin/.apk.probe && echo DOT_OK"),
+            timeoutSec = 10,
+        )
+        sb.appendLine("P5 dotfile test: exit=${p5.exitCode} out=${(p5.stdout.ifBlank { p5.stderr }).take(300)}")
+        // P6: the exact apk dance — create temp, then rename onto final name.
+        val p6 = execProot(
+            base + listOf("/bin/sh", "-c", "touch /usr/bin/.apk.mv && mv /usr/bin/.apk.mv /usr/bin/_apkfinal && ls -l /usr/bin/_apkfinal && rm /usr/bin/_apkfinal && echo MV_OK"),
+            timeoutSec = 10,
+        )
+        sb.appendLine("P6 rename test: exit=${p6.exitCode} out=${(p6.stdout.ifBlank { p6.stderr }).take(300)}")
         return sb.toString()
     }
 
@@ -676,7 +696,12 @@ class ContainerManager private constructor(
                         // both forms resolve identically.
                         val guestTarget = relativizeGuestLink(guestName, linkTarget)
                         target.parentFile?.mkdirs()
-                        if (target.exists() || target.isDirectory) target.deleteRecursively()
+                        // lstat, not exists(): broken/absolute links must be
+                        // replaced too, and File.delete() removes the link
+                        // itself (never follows it).
+                        if (isSymlink(target) || target.exists()) {
+                            if (!target.delete()) throw IllegalStateException("Cannot replace $name")
+                        }
                         try {
                             android.system.Os.symlink(guestTarget, target.absolutePath)
                             count++
