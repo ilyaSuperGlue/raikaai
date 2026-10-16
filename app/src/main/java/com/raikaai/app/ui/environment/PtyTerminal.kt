@@ -118,7 +118,6 @@ class PtyController(private val manager: ContainerManager) {
     }
 }
 
-private const val IME_SENTINEL = "⁠"
 
 @Composable
 fun PtyTerminalView(
@@ -139,14 +138,45 @@ fun PtyTerminalView(
     val cellW = paint.measureText("MMMMMMMMMM") / 10f
     val cellH = (fm.descent - fm.ascent).coerceAtLeast(1f)
 
-    // Hidden IME field: committed text is forwarded to the pty immediately,
-    // backspace sends DEL, Enter sends CR. Always reset to the sentinel.
-    var ime by remember { mutableStateOf(TextFieldValue(IME_SENTINEL, TextRange(1))) }
+    // Hidden IME field. Unlike the first version (which reset the field to a
+    // sentinel after every keystroke and forced the IME to restart input each
+    // time — the main source of typing lag), the field now accumulates text
+    // and we forward only the diff. The IME is never interrupted, so typing
+    // stays fluid; a rare reset happens past 256 chars.
+    var ime by remember { mutableStateOf(TextFieldValue("")) }
+    var lastSent by remember { mutableStateOf("") }
     fun sendImeText(raw: String) {
         if (raw.isEmpty()) return
         val sb = StringBuilder()
         for (c in raw) sb.append(if (c == '\n') '\r' else c)
         controller.write(sb.toString())
+    }
+    fun sendAdded(added: String) {
+        if (added.isEmpty()) return
+        when {
+            controller.ctrlActive -> {
+                controller.ctrlActive = false
+                added.forEach { ch ->
+                    val lower = ch.lowercaseChar()
+                    if (lower in 'a'..'z' && added.length == 1) {
+                        controller.write(((lower - 'a' + 1).toChar()).toString())
+                    } else {
+                        sendImeText(ch.toString())
+                    }
+                }
+            }
+            controller.altActive -> {
+                controller.altActive = false
+                added.forEach { ch ->
+                    controller.write(if (ch == '\n') "\r" else "\u001B$ch")
+                }
+            }
+            controller.shiftActive -> {
+                controller.shiftActive = false
+                sendImeText(if (added.length == 1) added.uppercase() else added)
+            }
+            else -> sendImeText(added)
+        }
     }
 
     BoxWithConstraints(modifier = modifier) {
@@ -174,38 +204,29 @@ fun PtyTerminalView(
             value = ime,
             onValueChange = { v ->
                 val n = v.text
-                if (n.startsWith(IME_SENTINEL) && n.length > 1) {
-                    var added = n.substring(1)
-                    when {
-                        controller.ctrlActive -> {
-                            controller.ctrlActive = false
-                            added.forEach { ch ->
-                                val lower = ch.lowercaseChar()
-                                if (lower in 'a'..'z') {
-                                    controller.write(((lower - 'a' + 1).toChar()).toString())
-                                } else {
-                                    controller.write(ch.toString())
-                                }
-                            }
-                        }
-                        controller.altActive -> {
-                            controller.altActive = false
-                            added.forEach { ch ->
-                                controller.write(if (ch == '\n') "\r" else "\u001B$ch")
-                            }
-                        }
-                        controller.shiftActive -> {
-                            controller.shiftActive = false
-                            sendImeText(added.uppercase())
-                        }
-                        else -> sendImeText(added)
+                val o = lastSent
+                if (n != o) {
+                    // Prefix/suffix diff: robust to cursor moves and batch
+                    // commits. The field is never reset, so the IME is never
+                    // interrupted (that restart was the typing-lag source).
+                    var pre = 0
+                    val mn = minOf(o.length, n.length)
+                    while (pre < mn && o[pre] == n[pre]) pre++
+                    var suf = 0
+                    while (suf < mn - pre && o[o.length - 1 - suf] == n[n.length - 1 - suf]) suf++
+                    val removed = o.length - pre - suf
+                    val added = n.substring(pre, n.length - suf)
+                    repeat(removed) { controller.write("\u007F") }
+                    sendAdded(added)
+                    lastSent = n
+                    if (n.length > 256) {
+                        // Rare hygiene reset so the buffer stays small.
+                        lastSent = ""
+                        ime = TextFieldValue("", TextRange.Zero)
+                        return@BasicTextField
                     }
-                } else if (n != IME_SENTINEL) {
-                    // Backspace (or IME weirdness): one DEL per missing char, min one.
-                    val missing = (1 - n.length).coerceAtLeast(1)
-                    repeat(missing) { controller.write("\u007F") }
                 }
-                ime = TextFieldValue(IME_SENTINEL, TextRange(1))
+                ime = v
             },
             modifier = Modifier
                 .size(1.dp)
@@ -215,7 +236,7 @@ fun PtyTerminalView(
             singleLine = false,
             maxLines = 10,
             keyboardOptions = KeyboardOptions(
-                autoCorrect = false,
+                autoCorrectEnabled = false,
                 keyboardType = KeyboardType.Text,
                 imeAction = ImeAction.Unspecified,
             ),

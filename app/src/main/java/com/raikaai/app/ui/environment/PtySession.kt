@@ -44,9 +44,35 @@ class PtySession(
 
     private val mainHandler = Handler(Looper.getMainLooper())
 
+    // onTextChanged can fire dozens of times per second during output bursts
+    // (and once per keystroke echo). Cap redraws at ~30fps with a trailing
+    // bump so the last frame is never dropped.
+    private var lastBumpAt = 0L
+    private var trailingBumpPosted = false
+
+    private fun bumpRevision() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (now - lastBumpAt >= 33) {
+            lastBumpAt = now
+            revision++
+            return
+        }
+        if (!trailingBumpPosted) {
+            trailingBumpPosted = true
+            mainHandler.postDelayed(
+                {
+                    trailingBumpPosted = false
+                    lastBumpAt = android.os.SystemClock.uptimeMillis()
+                    revision++
+                },
+                33,
+            )
+        }
+    }
+
     private inner class SessionClient : TerminalSessionClient {
         override fun onTextChanged(changedSession: TerminalSession) {
-            revision++
+            bumpRevision()
         }
 
         override fun onTitleChanged(changedSession: TerminalSession) {
