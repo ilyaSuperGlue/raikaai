@@ -606,48 +606,6 @@ fi
 
     fun close() = scope.cancel()
 
-    /**
-     * proot argv prefix shared by one-shot runs and the interactive PTY
-     * shell. Callers append the guest command (e.g. `/bin/sh`).
-     */
-    fun prootArgv(): List<String> {
-        workspaceDir.mkdirs()
-        return listOf(
-            prootBin.absolutePath,
-            "-r", alpineDir.absolutePath,
-            "-b", "${workspaceDir.absolutePath}:/workspace",
-            "-b", "/dev",
-            "-b", "/proc",
-            "-0",
-            "-w", "/workspace",
-        )
-    }
-
-    /**
-     * Full guest environment map for spawning an interactive PTY shell
-     * (same proot paths as [run], plus a real TERM since output renders
-     * through a terminal emulator, not a pipe).
-     */
-    fun containerEnvMap(): Map<String, String> {
-        val libDir = nativeLibDir.absolutePath
-        val tmpDir = File(app.filesDir, "proot-tmp").apply { mkdirs() }.absolutePath
-        return mapOf(
-            "LD_LIBRARY_PATH" to libDir,
-            "PROOT_LOADER" to File(nativeLibDir, "libproot_loader.so").absolutePath,
-            "PROOT_LOADER_32" to File(nativeLibDir, "libproot_loader32.so").absolutePath,
-            "PROOT_NO_SECCOMP" to "1",
-            "PROOT_TMP_DIR" to tmpDir,
-            "PROOT_L2S_DIR" to tmpDir,
-            "PATH" to "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
-            "HOME" to "/root",
-            "TMPDIR" to "/tmp",
-            "TEMP" to "/tmp",
-            "TMP" to "/tmp",
-            "TERM" to "xterm-256color",
-            "LANG" to "C.UTF-8",
-        )
-    }
-
     // ── Internals ─────────────────────────────────────────────────────
 
     /** Points proot at its bundled engine: lib dir first on the search path. */

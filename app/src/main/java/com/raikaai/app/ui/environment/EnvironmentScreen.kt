@@ -10,7 +10,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
@@ -60,7 +59,6 @@ import androidx.compose.material3.Tab
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -189,7 +187,10 @@ fun EnvironmentScreen(
             }
 
             if (tab == 0) {
-                TerminalTab(manager = manager)
+                TerminalTab(
+                    manager = manager,
+                    onCommandDone = { filesTick++ },
+                )
             } else {
                 FilesTab(
                     key = filesTick,
@@ -251,86 +252,357 @@ private fun NotInstalledCard(
     }
 }
 
+/** One terminal transcript line (Termux-style coloring). */
+private data class TermLine(val kind: TermKind, val text: String)
+private enum class TermKind { CMD, OUT, ERR, SYS }
+
+private val TermGreen = Color(0xFF4CAF50)
+
 @Composable
 private fun TerminalTab(
     manager: ContainerManager,
+    onCommandDone: () -> Unit,
 ) {
-    val controller = remember { PtyController(manager) }
-    DisposableEffect(Unit) { onDispose { controller.finish() } }
+    val scope = rememberCoroutineScope()
+    val lines = remember { mutableStateListOf<TermLine>() }
+    val history = remember { mutableStateListOf<String>() }
+    var histPos by remember { mutableIntStateOf(-1) }
+    var input by remember { mutableStateOf(TextFieldValue("")) }
+    var running by remember { mutableStateOf(false) }
+    // Sticky modifiers like Termux: tap one, then tap the target key.
+    // Only one sticky at a time; any tap consumes it.
+    var ctrlActive by remember { mutableStateOf(false) }
+    var shiftActive by remember { mutableStateOf(false) }
+    var altActive by remember { mutableStateOf(false) }
+    var selAnchor by remember { mutableIntStateOf(-1) }
+    val listState = rememberLazyListState()
+    // Termux keys must hand focus back to the input, otherwise the IME keeps
+    // a stale buffer and typed text appears to vanish.
+    val fieldFocus = remember { FocusRequester() }
+
+    LaunchedEffect(lines.size) {
+        if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
+    }
+
+    fun setInputText(text: String) {
+        input = TextFieldValue(text, selection = TextRange(text.length))
+        selAnchor = -1
+    }
+
+    /** Inserts at the cursor and keeps IME focus (keys must not jump to the end). */
+    fun insertAtCursor(s: String) {
+        val cur = input
+        val len = cur.text.length
+        val lo = minOf(cur.selection.start, cur.selection.end).coerceIn(0, len)
+        val hi = maxOf(cur.selection.start, cur.selection.end).coerceIn(0, len)
+        val newText = cur.text.substring(0, lo) + s + cur.text.substring(hi)
+        input = cur.copy(text = newText, selection = TextRange(lo + s.length))
+        selAnchor = -1
+        fieldFocus.requestFocus()
+    }
+
+    fun exec(cmd: String) {
+        val clean = cmd.trim()
+        if (clean.isEmpty() || running) return
+        running = true
+        lines.add(TermLine(TermKind.CMD, clean))
+        history.add(clean)
+        histPos = -1
+        input = TextFieldValue("")
+        scope.launch(Dispatchers.IO) {
+            val res = manager.run(clean, timeoutSec = 60)
+            withContext(Dispatchers.Main) {
+                if (res.stdout.isNotBlank()) lines.add(TermLine(TermKind.OUT, res.stdout.take(3000)))
+                if (res.stderr.isNotBlank()) lines.add(TermLine(TermKind.ERR, res.stderr.take(1000)))
+                if (res.timedOut) lines.add(TermLine(TermKind.SYS, "[timed out after 60s]"))
+                running = false
+                onCommandDone()
+            }
+        }
+    }
+
+    fun moveCursor(delta: Int) {
+        val pos = (input.selection.end + delta).coerceIn(0, input.text.length)
+        input = input.copy(selection = TextRange(pos))
+        selAnchor = -1
+        fieldFocus.requestFocus()
+    }
+
+    fun isWordChar(c: Char) = c.isLetterOrDigit() || c in "_./~-$"
+
+    fun moveCursorWord(dir: Int) {
+        val t = input.text
+        var p = input.selection.end.coerceIn(0, t.length)
+        if (dir < 0) {
+            while (p > 0 && !isWordChar(t[p - 1])) p--
+            while (p > 0 && isWordChar(t[p - 1])) p--
+        } else {
+            while (p < t.length && !isWordChar(t[p])) p++
+            while (p < t.length && isWordChar(t[p])) p++
+        }
+        input = input.copy(selection = TextRange(p))
+        selAnchor = -1
+        fieldFocus.requestFocus()
+    }
+
+    /** Extends the selection from the anchor (SHIFT + arrows/END). */
+    fun extendSelectionTo(pos: Int) {
+        val t = input.text
+        val p = pos.coerceIn(0, t.length)
+        val a = if (selAnchor < 0) input.selection.end.coerceIn(0, t.length) else selAnchor
+        selAnchor = a
+        input = input.copy(selection = TextRange(minOf(a, p), maxOf(a, p)))
+        fieldFocus.requestFocus()
+    }
+
+    fun clearModifiers() {
+        ctrlActive = false
+        shiftActive = false
+        altActive = false
+    }
+
+    fun arrowLeft() {
+        val a = altActive
+        val s = shiftActive
+        clearModifiers()
+        when {
+            a -> moveCursorWord(-1)
+            s -> extendSelectionTo(input.selection.end - 1)
+            else -> moveCursor(-1)
+        }
+    }
+
+    fun arrowRight() {
+        val a = altActive
+        val s = shiftActive
+        clearModifiers()
+        when {
+            a -> moveCursorWord(1)
+            s -> extendSelectionTo(input.selection.end + 1)
+            else -> moveCursor(1)
+        }
+    }
+
+    fun goEnd() {
+        val s = shiftActive
+        clearModifiers()
+        if (s) extendSelectionTo(input.text.length)
+        else {
+            input = input.copy(selection = TextRange(input.text.length))
+            fieldFocus.requestFocus()
+        }
+    }
+
+    /** Completes the current token against /workspace (TAB). */
+    fun tabComplete() {
+        clearModifiers()
+        val text = input.text
+        val cursor = input.selection.end.coerceIn(0, text.length)
+        val before = text.substring(0, cursor)
+        val cut = before.indexOfLast { it == ' ' || it == '\t' || it == ';' || it == '|' || it == '&' || it == '(' || it == '"' || it == '\'' }
+        val token = before.substring(cut + 1)
+        if (token.isEmpty()) return
+        val root = manager.workspaceDir
+        val dirPart = token.substringBeforeLast('/', "")
+        val prefix = token.substringAfterLast('/')
+        val base = if (dirPart.startsWith("/")) File(root, dirPart.removePrefix("/")) else File(root, dirPart)
+        val baseOk = runCatching {
+            base.canonicalPath == root.canonicalPath || base.canonicalPath.startsWith(root.canonicalPath + File.separator)
+        }.getOrDefault(false) && base.isDirectory
+        if (!baseOk) return
+        val cands = (base.listFiles() ?: return).filter { it.name.startsWith(prefix) }.sortedBy { it.name }
+        if (cands.isEmpty()) return
+        if (cands.size == 1) {
+            insertAtCursor(cands[0].name.removePrefix(prefix) + if (cands[0].isDirectory) "/" else " ")
+        } else {
+            val rest = cands.map { it.name.removePrefix(prefix) }
+            val common = rest.reduce { acc, s -> acc.commonPrefixWith(s) }
+            if (common.isNotEmpty()) insertAtCursor(common)
+            lines.add(TermLine(TermKind.SYS, cands.joinToString("  ") { it.name + if (it.isDirectory) "/" else "" }.take(600)))
+        }
+        fieldFocus.requestFocus()
+    }
+
+    fun historyStep(dir: Int) {
+        if (history.isEmpty()) return
+        clearModifiers()
+        histPos = (histPos + dir).coerceIn(-1, history.size - 1)
+        setInputText(if (histPos < 0) "" else history[history.size - 1 - histPos])
+        fieldFocus.requestFocus()
+    }
+
+    /** Sticky-modifier combos from typed letters (CTRL/ALT/SHIFT then a key). */
+    fun onInputChange(v: TextFieldValue) {
+        if ((ctrlActive || altActive) && v.text.length > input.text.length) {
+            val key = v.text.last().lowercaseChar()
+            val wasAlt = altActive
+            clearModifiers()
+            if (!wasAlt && key == 'c') {
+                scope.launch(Dispatchers.IO) { manager.cancelRun() }
+                lines.add(TermLine(TermKind.SYS, "^C"))
+            } else if (!wasAlt && key == 'l') {
+                lines.clear()
+            } else if (!wasAlt && key == 'u') {
+                setInputText("")
+            } else {
+                input = v
+                histPos = -1
+            }
+            selAnchor = -1
+            fieldFocus.requestFocus()
+            return
+        }
+        if (shiftActive && v.text.length > input.text.length) {
+            shiftActive = false
+            altActive = false
+            ctrlActive = false
+            input = v.copy(text = v.text.dropLast(1) + v.text.last().uppercaseChar())
+            histPos = -1
+            selAnchor = -1
+            fieldFocus.requestFocus()
+            return
+        }
+        input = v
+        histPos = -1
+        selAnchor = -1
+    }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color.Black),
-            modifier = Modifier.fillMaxWidth().weight(1f),
+            modifier = Modifier.fillMaxWidth().weight(1f).clickable { fieldFocus.requestFocus() },
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
-                PtyTerminalView(controller = controller, modifier = Modifier.fillMaxSize())
-                val exited = controller.session?.exited == true
-                if (exited) {
-                    Column(
-                        modifier = Modifier.align(Alignment.Center),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                    ) {
-                        Text(
-                            "Shell exited.",
-                            color = Color.White.copy(alpha = 0.7f),
-                            fontFamily = FontFamily.Monospace,
-                            fontSize = 12.sp,
-                        )
-                        Spacer(Modifier.height(8.dp))
-                        Button(onClick = { controller.restart() }) {
-                            Text("Restart shell")
+            Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
+                if (lines.isEmpty()) {
+                    Text(
+                        "Alpine shell — type below. TAB completes, ↑↓ history, CTRL/ALT/SHIFT sticky.",
+                        style = MaterialTheme.typography.bodySmall,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        color = Color.White.copy(alpha = 0.7f),
+                    )
+                } else {
+                    LazyColumn(state = listState, modifier = Modifier.fillMaxWidth().weight(1f)) {
+                        items(lines.size) { i ->
+                            val line = lines[i]
+                            when (line.kind) {
+                                TermKind.CMD -> Text(
+                                    "$ ${line.text}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = TermGreen,
+                                )
+                                TermKind.ERR -> Text(
+                                    line.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = MaterialTheme.colorScheme.error,
+                                )
+                                TermKind.SYS -> Text(
+                                    line.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = Color.White.copy(alpha = 0.6f),
+                                )
+                                TermKind.OUT -> Text(
+                                    line.text,
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontFamily = FontFamily.Monospace,
+                                    fontSize = 11.sp,
+                                    lineHeight = 14.sp,
+                                    color = Color.White,
+                                )
+                            }
                         }
                     }
+                }
+                // Inline shell prompt (Termux-style: type directly in the shell).
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Text(
+                        if (running) "… " else "$ ",
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 11.sp,
+                        lineHeight = 14.sp,
+                        color = if (running) Color(0xFFFFC107) else TermGreen,
+                    )
+                    BasicTextField(
+                        value = input,
+                        onValueChange = ::onInputChange,
+                        modifier = Modifier.weight(1f).focusRequester(fieldFocus),
+                        textStyle = MaterialTheme.typography.bodySmall.copy(
+                            fontFamily = FontFamily.Monospace,
+                            fontSize = 11.sp,
+                            lineHeight = 14.sp,
+                            color = Color.White,
+                        ),
+                        cursorBrush = SolidColor(Color.White),
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
+                        keyboardActions = KeyboardActions(onGo = { exec(input.text) }),
+                    )
                 }
             }
         }
         Spacer(Modifier.height(8.dp))
         // Termux-style extra keys in three compact rows (all fit without clipping).
-        // CTRL/ALT/SHIFT are sticky: tap one, then tap the target key (or type a letter).
+        // CTRL/ALT/SHIFT are sticky: tap one, then tap the target key.
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            termKey("ESC") { controller.write("\u001B") }
-            termKey("TAB") { controller.write("\t") }
-            termKey("CTRL", active = controller.ctrlActive) {
-                val on = !controller.ctrlActive
-                controller.clearModifiers()
-                controller.ctrlActive = on
+            termKey("ESC") { input = TextFieldValue(""); clearModifiers(); fieldFocus.requestFocus() }
+            termKey("TAB") { tabComplete() }
+            termKey("CTRL", active = ctrlActive) {
+                val on = !ctrlActive
+                clearModifiers()
+                ctrlActive = on
+                fieldFocus.requestFocus()
             }
-            termKey("ALT", active = controller.altActive) {
-                val on = !controller.altActive
-                controller.clearModifiers()
-                controller.altActive = on
+            termKey("ALT", active = altActive) {
+                val on = !altActive
+                clearModifiers()
+                altActive = on
+                fieldFocus.requestFocus()
             }
-            termKey("SHIFT", active = controller.shiftActive) {
-                val on = !controller.shiftActive
-                controller.clearModifiers()
-                controller.shiftActive = on
+            termKey("SHIFT", active = shiftActive) {
+                val on = !shiftActive
+                clearModifiers()
+                shiftActive = on
+                fieldFocus.requestFocus()
             }
-            termKey("↑") { controller.write("\u001B[A") }
-            termKey("↓") { controller.write("\u001B[B") }
+            termKey("↑") { historyStep(1) }
+            termKey("↓") { historyStep(-1) }
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            termKey("←") { controller.write("\u001B[C") }
-            termKey("→") { controller.write("\u001B[D") }
-            termKey("END") { controller.write("\u001B[F") }
-            termKey("PGUP") { controller.pageUp() }
-            termKey("PGDN") { controller.pageDown() }
-            termKey("/") { controller.write("/") }
-            termKey("|") { controller.write("|") }
+            termKey("←") { arrowLeft() }
+            termKey("→") { arrowRight() }
+            termKey("END") { goEnd() }
+            termKey("PGUP") { scope.launch { listState.animateScrollToItem(0) } }
+            termKey("PGDN") { scope.launch { if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1) } }
+            termKey("/") { insertAtCursor("/") }
+            termKey("|") { insertAtCursor("|") }
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            termKey("~") { controller.write("~") }
-            termKey("-") { controller.write("-") }
-            termKey("_") { controller.write("_") }
-            termKey(".") { controller.write(".") }
-            termKey("*") { controller.write("*") }
-            termKey("$") { controller.write("$") }
-            termKey("\"") { controller.write("\"") }
-            termKey("'") { controller.write("'") }
+            termKey("~") { insertAtCursor("~") }
+            termKey("-") { insertAtCursor("-") }
+            termKey("_") { insertAtCursor("_") }
+            termKey(".") { insertAtCursor(".") }
+            termKey("*") { insertAtCursor("*") }
+            termKey("$") { insertAtCursor("$") }
+            termKey("\"") { insertAtCursor("\"") }
+            termKey("'") { insertAtCursor("'") }
         }
     }
 }
+
 @Composable
 private fun termKey(label: String, active: Boolean = false, onTap: () -> Unit) {
     TextButton(
