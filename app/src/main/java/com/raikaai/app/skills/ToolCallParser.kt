@@ -199,7 +199,18 @@ object ToolCallParser {
             .replace(Regex("<think>[\\s\\S]*?</think>", RegexOption.IGNORE_CASE), "")
             .replace(Regex("<thought>[\\s\\S]*?</thought>", RegexOption.IGNORE_CASE), "")
             .trim()
-        val targetText = if (clean.isNotBlank()) clean else text
+        // Thinking models sometimes emit the call INSIDE their thinking block.
+        // Prefer calls outside thinking (a think-block call is often a
+        // discarded draft), but fall back to raw text so those still execute
+        // instead of dying as an "empty response".
+        for (targetText in listOf(clean, text).distinct()) {
+            collectBodies(targetText)?.let { return it }
+        }
+        return null
+    }
+
+    private fun collectBodies(targetText: String): GenericToolCall? {
+        if (targetText.isBlank()) return null
         val bodies = mutableListOf<Pair<String, String>>()
 
         val xmlMatcher = Pattern.compile(

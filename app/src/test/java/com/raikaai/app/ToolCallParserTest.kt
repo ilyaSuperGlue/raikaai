@@ -110,6 +110,17 @@ class ToolCallParserTest {
     }
 
     @Test
+    fun testCallInsideThinkingStillExecutes() {
+        val text = "<think>I'll check the workspace. " +
+            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"ls /workspace\"}}</tool_call>" +
+            "</think>"
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("execute_in_container", parsed?.name)
+        assertEquals("ls /workspace", parsed?.arguments?.get("command")?.asString)
+    }
+
+    @Test
     fun testMultilineBrokenJsonCommand() {
         val text = "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": " +
             "{\"command\": \"unzip -l \\\"/workspace/\nkzkt-license-web-main.zip\\\"\"}}</tool_call>"

@@ -1679,6 +1679,8 @@ class ChatViewModel(
         yolo: Boolean,
         ranThisTurn: MutableMap<String, Int>?,
         onStatus: (String) -> Unit,
+        followUpOutCap: Int = 4000,
+        followUpErrCap: Int = 1000,
     ): ContainerDispatch {
         val lower = toolName.lowercase()
         if (lower == "list_daemons") {
@@ -1749,8 +1751,8 @@ class ChatViewModel(
             command, res.stdout, res.stderr, res.exitCode, res.timedOut, autoApproved = auto,
         )
         val ctx = "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
-            "stdout:\n${res.stdout.take(4000)}\n" +
-            (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
+            "stdout:\n${res.stdout.take(followUpOutCap)}\n" +
+            (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(followUpErrCap)}\n" else "") +
             (if (res.exitCode != 0 && command.contains('\n')) "\nHINT: the command contained a line break. If a path or package name got split across lines, re-emit the ENTIRE tool call on ONE single line.\n" else "") +
             "Summarize the result for the user. Never claim you ran anything else."
         return ContainerDispatch(ctx, block, res.exitCode)
@@ -1772,11 +1774,14 @@ class ChatViewModel(
         onMetricsUpdate: (LiteRtEngineManager.InferenceMetrics) -> Unit,
     ): List<String>? {
         val idx = messages.lastIndex
-        val dispatched = dispatchContainerTool(call.name, call.arguments, s.containerYolo, null) { status ->
-            if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                messages[idx] = messages[idx].copy(content = status)
-            }
-        }
+        val dispatched = dispatchContainerTool(
+            call.name, call.arguments, s.containerYolo, null,
+            onStatus = { status ->
+                if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                    messages[idx] = messages[idx].copy(content = status)
+                }
+            },
+        )
         val toolContext = dispatched.toolContext
         val executedBlock: String? = dispatched.block
         // Inject the tool outcome into the last user turn and stream a follow-up.
@@ -2865,6 +2870,7 @@ class ChatViewModel(
         var rounds = 0
         val ranThisTurn = mutableMapOf<String, Int>()
         val executedBlocks = mutableListOf<String>()
+        var keptRawFallback = false
         // True agent loop: each round's follow-up becomes the next round's
         // input, so the model chains ls -> cat -> run -> verify by itself.
         while (rounds < MAX_CONTAINER_ROUNDS) {
@@ -2873,11 +2879,15 @@ class ChatViewModel(
             if (!isContainerToolCall(call.name)) break
             rounds++
             KLog.d("ChatVM", "Remote container round $rounds/$MAX_CONTAINER_ROUNDS: ${call.name}")
-            val dispatched = dispatchContainerTool(call.name, call.arguments, s.containerYolo, ranThisTurn) { status ->
-                if (currentConversationId == targetChatId && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                    messages[idx] = messages[idx].copy(content = status)
-                }
-            }
+            val dispatched = dispatchContainerTool(
+                call.name, call.arguments, s.containerYolo, ranThisTurn,
+                followUpOutCap = 1500, followUpErrCap = 400,
+                onStatus = { status ->
+                    if (currentConversationId == targetChatId && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                        messages[idx] = messages[idx].copy(content = status)
+                    }
+                },
+            )
             dispatched.block?.let { executedBlocks.add(it) }
             val toolContext = dispatched.toolContext
             if (currentConversationId != targetChatId) return
@@ -2911,6 +2921,20 @@ class ChatViewModel(
                 onDelta = {},
             )
             followFinishReason?.let { KLog.d("ChatVM", "Remote container follow-up finish_reason=$it") }
+            // Provider cut the reply mid-thinking (or returned nothing): the
+            // finally-block would delete this message as "empty". Keep the raw
+            // command outputs instead so the turn is never a dead end.
+            if (currentConversationId == targetChatId &&
+                stripThinking(messages[idx].content).isBlank() && executedBlocks.isNotEmpty()
+            ) {
+                KLog.w("ChatVM", "Remote container follow-up came back empty; keeping raw outputs")
+                messages[idx] = messages[idx].copy(
+                    content = executedBlocks.joinToString("\n\n") +
+                        "\n\n_(The model returned no summary — results above are the raw command outputs.)_",
+                )
+                keptRawFallback = true
+                return
+            }
         }
         if (rounds >= MAX_CONTAINER_ROUNDS && currentConversationId == targetChatId &&
             messages[idx].role == ChatConstants.ROLE_ASSISTANT
@@ -2924,7 +2948,8 @@ class ChatViewModel(
             }
         }
         // Verbose mode: keep every executed command + output visible above the summary.
-        if (executedBlocks.isNotEmpty() && idx < messages.size &&
+        // Skipped when the raw-fallback above already laid the blocks out.
+        if (!keptRawFallback && executedBlocks.isNotEmpty() && idx < messages.size &&
             messages[idx].role == ChatConstants.ROLE_ASSISTANT
         ) {
             messages[idx] = messages[idx].copy(
