@@ -127,6 +127,9 @@ Requirements: JDK 17+, Android SDK (compileSdk 37, targetSdk 36), and an ARM64 A
 RaikaAI is built with these open-source projects:
 
 - [Google AI Edge LiteRT](https://ai.google.dev/edge/litert) for on-device LLM inference.
+- [PRoot](https://proot-me.github.io/) for user-space chroot and virtualization without root.
+- [Alpine Linux](https://alpinelinux.org/) for the lightweight on-device sandbox environment.
+- [Termux](https://termux.dev/) for terminal virtual keypad patterns and Android userland tooling inspiration.
 - [Ktor](https://ktor.io/) for the embedded HTTP/CIO server.
 - [Jetpack Compose](https://developer.android.com/compose) for the Android UI.
 - [MaterialKolor](https://github.com/jordond/MaterialKolor) for Material 3 color theming.

@@ -127,6 +127,9 @@ Kebutuhan: JDK 17+, Android SDK (compileSdk 37, targetSdk 36), dan perangkat fis
 RaikaAI dibangun dengan proyek open-source berikut:
 
 - [Google AI Edge LiteRT](https://ai.google.dev/edge/litert) untuk inferensi LLM on-device.
+- [PRoot](https://proot-me.github.io/) untuk virtualisasi chroot tingkat user-space tanpa root.
+- [Alpine Linux](https://alpinelinux.org/) untuk distribusi rootfs sandbox ringan di perangkat.
+- [Termux](https://termux.dev/) untuk inspirasi implementasi virtual keypad terminal dan userland tooling di Android.
 - [Ktor](https://ktor.io/) untuk server HTTP/CIO bawaan.
 - [Jetpack Compose](https://developer.android.com/compose) untuk UI Android.
 - [MaterialKolor](https://github.com/jordond/MaterialKolor) untuk theming warna Material 3.
