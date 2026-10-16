@@ -475,6 +475,11 @@ class ContainerManager private constructor(
         env["LD_LIBRARY_PATH"] = if (existing.isBlank()) libDir else "$libDir:$existing"
         env["PROOT_LOADER"] = File(nativeLibDir, "libproot_loader.so").absolutePath
         env["PROOT_LOADER_32"] = File(nativeLibDir, "libproot_loader32.so").absolutePath
+        // proot's own documented workaround: its seccomp fast path returns
+        // bogus errno (e.g. EACCES on apk's dirfd-relative openat/linkat) on
+        // newer kernels ("new syscall order"). Pure ptrace is the reference
+        // path and always correct; the per-syscall cost is negligible here.
+        env["PROOT_NO_SECCOMP"] = "1"
         // Guest shells inherit an empty PATH through proot: set Alpine's
         // default so apk/ls/busybox applets resolve without full paths.
         // Guest TMPDIR points inside the guest (/tmp is created on install);
