@@ -425,22 +425,51 @@ object RemoteAiClient {
                 reqBuilder.addHeader("Authorization", "Bearer $apiKey")
             }
 
-            val response = client.newCall(reqBuilder.build()).execute()
+            var response: okhttp3.Response? = null
+            var attempts = 0
+            val maxRetries = 3
+            while (attempts < maxRetries) {
+                attempts++
+                try {
+                    val resp = client.newCall(reqBuilder.build()).execute()
+                    if (resp.isSuccessful) {
+                        response = resp
+                        break
+                    }
+                    val code = resp.code
+                    resp.close()
+                    if (code == 429 || code in 500..504) {
+                        KLog.w("RemoteAiClient", "HTTP $code from provider, auto-retrying attempt $attempts/$maxRetries...")
+                        if (attempts < maxRetries) {
+                            kotlinx.coroutines.delay(1000L * attempts)
+                            continue
+                        }
+                    }
+                    throw IllegalStateException("Remote server error: HTTP $code (${resp.message})")
+                } catch (e: Exception) {
+                    if (e is kotlinx.coroutines.CancellationException) throw e
+                    if (e is IllegalStateException) throw e
+                    KLog.w("RemoteAiClient", "Network error (${e.message}), auto-retrying attempt $attempts/$maxRetries...")
+                    if (attempts < maxRetries) {
+                        kotlinx.coroutines.delay(1000L * attempts)
+                    } else {
+                        throw e
+                    }
+                }
+            }
+
+            val validResponse = response ?: throw IllegalStateException("Failed to connect after $maxRetries attempts")
             // Close the connection promptly when the collecting coroutine is
             // cancelled, instead of blocking in readLine() until the next
             // chunk or socket timeout.
             currentCoroutineContext()[Job]?.invokeOnCompletion {
                 try {
-                    response.close()
+                    validResponse.close()
                 } catch (_: Exception) {
                 }
             }
             try {
-                if (!response.isSuccessful) {
-                    throw IllegalStateException("Remote server error: HTTP ${response.code} (${response.message})")
-                }
-
-                val reader = response.body?.byteStream()?.bufferedReader() ?: return@flow
+                val reader = validResponse.body?.byteStream()?.bufferedReader() ?: return@flow
                 var inThinking = false
                 var lastFinishReason = ""
                 try {

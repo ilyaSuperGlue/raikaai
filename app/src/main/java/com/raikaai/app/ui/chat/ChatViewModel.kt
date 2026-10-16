@@ -86,7 +86,7 @@ data class PersonaPreset(
 }
 
 /** Max autonomous container rounds per remote turn (OpenCode-style agent loop). */
-internal const val MAX_CONTAINER_ROUNDS = 10
+internal const val MAX_CONTAINER_ROUNDS = 30
 
 /** Fresh turns kept verbatim beside a compaction summary (never folded). */
 internal const val VERBATIM_TAIL_COUNT = 4
@@ -3125,6 +3125,39 @@ class ChatViewModel(
                             if (firstChunkAt == 0L) firstChunkAt = System.currentTimeMillis()
                         },
                     )
+
+                    // Auto-continue cut-off response if provider stopped due to max_tokens length cap
+                    var autoContinues = 0
+                    while (remoteFinishReason == "length" && autoContinues < 2 && currentConversationId == targetRemoteChatId) {
+                        autoContinues++
+                        KLog.d("ChatVM", "Response truncated by token limit (finish_reason=length), auto-continuing (pass $autoContinues/2)...")
+                        val currentText = messages.lastOrNull()?.content.orEmpty()
+                        if (currentText.isBlank()) break
+                        val contHistory = history.toMutableList().apply {
+                            add(RemoteChatMessage(role = "assistant", text = currentText))
+                            add(RemoteChatMessage(role = "user", text = "Continue writing directly from where you were cut off. Do not repeat text already written."))
+                        }
+                        val contCounts = contHistory.map { estimateTokens(it.text) }
+                        val contCapped = capMessagesToWindow(contHistory, contCounts, remoteWindow, s.maxTokens + 256)
+                        remoteFinishReason = null
+                        collectStreamIntoMessage(
+                            deltas =
+                                RemoteAiClient.streamChat(
+                                    baseUrl = s.remoteBaseUrl,
+                                    apiKey = s.remoteApiKey,
+                                    model = s.remoteModelId,
+                                    messages = contCapped,
+                                    temperature = effectiveTemperature(s),
+                                    topP = s.topP,
+                                    maxTokens = s.maxTokens,
+                                    onUsageTokens = { usageCompletionTokens = (usageCompletionTokens ?: 0) + it },
+                                    onFinishReason = { remoteFinishReason = it },
+                                ),
+                            targetChatId = targetRemoteChatId,
+                            onDelta = {},
+                        )
+                    }
+
                     // One autonomous container round (mirrors generate_image handling
                     // in finally): execute + stream a single follow-up, never re-parsed.
                     handleRemoteContainerFollowUp(
