@@ -2740,6 +2740,7 @@ class ChatViewModel(
             return
         }
         var rounds = 0
+        val ranThisTurn = mutableMapOf<String, Int>()
         while (rounds < 3) {
             if (currentConversationId != targetChatId) return
             val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
@@ -2747,8 +2748,12 @@ class ChatViewModel(
             rounds++
             KLog.d("ChatVM", "Remote container round $rounds: ${call.name}")
             val command = extractToolCommand(call.arguments, call.name)
-        val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
-        val toolContext: String = when {
+            val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
+            val toolContext: String = if (command.isNotBlank() && ranThisTurn.containsKey(command)) {
+                KLog.d("ChatVM", "Remote container: identical command already ran, skipping re-run")
+                "[CONTAINER TOOL SKIPPED] That exact command already ran this turn. " +
+                    "Do NOT emit it again. Fix the command or try a different one."
+            } else when {
             command.isBlank() ->
                 "[CONTAINER TOOL ERROR]\nEmpty command. Provide the shell to run."
             policy == com.raikaai.app.core.container.InstallPolicy.DENY -> {
@@ -2764,10 +2769,12 @@ class ChatViewModel(
                     "[CONTAINER TOOL CALL DENIED]\nThe user denied running `$command`. Apologize briefly and ask how to proceed without the sandbox."
                 } else {
                     val res = containerManager.run(command)
+                    ranThisTurn[command] = res.exitCode
                     KLog.d("ChatVM", "Remote container tool exit=${res.exitCode}")
                     "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
                         "stdout:\n${res.stdout.take(4000)}\n" +
                         (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
+                        (if (res.exitCode != 0 && command.contains('\n')) "\nHINT: the command contained a line break. If a path or package name got split across lines, re-emit the ENTIRE tool call on ONE single line.\n" else "") +
                         "Summarize the result for the user. Never claim you ran anything else."
                 }
             }

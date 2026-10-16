@@ -75,5 +75,7 @@ class ContainerManifestTest {
         // Real separators outside quotes are untouched.
         assertEquals("cd /tmp\nls", joinBrokenPaths("cd /tmp\nls"))
         assertEquals("echo hi", joinBrokenPaths("echo hi"))
+        // Other wraps inside quotes join with a space.
+        assertEquals("echo \"a b\"", joinBrokenPaths("echo \"a\nb\""))
     }
 }

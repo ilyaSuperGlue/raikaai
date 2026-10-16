@@ -153,6 +153,17 @@ internal fun joinBrokenPaths(command: String): String {
                     continue
                 }
             }
+            if (c == '\r' || c == '\n') {
+                // Any other wrap inside quotes: join with a single space.
+                // Genuine multiline strings are vanishingly rare in tool
+                // calls; accidental wraps of long lines are common.
+                var j = i + 1
+                if (c == '\r' && j < command.length && command[j] == '\n') j++
+                while (j < command.length && (command[j] == ' ' || command[j] == '\t')) j++
+                sb.append(' ')
+                i = j
+                continue
+            }
             sb.append(c)
             i++
         } else {
