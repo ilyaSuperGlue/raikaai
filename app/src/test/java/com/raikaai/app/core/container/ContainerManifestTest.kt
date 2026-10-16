@@ -77,5 +77,10 @@ class ContainerManifestTest {
         assertEquals("echo hi", joinBrokenPaths("echo hi"))
         // Other wraps inside quotes join with a space.
         assertEquals("echo \"a b\"", joinBrokenPaths("echo \"a\nb\""))
+        // Pretty-printer wraps after slashes even outside quotes.
+        assertEquals(
+            "cat /workspace/kzkt_app/kzkt-license-web-main/web_server.py",
+            joinBrokenPaths("cat /workspace/kzkt_app/\nkzkt-license-web-main/web_server.py"),
+        )
     }
 }

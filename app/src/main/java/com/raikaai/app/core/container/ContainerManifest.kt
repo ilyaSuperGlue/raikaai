@@ -124,14 +124,18 @@ private val shellOperators = setOf(";", "&", "|", "`", "$", "(", ")", "<", ">", 
  */
 internal fun joinBrokenPaths(command: String): String {
     if (!command.contains('\n')) return command
-    val sb = StringBuilder(command.length)
+    // Models hard-wrap long tool-call lines at width, almost always right
+    // after a `/`. Nobody writes `/` + newline intentionally, so rejoin those
+    // everywhere (quoted or not). Other newlines are real separators.
+    var s = slashWrapRegex.replace(command, "/")
+    val sb = StringBuilder(s.length)
     var i = 0
     var quote = '\u0000'
-    while (i < command.length) {
-        val c = command[i]
+    while (i < s.length) {
+        val c = s[i]
         if (quote != '\u0000') {
-            if (c == '\\' && quote == '"' && i + 1 < command.length) {
-                sb.append(c).append(command[i + 1])
+            if (c == '\\' && quote == '"' && i + 1 < s.length) {
+                sb.append(c).append(s[i + 1])
                 i += 2
                 continue
             }
@@ -143,11 +147,11 @@ internal fun joinBrokenPaths(command: String): String {
             }
             if (c == '/') {
                 var j = i + 1
-                while (j < command.length && (command[j] == ' ' || command[j] == '\t')) j++
-                if (j < command.length && command[j] == '\r') j++
-                if (j < command.length && command[j] == '\n') {
+                while (j < s.length && (s[j] == ' ' || s[j] == '\t')) j++
+                if (j < s.length && s[j] == '\r') j++
+                if (j < s.length && s[j] == '\n') {
                     j++
-                    while (j < command.length && (command[j] == ' ' || command[j] == '\t')) j++
+                    while (j < s.length && (s[j] == ' ' || s[j] == '\t')) j++
                     sb.append('/')
                     i = j
                     continue
@@ -158,8 +162,8 @@ internal fun joinBrokenPaths(command: String): String {
                 // Genuine multiline strings are vanishingly rare in tool
                 // calls; accidental wraps of long lines are common.
                 var j = i + 1
-                if (c == '\r' && j < command.length && command[j] == '\n') j++
-                while (j < command.length && (command[j] == ' ' || command[j] == '\t')) j++
+                if (c == '\r' && j < s.length && s[j] == '\n') j++
+                while (j < s.length && (s[j] == ' ' || s[j] == '\t')) j++
                 sb.append(' ')
                 i = j
                 continue
@@ -174,6 +178,8 @@ internal fun joinBrokenPaths(command: String): String {
     }
     return sb.toString()
 }
+
+private val slashWrapRegex = Regex("/[ \\t]*\\r?\\n[ \\t]*")
 
 fun installPolicyFor(command: String): InstallPolicy {
     val cmd = command.trim()
