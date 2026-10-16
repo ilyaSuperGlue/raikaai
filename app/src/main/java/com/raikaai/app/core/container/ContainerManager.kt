@@ -203,8 +203,7 @@ fi
         return n
     }
 
-    fun workspaceFiles(): List<File> {
-        val dir = workspaceDir
+    fun workspaceFiles(dir: File = workspaceDir): List<File> {
         if (!dir.isDirectory) return emptyList()
         return dir.listFiles()?.sortedBy { it.name.lowercase() } ?: emptyList()
     }

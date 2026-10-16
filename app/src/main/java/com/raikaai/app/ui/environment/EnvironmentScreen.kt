@@ -11,6 +11,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -268,8 +269,12 @@ private fun TerminalTab(
     var histPos by remember { mutableIntStateOf(-1) }
     var input by remember { mutableStateOf(TextFieldValue("")) }
     var running by remember { mutableStateOf(false) }
-    // Sticky CTRL like Termux: tap CTRL, then tap a combo key (or type a letter).
+    // Sticky modifiers like Termux: tap one, then tap the target key.
+    // Only one sticky at a time; any tap consumes it.
     var ctrlActive by remember { mutableStateOf(false) }
+    var shiftActive by remember { mutableStateOf(false) }
+    var altActive by remember { mutableStateOf(false) }
+    var selAnchor by remember { mutableIntStateOf(-1) }
     val listState = rememberLazyListState()
     // Termux keys must hand focus back to the input, otherwise the IME keeps
     // a stale buffer and typed text appears to vanish.
@@ -281,6 +286,7 @@ private fun TerminalTab(
 
     fun setInputText(text: String) {
         input = TextFieldValue(text, selection = TextRange(text.length))
+        selAnchor = -1
     }
 
     /** Inserts at the cursor and keeps IME focus (keys must not jump to the end). */
@@ -291,6 +297,7 @@ private fun TerminalTab(
         val hi = maxOf(cur.selection.start, cur.selection.end).coerceIn(0, len)
         val newText = cur.text.substring(0, lo) + s + cur.text.substring(hi)
         input = cur.copy(text = newText, selection = TextRange(lo + s.length))
+        selAnchor = -1
         fieldFocus.requestFocus()
     }
 
@@ -317,37 +324,147 @@ private fun TerminalTab(
     fun moveCursor(delta: Int) {
         val pos = (input.selection.end + delta).coerceIn(0, input.text.length)
         input = input.copy(selection = TextRange(pos))
+        selAnchor = -1
+        fieldFocus.requestFocus()
+    }
+
+    fun isWordChar(c: Char) = c.isLetterOrDigit() || c in "_./~-$"
+
+    fun moveCursorWord(dir: Int) {
+        val t = input.text
+        var p = input.selection.end.coerceIn(0, t.length)
+        if (dir < 0) {
+            while (p > 0 && !isWordChar(t[p - 1])) p--
+            while (p > 0 && isWordChar(t[p - 1])) p--
+        } else {
+            while (p < t.length && !isWordChar(t[p])) p++
+            while (p < t.length && isWordChar(t[p])) p++
+        }
+        input = input.copy(selection = TextRange(p))
+        selAnchor = -1
+        fieldFocus.requestFocus()
+    }
+
+    /** Extends the selection from the anchor (SHIFT + arrows/END). */
+    fun extendSelectionTo(pos: Int) {
+        val t = input.text
+        val p = pos.coerceIn(0, t.length)
+        val a = if (selAnchor < 0) input.selection.end.coerceIn(0, t.length) else selAnchor
+        selAnchor = a
+        input = input.copy(selection = TextRange(minOf(a, p), maxOf(a, p)))
+        fieldFocus.requestFocus()
+    }
+
+    fun clearModifiers() {
+        ctrlActive = false
+        shiftActive = false
+        altActive = false
+    }
+
+    fun arrowLeft() {
+        val a = altActive
+        val s = shiftActive
+        clearModifiers()
+        when {
+            a -> moveCursorWord(-1)
+            s -> extendSelectionTo(input.selection.end - 1)
+            else -> moveCursor(-1)
+        }
+    }
+
+    fun arrowRight() {
+        val a = altActive
+        val s = shiftActive
+        clearModifiers()
+        when {
+            a -> moveCursorWord(1)
+            s -> extendSelectionTo(input.selection.end + 1)
+            else -> moveCursor(1)
+        }
+    }
+
+    fun goEnd() {
+        val s = shiftActive
+        clearModifiers()
+        if (s) extendSelectionTo(input.text.length)
+        else {
+            input = input.copy(selection = TextRange(input.text.length))
+            fieldFocus.requestFocus()
+        }
+    }
+
+    /** Completes the current token against /workspace (TAB). */
+    fun tabComplete() {
+        clearModifiers()
+        val text = input.text
+        val cursor = input.selection.end.coerceIn(0, text.length)
+        val before = text.substring(0, cursor)
+        val cut = before.indexOfLast { it == ' ' || it == '\t' || it == ';' || it == '|' || it == '&' || it == '(' || it == '"' || it == '\'' }
+        val token = before.substring(cut + 1)
+        if (token.isEmpty()) return
+        val root = manager.workspaceDir
+        val dirPart = token.substringBeforeLast('/', "")
+        val prefix = token.substringAfterLast('/')
+        val base = if (dirPart.startsWith("/")) File(root, dirPart.removePrefix("/")) else File(root, dirPart)
+        val baseOk = runCatching {
+            base.canonicalPath == root.canonicalPath || base.canonicalPath.startsWith(root.canonicalPath + File.separator)
+        }.getOrDefault(false) && base.isDirectory
+        if (!baseOk) return
+        val cands = (base.listFiles() ?: return).filter { it.name.startsWith(prefix) }.sortedBy { it.name }
+        if (cands.isEmpty()) return
+        if (cands.size == 1) {
+            insertAtCursor(cands[0].name.removePrefix(prefix) + if (cands[0].isDirectory) "/" else " ")
+        } else {
+            val rest = cands.map { it.name.removePrefix(prefix) }
+            val common = rest.reduce { acc, s -> acc.commonPrefixWith(s) }
+            if (common.isNotEmpty()) insertAtCursor(common)
+            lines.add(TermLine(TermKind.SYS, cands.joinToString("  ") { it.name + if (it.isDirectory) "/" else "" }.take(600)))
+        }
         fieldFocus.requestFocus()
     }
 
     fun historyStep(dir: Int) {
         if (history.isEmpty()) return
+        clearModifiers()
         histPos = (histPos + dir).coerceIn(-1, history.size - 1)
         setInputText(if (histPos < 0) "" else history[history.size - 1 - histPos])
         fieldFocus.requestFocus()
     }
 
-    /** Sticky-CTRL combo from a typed letter (CTRL then `c` on the keyboard). */
+    /** Sticky-modifier combos from typed letters (CTRL/ALT/SHIFT then a key). */
     fun onInputChange(v: TextFieldValue) {
-        if (ctrlActive && v.text.length > input.text.length) {
-            ctrlActive = false
-            when (v.text.last().lowercaseChar()) {
-                'c' -> {
-                    scope.launch(Dispatchers.IO) { manager.cancelRun() }
-                    lines.add(TermLine(TermKind.SYS, "^C"))
-                }
-                'l' -> lines.clear()
-                'u' -> setInputText("")
-                else -> {
-                    input = v
-                    histPos = -1
-                }
+        if ((ctrlActive || altActive) && v.text.length > input.text.length) {
+            val key = v.text.last().lowercaseChar()
+            val wasAlt = altActive
+            clearModifiers()
+            if (!wasAlt && key == 'c') {
+                scope.launch(Dispatchers.IO) { manager.cancelRun() }
+                lines.add(TermLine(TermKind.SYS, "^C"))
+            } else if (!wasAlt && key == 'l') {
+                lines.clear()
+            } else if (!wasAlt && key == 'u') {
+                setInputText("")
+            } else {
+                input = v
+                histPos = -1
             }
+            selAnchor = -1
+            fieldFocus.requestFocus()
+            return
+        }
+        if (shiftActive && v.text.length > input.text.length) {
+            shiftActive = false
+            altActive = false
+            ctrlActive = false
+            input = v.copy(text = v.text.dropLast(1) + v.text.last().uppercaseChar())
+            histPos = -1
+            selAnchor = -1
             fieldFocus.requestFocus()
             return
         }
         input = v
         histPos = -1
+        selAnchor = -1
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
@@ -359,7 +476,7 @@ private fun TerminalTab(
             Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                 if (lines.isEmpty()) {
                     Text(
-                        "Alpine shell — type below. ↑↓ history, CTRL combos, ESC clears.",
+                        "Alpine shell — type below. TAB completes, ↑↓ history, CTRL/ALT/SHIFT sticky.",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,
@@ -438,29 +555,50 @@ private fun TerminalTab(
             }
         }
         Spacer(Modifier.height(8.dp))
-        // Termux-style extra keys, two rows. CTRL is sticky: tap it, then a combo.
+        // Termux-style extra keys in three compact rows (all fit without clipping).
+        // CTRL/ALT/SHIFT are sticky: tap one, then tap the target key.
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            termKey("ESC") { input = TextFieldValue(""); fieldFocus.requestFocus() }
-            termKey("/") { insertAtCursor("/") }
-            termKey("|") { insertAtCursor("|") }
-            termKey("~") { insertAtCursor("~") }
-            termKey("-") { insertAtCursor("-") }
-            termKey("_") { insertAtCursor("_") }
+            termKey("ESC") { input = TextFieldValue(""); clearModifiers(); fieldFocus.requestFocus() }
+            termKey("TAB") { tabComplete() }
+            termKey("CTRL", active = ctrlActive) {
+                val on = !ctrlActive
+                clearModifiers()
+                ctrlActive = on
+                fieldFocus.requestFocus()
+            }
+            termKey("ALT", active = altActive) {
+                val on = !altActive
+                clearModifiers()
+                altActive = on
+                fieldFocus.requestFocus()
+            }
+            termKey("SHIFT", active = shiftActive) {
+                val on = !shiftActive
+                clearModifiers()
+                shiftActive = on
+                fieldFocus.requestFocus()
+            }
             termKey("↑") { historyStep(1) }
             termKey("↓") { historyStep(-1) }
         }
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
-            termKey("CTRL", active = ctrlActive) { ctrlActive = !ctrlActive; fieldFocus.requestFocus() }
-            termKey("←") { moveCursor(-1) }
-            termKey("→") { moveCursor(1) }
-            termKey("END") {
-                input = input.copy(selection = TextRange(input.text.length))
-                fieldFocus.requestFocus()
-            }
+            termKey("←") { arrowLeft() }
+            termKey("→") { arrowRight() }
+            termKey("END") { goEnd() }
             termKey("PGUP") { scope.launch { listState.animateScrollToItem(0) } }
             termKey("PGDN") { scope.launch { if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1) } }
+            termKey("/") { insertAtCursor("/") }
+            termKey("|") { insertAtCursor("|") }
+        }
+        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceEvenly) {
+            termKey("~") { insertAtCursor("~") }
+            termKey("-") { insertAtCursor("-") }
+            termKey("_") { insertAtCursor("_") }
             termKey(".") { insertAtCursor(".") }
             termKey("*") { insertAtCursor("*") }
+            termKey("$") { insertAtCursor("$") }
+            termKey("\"") { insertAtCursor("\"") }
+            termKey("'") { insertAtCursor("'") }
         }
     }
 }
@@ -469,7 +607,8 @@ private fun TerminalTab(
 private fun termKey(label: String, active: Boolean = false, onTap: () -> Unit) {
     TextButton(
         onClick = onTap,
-        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp),
+        modifier = Modifier.defaultMinSize(minWidth = 1.dp, minHeight = 32.dp),
+        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp),
         colors = ButtonDefaults.textButtonColors(
             contentColor = if (active) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
         ),
@@ -477,8 +616,9 @@ private fun termKey(label: String, active: Boolean = false, onTap: () -> Unit) {
         Text(
             label,
             fontFamily = FontFamily.Monospace,
-            fontSize = 12.sp,
+            fontSize = 11.sp,
             fontWeight = if (active) FontWeight.Bold else FontWeight.Normal,
+            maxLines = 1,
         )
     }
 }
@@ -492,53 +632,95 @@ private fun FilesTab(
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val rootDir = remember { manager.workspaceDir }
+    var currentDir by remember { mutableStateOf(manager.workspaceDir) }
     var files by remember { mutableStateOf(listOf<File>()) }
     var previewFile by remember { mutableStateOf<File?>(null) }
     var previewText by remember { mutableStateOf<String?>(null) }
 
     fun refresh() {
         scope.launch(Dispatchers.IO) {
-            val list = manager.workspaceFiles()
+            val list = manager.workspaceFiles(currentDir)
             withContext(Dispatchers.Main) { files = list }
         }
     }
-    LaunchedEffect(key) { refresh() }
+    LaunchedEffect(key, currentDir) { refresh() }
+
+    val relPath = remember(currentDir) {
+        runCatching {
+            val rel = File(currentDir.canonicalPath.removePrefix(rootDir.canonicalPath)).path
+                .removePrefix(File.separator)
+            if (rel.isBlank()) "/workspace" else "/workspace/$rel"
+        }.getOrDefault("/workspace")
+    }
 
     val importLauncher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri: Uri? ->
         if (uri == null) return@rememberLauncherForActivityResult
         scope.launch(Dispatchers.IO) {
             try {
                 val name = sanitizeFileName(queryDisplayName(context, uri) ?: "import_${System.currentTimeMillis()}")
-                val dest = File(manager.workspaceDir, name)
+                val dest = File(currentDir, name)
                 context.contentResolver.openInputStream(uri)?.use { input ->
                     dest.outputStream().use { output -> input.copyTo(output) }
                 }
-                withContext(Dispatchers.Main) { refresh() }
-            } catch (_: Throwable) {}
+                withContext(Dispatchers.Main) {
+                    toast(context, "Imported $name")
+                    refresh()
+                }
+            } catch (_: Throwable) {
+                withContext(Dispatchers.Main) { toast(context, "Import failed") }
+            }
         }
     }
 
     Column(modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 8.dp)) {
         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-            Text("/workspace (${files.size} files)", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.SemiBold)
+            Text(
+                "$relPath (${files.size})",
+                style = MaterialTheme.typography.titleSmall,
+                fontWeight = FontWeight.SemiBold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
             TextButton(onClick = { importLauncher.launch(arrayOf("*/*")) }) { Text("Import") }
         }
         Spacer(Modifier.height(4.dp))
+        if (currentDir != rootDir && isWithinRoot(rootDir, currentDir)) {
+            Card(
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
+                modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp),
+                onClick = {
+                    val parent = currentDir.parentFile
+                    if (parent != null && isWithinRoot(rootDir, parent)) currentDir = parent else currentDir = rootDir
+                },
+            ) {
+                Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text("↑", fontFamily = FontFamily.Monospace, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                    Spacer(Modifier.width(10.dp))
+                    Text(".. (up)", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold)
+                }
+            }
+        }
         if (files.isEmpty()) {
             Text(
-                "Empty. Import a file or ask the AI to save results to /workspace.",
+                "This folder is empty. Import a file or ask the AI to save results here.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
         } else {
             LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 items(files, key = { it.absolutePath }) { f ->
+                    val isDir = f.isDirectory
                     Card(
                         shape = RoundedCornerShape(12.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainerLow),
                         modifier = Modifier.fillMaxWidth(),
                         onClick = {
-                            if (isTextFile(f)) {
+                            if (isDir) {
+                                if (isWithinRoot(rootDir, f)) currentDir = f
+                            } else if (isTextFile(f)) {
                                 scope.launch(Dispatchers.IO) {
                                     val text = runCatching {
                                         f.bufferedReader().use { r ->
@@ -573,7 +755,11 @@ private fun FilesTab(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(f.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.SemiBold, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(
-                                    "${formatBytes(f.length())} · ${java.text.SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(java.util.Date(f.lastModified()))}",
+                                    text = if (isDir) {
+                                        "Folder · ${java.text.SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(java.util.Date(f.lastModified()))}"
+                                    } else {
+                                        "${formatBytes(f.length())} · ${java.text.SimpleDateFormat("dd MMM HH:mm", Locale.getDefault()).format(java.util.Date(f.lastModified()))}"
+                                    },
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 )
@@ -598,8 +784,13 @@ private fun FilesTab(
                             }
                             IconButton(onClick = {
                                 scope.launch(Dispatchers.IO) {
-                                    f.delete()
-                                    withContext(Dispatchers.Main) { refresh() }
+                                    val ok = runCatching {
+                                        if (f.isDirectory) f.deleteRecursively() else f.delete()
+                                    }.getOrDefault(false)
+                                    withContext(Dispatchers.Main) {
+                                        toast(context, if (ok) "Deleted ${f.name}" else "Delete failed")
+                                        refresh()
+                                    }
                                 }
                             }) {
                                 Icon(Icons.Default.Delete, contentDescription = "Delete", modifier = Modifier.size(18.dp))
@@ -647,8 +838,20 @@ private fun queryDisplayName(context: Context, uri: Uri): String? {
 }
 
 private fun isTextFile(f: File): Boolean {
+    if (f.isDirectory) return false
     val ext = f.extension.lowercase()
     return ext in setOf("txt", "md", "csv", "json", "xml", "yml", "yaml", "log", "py", "js", "ts", "sh", "kt", "java", "html", "css", "toml", "ini", "conf", "rc") || f.length() < 200_000 && ext.isEmpty()
+}
+
+/** True when [f] lives inside [root] (prevents escaping /workspace). */
+private fun isWithinRoot(root: File, f: File): Boolean {
+    return runCatching {
+        f.canonicalPath == root.canonicalPath || f.canonicalPath.startsWith(root.canonicalPath + File.separator)
+    }.getOrDefault(false)
+}
+
+private fun toast(context: Context, msg: String) {
+    android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
 }
 
 private fun formatBytes(n: Long): String {
