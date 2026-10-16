@@ -4116,7 +4116,8 @@ class ChatViewModel(
             "- Files live strictly in /workspace. Chat attachments are mirrored to /workspace/chat_uploads/.\n" +
             "- Do NOT repeat exploration commands or re-read files you already inspected in earlier turns. Move directly to editing or writing files.\n" +
             "- When writing code, write the complete file or make targeted edits with edit_file. Do not loop reading the same file.\n" +
-            "- When work is complete, provide your final response explaining what was done.\n" +
+            "- NEVER claim a server or web app is running, built, or active (e.g. \"Status: Active HTTP 200 OK\") unless you actually executed `execute_in_container` with `run_in_background: true` to start it and verified it. If you only created/edited files, state that files are ready and instruct how to start it or start it yourself.\n" +
+            "- To run web servers in background: use execute_in_container with \"run_in_background\": true (e.g. `npm run dev -- --host 0.0.0.0`).\n" +
             "- Manage servers with list_daemons and stop_daemon {\"id\"}.\n" +
             "- Act directly: emit tool calls instead of asking what to run. Do not narrate reasoning steps."
     }
