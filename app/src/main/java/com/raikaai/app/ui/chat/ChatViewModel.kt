@@ -1753,6 +1753,7 @@ class ChatViewModel(
         val ctx = "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
             "stdout:\n${res.stdout.take(followUpOutCap)}\n" +
             (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(followUpErrCap)}\n" else "") +
+            (if (res.exitCode == 127) "\nHINT: 'command not found' — this minimal rootfs has busybox applets (wget, netstat, unzip, ifconfig) plus a curl shim; anything else needs `apk add` first.\n" else "") +
             (if (res.exitCode != 0 && command.contains('\n')) "\nHINT: the command contained a line break. If a path or package name got split across lines, re-emit the ENTIRE tool call on ONE single line.\n" else "") +
             "Summarize the result for the user. Never claim you ran anything else."
         return ContainerDispatch(ctx, block, res.exitCode)

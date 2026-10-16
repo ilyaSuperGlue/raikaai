@@ -50,7 +50,40 @@ class ContainerManager private constructor(
          * (symlinks, permissions, …) so stale on-device rootfs is detected
          * and the UI forces a reinstall instead of failing cryptically.
          */
-        const val ROOTFS_SCHEMA = 4
+        const val ROOTFS_SCHEMA = 5
+
+        /**
+         * Minimal `curl` subset (GET only) backed by busybox wget, installed
+         * to /usr/local/bin at install time. Triple-quoted: no Kotlin
+         * escapes needed except ${'$'} for shell variables (none used).
+         */
+        const val CURL_SHIM = """#!/bin/sh
+# Minimal curl subset for agents (backed by busybox wget). GET only.
+head_only=0
+outfile=""
+url=""
+next_is_outfile=0
+for a in "${'$'}@"; do
+    if [ "${'$'}next_is_outfile" = 1 ]; then
+        outfile="${'$'}a"; next_is_outfile=0; continue
+    fi
+    case "${'$'}a" in
+        -I|--head) head_only=1 ;;
+        -o|--output) next_is_outfile=1 ;;
+        -O|--remote-name) outfile="REMOTE" ;;
+        -s|-S|-sS|-Ss|-L|--location|-f|--fail|-k|--insecure|-q) ;;
+        -*) ;;
+        *) url="${'$'}a" ;;
+    esac
+done
+if [ -z "${'$'}url" ]; then echo "curl: no URL" >&2; exit 2; fi
+if [ "${'$'}outfile" = "REMOTE" ]; then outfile="${'$'}{url##*/}"; fi
+if [ "${'$'}head_only" = 1 ]; then
+    if wget -q -O /dev/null "${'$'}url"; then echo "HTTP OK: ${'$'}url"; else echo "curl: failed: ${'$'}url" >&2; exit 1; fi
+else
+    if [ -n "${'$'}outfile" ]; then wget -q -O "${'$'}outfile" "${'$'}url"; else wget -qO- "${'$'}url"; fi
+fi
+"""
 
         @Volatile private var instance: ContainerManager? = null
 
@@ -222,6 +255,7 @@ class ContainerManager private constructor(
                 listOf("tmp", "var/cache/apk", "etc/apk", "lib/apk/db", "root").forEach {
                     File(alpineDir, it).mkdirs()
                 }
+                installCurlShim()
                 File(alpineDir, ".installed").writeText("${manifest.alpineVersion}#$ROOTFS_SCHEMA")
                 settingsRepo.setAlpineInstalled(true)
                 settingsRepo.setAlpineVersion(manifest.alpineVersion)
@@ -490,6 +524,19 @@ class ContainerManager private constructor(
             withContext(Dispatchers.IO) { daemons.keys.toList() }
         }
         ids.forEach { stopDaemon(it) }
+    }
+
+    /**
+     * Installs a minimal `curl` subset backed by the busybox `wget` applet
+     * (Alpine minirootfs ships no curl/ss/nc, and models constantly reach
+     * for `curl -I`). Supports: [-sS] [-L] [-I] [-o FILE] [-O] URL, GET only.
+     */
+    private fun installCurlShim() {
+        val dest = File(alpineDir, "usr/local/bin/curl")
+        dest.parentFile?.mkdirs()
+        dest.writeText(CURL_SHIM)
+        dest.setExecutable(true, false)
+        if (!dest.canExecute()) throw IllegalStateException("curl shim not executable")
     }
 
     // ── Serve localhost ───────────────────────────────────────────────
