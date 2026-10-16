@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
+## [0.1.4] - 2026-10-16
+
+### Added
+- **Chrome-Style Multi-Tab Terminal Sessions**: Horizontal tab bar (`Term 1`, `Term 2`, `+` button) allowing multiple simultaneous terminal sessions in Linux Environment. Tabs execute concurrently without thread blocking, enabling background servers (like Vite/Node) in one tab while executing shell commands in another.
+- **Terminal State Persistency**: Terminal transcript, command history, and draft inputs survive tab switching and app navigation via ViewModel lifecycle.
+- **Real-Time Streaming Output**: Asynchronous streaming stdout/stderr in PRoot terminal with live output rendering, eliminating frozen UI and 60s hard timeouts for long-running processes.
+- **Dedicated File Manipulation Tools**: Container agent tools `write_file`, `edit_file`, and `read_file` replace fragile shell echo/cat scripts with robust local filesystem operations.
+- **Collapsible Code Blocks**: Markdown code blocks default to 10 lines with line counter badges and one-tap Expand/Collapse controls.
+- **Quick Stop Action**: Red instant-stop action button (`✕`) alongside command prompt for terminating active running foreground processes without keyboard modifiers.
+- **Remote Stream Resilience**: Exponential backoff auto-retry (up to 3x) for remote AI inference streams on socket timeouts, network drops, and HTTP 429/500-504 errors.
+
+### Fixed
+- **Multi-Round Thinking & Action Block Leakage**: Extracted and rendered all multi-turn `<think>`, `<thought>`, `<thinking>`, and `<action>` tags into structured UI cards without raw XML tag leakage in chat bubbles, TTS, or history summaries.
+- **Streaming Tool Call Escapes**: Formatted streaming tool calls into stylized code block cards in real-time, preventing escaped JSON string leakage.
+- **Agent Loop Premature Halts**: Expanded autonomous coding loop limit from 10 to 30 rounds with automatic length continuation when token limits are reached (`finish_reason == "length"`).
+- **Server Status Hallucination**: Strict agent prompt guards preventing LLMs from claiming dev servers are running without verified container daemon startup.
+- **Background Operator Redirection**: Terminal commands with `&` or background syntax automatically route to detached container daemons (`startDaemon`) to prevent execution hangs.
+
 ## [0.1.3] - 2026-10-16
 
 ### Added
