@@ -116,6 +116,54 @@ private val safeReadonlyBinaries = setOf(
 /** Shell metacharacters that can smuggle side effects into "read-only" calls. */
 private val shellOperators = setOf(";", "&", "|", "`", "$", "(", ")", "<", ">", "\\", "\n")
 
+/**
+ * Joins newlines that split a path inside quotes (`"/workspace/\nkzkt.zip"`
+ * → `"/workspace/kzkt.zip"`). Models hard-wrap long tool-call lines at
+ * exactly such spots. Newlines OUTSIDE quotes are real command separators
+ * and are left alone (`cd /tmp` + newline + `ls` must keep working).
+ */
+internal fun joinBrokenPaths(command: String): String {
+    if (!command.contains('\n')) return command
+    val sb = StringBuilder(command.length)
+    var i = 0
+    var quote = '\u0000'
+    while (i < command.length) {
+        val c = command[i]
+        if (quote != '\u0000') {
+            if (c == '\\' && quote == '"' && i + 1 < command.length) {
+                sb.append(c).append(command[i + 1])
+                i += 2
+                continue
+            }
+            if (c == quote) {
+                quote = '\u0000'
+                sb.append(c)
+                i++
+                continue
+            }
+            if (c == '/') {
+                var j = i + 1
+                while (j < command.length && (command[j] == ' ' || command[j] == '\t')) j++
+                if (j < command.length && command[j] == '\r') j++
+                if (j < command.length && command[j] == '\n') {
+                    j++
+                    while (j < command.length && (command[j] == ' ' || command[j] == '\t')) j++
+                    sb.append('/')
+                    i = j
+                    continue
+                }
+            }
+            sb.append(c)
+            i++
+        } else {
+            if (c == '"' || c == '\'') quote = c
+            sb.append(c)
+            i++
+        }
+    }
+    return sb.toString()
+}
+
 fun installPolicyFor(command: String): InstallPolicy {
     val cmd = command.trim()
     if (cmd.isEmpty()) return InstallPolicy.DENY

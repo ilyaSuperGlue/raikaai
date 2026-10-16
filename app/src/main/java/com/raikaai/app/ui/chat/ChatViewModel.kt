@@ -1638,9 +1638,10 @@ class ChatViewModel(
             if (v != null && v.isJsonPrimitive) {
                 val t = v.asString.trim()
                 if (t.isNotBlank()) {
-                    return if (toolName.lowercase() in CONTAINER_INSTALL_NAMES && !t.startsWith("apk") && !t.contains(" ")) {
+                    val cmd = if (toolName.lowercase() in CONTAINER_INSTALL_NAMES && !t.startsWith("apk") && !t.contains(" ")) {
                         "apk add --no-cache $t"
                     } else t
+                    return com.raikaai.app.core.container.joinBrokenPaths(cmd)
                 }
             }
         }

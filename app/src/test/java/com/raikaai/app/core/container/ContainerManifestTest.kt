@@ -61,4 +61,19 @@ class ContainerManifestTest {
         assertEquals(InstallPolicy.DENY, installPolicyFor("rm -rf /"))
         assertEquals(InstallPolicy.DENY, installPolicyFor("apk add --allow-untrusted foo"))
     }
+
+    @Test
+    fun joinBrokenPathsOnlyInsideQuotes() {
+        assertEquals(
+            "cat \"/workspace/kzkt/x.zip\"",
+            joinBrokenPaths("cat \"/workspace/\nkzkt/x.zip\""),
+        )
+        assertEquals(
+            "cat '/workspace/kzkt/x.zip'",
+            joinBrokenPaths("cat '/workspace/  \n  kzkt/x.zip'"),
+        )
+        // Real separators outside quotes are untouched.
+        assertEquals("cd /tmp\nls", joinBrokenPaths("cd /tmp\nls"))
+        assertEquals("echo hi", joinBrokenPaths("echo hi"))
+    }
 }
