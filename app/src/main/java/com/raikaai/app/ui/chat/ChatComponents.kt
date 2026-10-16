@@ -560,7 +560,7 @@ internal fun MessageBubble(
                         .fillMaxWidth(if (isUser) 0.85f else 1f)
                         .padding(bottom = 6.dp)
                         .clip(RoundedCornerShape(12.dp))
-                        .clickable { onPreviewImage(message.imagePath ?: "") },
+                        .clickable { onPreviewImage(message.imagePath) },
                     contentScale = ContentScale.FillWidth,
                 )
             }

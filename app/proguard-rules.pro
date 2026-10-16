@@ -11,6 +11,7 @@
 -keep class com.raikaai.app.localai.** { *; }
 -keep class com.raikaai.app.core.server.** { *; }
 -keep class com.raikaai.app.core.remote.** { *; }
+-keep class com.raikaai.app.core.container.** { *; }
 -keep class com.raikaai.app.ui.chat.PersonaPreset { *; }
 -keep class com.raikaai.app.ui.chat.BenchmarkResult { *; }
 -keep class com.raikaai.app.skills.** { *; }
