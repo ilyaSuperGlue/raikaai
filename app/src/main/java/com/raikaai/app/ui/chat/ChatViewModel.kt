@@ -1494,7 +1494,7 @@ class ChatViewModel(
                 }
                 if (isContainerToolCall(genericCall.name)) {
                     if (!containerReady(s)) {
-                        errorMessage.value = "Linux Environment not ready — open Models Hub → Linux Environment → Install/Update, then retry."
+                        errorMessage.value = "Linux Environment not ready — run /env install or open /env to install, then retry."
                         KLog.w("ChatVM", "Container call skipped: environment not ready")
                     } else {
                         return handleContainerToolCall(
@@ -2145,7 +2145,7 @@ class ChatViewModel(
                     when (sub) {
                         "install" -> {
                             containerManager.install()
-                            "Downloading Alpine… watch progress in Models Hub → Linux Environment."
+                            "Downloading Alpine… check /env for progress."
                         }
                         "wipe", "uninstall", "hapus" -> {
                             containerManager.wipe()
@@ -2172,7 +2172,7 @@ class ChatViewModel(
             val reply = when (arg) {
                 "on", "enable", "true", "1" -> {
                     settingsRepo.setContainerYolo(true)
-                    "YOLO mode ON — sandbox commands auto-run (destructive ones stay blocked). Toggle in Models Hub → Linux Environment."
+                    "YOLO mode ON — sandbox commands auto-run (destructive ones stay blocked). Toggle via /permission yolo or /yolo."
                 }
                 "off", "disable", "false", "0" -> {
                     settingsRepo.setContainerYolo(false)
@@ -3040,7 +3040,7 @@ class ChatViewModel(
         val firstCall = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
         if (!isContainerToolCall(firstCall.name)) return
         if (!containerReady(s)) {
-            errorMessage.value = "Linux Environment not ready — open Models Hub → Linux Environment → Install/Update, then retry."
+            errorMessage.value = "Linux Environment not ready — run /env install or open /env to install, then retry."
             KLog.w("ChatVM", "Remote container call skipped: environment not ready")
             return
         }

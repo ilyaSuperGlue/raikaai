@@ -115,7 +115,9 @@ import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.filled.Translate
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.TextFieldValue
 import androidx.compose.material.icons.filled.UploadFile
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material3.AlertDialog
@@ -239,7 +241,10 @@ fun ChatScreen(
     val errorMessage by viewModel.errorMessage
     val context = LocalContext.current
 
-    var input by remember { mutableStateOf("") }
+    var input by remember { mutableStateOf(TextFieldValue("")) }
+    fun setInputText(text: String) {
+        input = TextFieldValue(text = text, selection = TextRange(text.length))
+    }
 
     // Widget prefill: "Ask RaikaAI" home-screen widget delivers a prompt via
     // MainActivity's intent extra; consume it once into the composer.
@@ -248,7 +253,7 @@ fun ChatScreen(
         val p = pendingPrefill
         if (!p.isNullOrBlank()) {
             viewModel.consumePrefill()
-            input = p
+            setInputText(p)
         }
     }
     // Overlay/dialog state shared with the composer and dialogs host.
@@ -318,7 +323,8 @@ fun ChatScreen(
                 val matches = result.data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 val spoken = matches?.firstOrNull()?.trim().orEmpty()
                 if (spoken.isNotBlank()) {
-                    input = if (input.isBlank()) spoken else "$input $spoken"
+                    val cur = input.text
+                    setInputText(if (cur.isBlank()) spoken else "$cur $spoken")
                 }
             }
         }
@@ -363,7 +369,8 @@ fun ChatScreen(
                 } else {
                     speechHelper.startListening(
                         onResult = { transcribed ->
-                            input = if (input.isBlank()) transcribed else "$input $transcribed"
+                            val cur = input.text
+                            setInputText(if (cur.isBlank()) transcribed else "$cur $transcribed")
                         },
                         onFallbackToIntent = { intent ->
                             try {
@@ -406,11 +413,11 @@ fun ChatScreen(
         }
     }
 
-    val isSlashActive = input.startsWith("/")
+    val isSlashActive = input.text.startsWith("/")
     val matchingSlashCommands =
-        remember(input) {
-            if (input.startsWith("/")) {
-                val q = input.removePrefix("/").trim()
+        remember(input.text) {
+            if (input.text.startsWith("/")) {
+                val q = input.text.removePrefix("/").trim()
                 if (q.isEmpty()) {
                     DEFAULT_SLASH_COMMANDS
                 } else {
@@ -464,7 +471,7 @@ fun ChatScreen(
                         .padding(horizontal = 10.dp, vertical = 4.dp),
             ) {
                 // Token Context indicator (Subtle status with dynamic progress line)
-                if (hasMessages || input.isNotBlank()) {
+                if (hasMessages || input.text.isNotBlank()) {
                     val totalContextTokens = viewModel.liveContextTokens.intValue
                     val maxTokens = settings.contextWindowTokens
                     val ratio = if (maxTokens > 0) (totalContextTokens.toFloat() / maxTokens.toFloat()) * 100f else 0f
@@ -488,8 +495,8 @@ fun ChatScreen(
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically,
                         ) {
-                            val inputTokens = viewModel.estimateTokens(input)
-                            if (isCompressing || input.isNotBlank()) {
+                            val inputTokens = viewModel.estimateTokens(input.text)
+                            if (isCompressing || input.text.isNotBlank()) {
                                 Text(
                                     text =
                                         if (isCompressing) {
@@ -554,7 +561,7 @@ fun ChatScreen(
                             items(matchingSlashCommands, key = { it.command }) { cmd ->
                                 Surface(
                                     onClick = {
-                                        input = cmd.promptTemplate
+                                        setInputText(cmd.promptTemplate)
                                     },
                                     shape = RoundedCornerShape(10.dp),
                                     color = MaterialTheme.colorScheme.surfaceContainerLowest,
@@ -912,7 +919,7 @@ fun ChatScreen(
                                         modifier = Modifier.fillMaxWidth(),
                                         contentAlignment = Alignment.CenterStart,
                                     ) {
-                                        if (input.isEmpty()) {
+                                        if (input.text.isEmpty()) {
                                             Text(
                                                 text =
                                                     when {
@@ -1103,7 +1110,7 @@ fun ChatScreen(
                             }
 
                             // Right Group: Voice Input & Send / Stop Action Button
-                            val canSend = input.isNotBlank() || selectedAttachments.isNotEmpty() || selectedAudioFile != null
+                            val canSend = input.text.isNotBlank() || selectedAttachments.isNotEmpty() || selectedAudioFile != null
                             val isListening = speechHelper.isListening.value || isRecordingAudio
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
@@ -1146,7 +1153,8 @@ fun ChatScreen(
                                                     if (hasPerm) {
                                                         speechHelper.startListening(
                                                             onResult = { transcribed ->
-                                                                input = if (input.isBlank()) transcribed else "$input $transcribed"
+                                                                val cur = input.text
+                                                                setInputText(if (cur.isBlank()) transcribed else "$cur $transcribed")
                                                             },
                                                             onFallbackToIntent = launchSpeechIntentSafely,
                                                         )
@@ -1185,8 +1193,8 @@ fun ChatScreen(
                                             if (isGenerating) {
                                                 viewModel.stopGeneration()
                                             } else if (canSend) {
-                                                val text = input
-                                                input = ""
+                                                val text = input.text
+                                                input = TextFieldValue("")
                                                 viewModel.sendMessage(text)
                                             }
                                         },
