@@ -2117,10 +2117,11 @@ class ChatViewModel(
                         com.raikaai.app.util.NetworkUtils.HttpClient.searchClient
                             .newCall(req).execute().use { "HTTP ${it.code}" }
                     }.getOrElse { "FAIL: ${it.message?.take(120)}" }
-                    // Guest side (proves the container path works).
+                    // Guest side (proves the container path works). No pipes: `$?`
+                    // must be wget's own code, not head's.
                     val guestResolv = containerManager.run("cat /etc/resolv.conf").stdout.trim().take(200)
-                    val guestIpRoute = containerManager.run("wget -qO- --timeout=8 http://8.8.8.8/ 2>&1 | head -c 60; echo; echo wget-ip-exit=$?").stdout.trim().take(200)
-                    val guestDns = containerManager.run("wget -qO- --timeout=8 http://google.com/ 2>&1 | head -c 60; echo; echo wget-dns-exit=$?").stdout.trim().take(200)
+                    val guestIpRoute = containerManager.run("wget -q -O /tmp/_nt_ip --timeout=8 http://8.8.8.8/ 2>&1; echo wget-ip-exit=$?").stdout.trim().take(200)
+                    val guestDns = containerManager.run("wget -q -O /tmp/_nt_dns --timeout=8 http://google.com/ 2>&1; echo wget-dns-exit=$?").stdout.trim().take(200)
                     "Phone net: $appSide\nGuest resolv.conf:\n$guestResolv\nGuest route (IP literal):\n$guestIpRoute\nGuest DNS+route (hostname):\n$guestDns"
                 }
                 trimmed.startsWith("/daemons", ignoreCase = true) -> {
