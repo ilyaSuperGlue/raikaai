@@ -2538,6 +2538,7 @@ class ChatViewModel(
         var promptTokensEstimate = 0
         val targetRemoteChatId = currentConversationId
         var ragSources: List<String>? = null
+        var remoteFinishReason: String? = null
 
         genJob =
             viewModelScope.launch {
@@ -2595,6 +2596,7 @@ class ChatViewModel(
                                 topP = s.topP,
                                 maxTokens = s.maxTokens,
                                 onUsageTokens = { usageCompletionTokens = it },
+                                onFinishReason = { remoteFinishReason = it },
                             ),
                         targetChatId = targetRemoteChatId,
                         onDelta = {
@@ -2641,7 +2643,16 @@ class ChatViewModel(
                                 val decodeStart = if (firstChunkAt > 0L) firstChunkAt else start
                                 val duration = maxOf(0.1f, (System.currentTimeMillis() - decodeStart) / 1000f)
                                 val tokSec = outputTokens / duration
-                                val badge = "%.1f tok/s · %d tokens · Remote".format(tokSec, outputTokens)
+                                // finish_reason=length means the PROVIDER cut the reply
+                                // at its own cap (our max_tokens request was higher).
+                                // Surfacing it answers "kepotong" complaints in-app.
+                                val cutSuffix = if (remoteFinishReason == "length") " · provider limit" else ""
+                                KLog.d(
+                                    "ChatVM",
+                                    "Remote done: requested max_tokens=${s.maxTokens}, " +
+                                        "got $outputTokens, finish_reason=${remoteFinishReason ?: "?"}",
+                                )
+                                val badge = "%.1f tok/s · %d tokens · Remote$cutSuffix".format(tokSec, outputTokens)
                                 val variants = if (current.variants.orEmpty().isEmpty()) listOf(current.content) else current.variants
                                 messages[idx] = current.copy(stats = badge, variants = variants, sources = ragSources)
                                 recordRemoteCost(s.remoteModelId, promptTokensEstimate, outputTokens)
@@ -2741,6 +2752,7 @@ class ChatViewModel(
         val cappedFollow = capMessagesToWindow(follow, counts, remoteWindow, s.maxTokens + 256)
         onPromptCounted(counts.sum())
         messages[idx] = messages[idx].copy(content = "")
+        var followFinishReason: String? = null
         collectStreamIntoMessage(
             deltas =
                 RemoteAiClient.streamChat(
@@ -2752,10 +2764,12 @@ class ChatViewModel(
                     topP = s.topP,
                     maxTokens = s.maxTokens,
                     onUsageTokens = onUsageTokens,
+                    onFinishReason = { followFinishReason = it },
                 ),
             targetChatId = targetChatId,
             onDelta = {},
         )
+        followFinishReason?.let { KLog.d("ChatVM", "Remote container follow-up finish_reason=$it") }
     }
 
     /**

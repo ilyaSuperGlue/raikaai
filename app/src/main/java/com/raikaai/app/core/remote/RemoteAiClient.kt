@@ -396,6 +396,7 @@ object RemoteAiClient {
         topP: Float = com.raikaai.app.data.SamplingDefaults.TOP_P,
         maxTokens: Int = 2048,
         onUsageTokens: ((completionTokens: Int) -> Unit)? = null,
+        onFinishReason: ((finishReason: String) -> Unit)? = null,
     ): Flow<String> =
         flow {
             val cleanUrl = baseUrl.trimEnd('/')
@@ -441,6 +442,7 @@ object RemoteAiClient {
 
                 val reader = response.body?.byteStream()?.bufferedReader() ?: return@flow
                 var inThinking = false
+                var lastFinishReason = ""
                 try {
                     while (true) {
                         val line = reader.readBoundedLine() ?: break
@@ -455,7 +457,15 @@ object RemoteAiClient {
                                 val chunkJson = JSONObject(data)
                                 val choices = chunkJson.optJSONArray("choices")
                                 if (choices != null && choices.length() > 0) {
-                                    val delta = choices.getJSONObject(0).optJSONObject("delta")
+                                    val firstChoice = choices.getJSONObject(0)
+                                    // finish_reason lives on the choice (sibling of
+                                    // delta), not inside delta. Remember the last
+                                    // non-blank one: providers send it on the
+                                    // final chunk ("stop" vs "length" tells who
+                                    // cut the reply: model or token cap).
+                                    val fr = firstChoice.optString("finish_reason", "")
+                                    if (fr.isNotBlank() && fr != "null") lastFinishReason = fr
+                                    val delta = firstChoice.optJSONObject("delta")
                                     val content = delta?.optString("content", "") ?: ""
                                     val reasoning =
                                         delta?.optString("reasoning_content", "")
@@ -494,6 +504,9 @@ object RemoteAiClient {
                     }
                     if (inThinking) {
                         emit("</think>\n\n")
+                    }
+                    if (lastFinishReason.isNotBlank()) {
+                        onFinishReason?.invoke(lastFinishReason)
                     }
                 } finally {
                     reader.close()
