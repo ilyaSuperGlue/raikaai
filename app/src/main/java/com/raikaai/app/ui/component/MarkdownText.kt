@@ -27,6 +27,7 @@ import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material.icons.filled.SaveAlt
 import androidx.compose.material.icons.outlined.Visibility
 import androidx.compose.material3.CircularProgressIndicator
@@ -313,6 +314,14 @@ private fun CodeBlockCard(
         l == "html" || l == "htm" || code.contains("<!DOCTYPE html", ignoreCase = true) || code.contains("<html", ignoreCase = true)
     }
 
+    val lines = remember(code) { code.lines() }
+    val totalLines = lines.size
+    val isCollapsible = totalLines > 10
+    var isExpanded by remember { mutableStateOf(false) }
+    val displayCode = remember(code, isExpanded) {
+        if (isCollapsible && !isExpanded) lines.take(10).joinToString("\n") else code
+    }
+
     Surface(
         shape = RoundedCornerShape(12.dp),
         color = MaterialTheme.colorScheme.surfaceContainerHighest.copy(alpha = 0.75f),
@@ -328,14 +337,39 @@ private fun CodeBlockCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween,
             ) {
-                Text(
-                    text = language.ifBlank { "code" }.lowercase(),
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontWeight = FontWeight.Bold,
-                    fontFamily = FontFamily.Monospace,
-                )
                 Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = language.ifBlank { "code" }.lowercase(),
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Bold,
+                        fontFamily = FontFamily.Monospace,
+                    )
+                    if (isCollapsible) {
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "· $totalLines lines",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            fontFamily = FontFamily.Monospace,
+                        )
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (isCollapsible) {
+                        IconButton(
+                            onClick = { isExpanded = !isExpanded },
+                            modifier = Modifier.size(24.dp),
+                        ) {
+                            Icon(
+                                if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                                contentDescription = if (isExpanded) "Minimize code" else "Maximize code",
+                                modifier = Modifier.size(16.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                        Spacer(Modifier.width(4.dp))
+                    }
                     if (isHtml && onPreviewHtml != null) {
                         IconButton(
                             onClick = { onPreviewHtml(code) },
@@ -409,7 +443,7 @@ private fun CodeBlockCard(
                 }
             }
             Text(
-                text = code,
+                text = displayCode,
                 fontFamily = FontFamily.Monospace,
                 fontSize = 12.sp,
                 lineHeight = 17.sp,
@@ -420,6 +454,33 @@ private fun CodeBlockCard(
                         .horizontalScroll(scrollState)
                         .padding(horizontal = 12.dp, vertical = 8.dp),
             )
+            if (isCollapsible) {
+                Surface(
+                    onClick = { isExpanded = !isExpanded },
+                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.5f),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Icon(
+                            if (isExpanded) Icons.Filled.KeyboardArrowUp else Icons.Filled.KeyboardArrowDown,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.primary,
+                        )
+                        Spacer(Modifier.width(4.dp))
+                        Text(
+                            text = if (isExpanded) "Collapse ($totalLines lines)" else "Show all $totalLines lines",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold,
+                        )
+                    }
+                }
+            }
         }
     }
 }

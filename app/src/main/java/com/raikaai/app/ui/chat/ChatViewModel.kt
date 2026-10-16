@@ -1964,10 +1964,15 @@ class ChatViewModel(
                 }
             }.getOrDefault(false)
         }
+        val isHeavy = listOf(
+            "install", "build", "compile", "clone", "npm", "yarn", "pnpm", "bun",
+            "apk", "pip", "cargo", "gradle", "download", "wget", "curl", "tar", "unzip"
+        ).any { command.contains(it, ignoreCase = true) }
+        val timeout = if (isHeavy) 120L else 30L
         val res = if (wantsBackground || com.raikaai.app.core.container.containsBackgroundOp(command)) {
             containerManager.startDaemon(command)
         } else {
-            containerManager.run(command)
+            containerManager.run(command, timeoutSec = timeout)
         }
         KLog.d("ChatVM", "Container tool exit=${res.exitCode} timedOut=${res.timedOut}")
         ranThisTurn?.set(com.raikaai.app.core.container.dedupKeyOf(command), res.exitCode)
@@ -2003,12 +2008,36 @@ class ChatViewModel(
             call.name, call.arguments, s.containerYolo, null, s.containerAlwaysAllowJson,
             onStatus = { status ->
                 if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                    messages[idx] = messages[idx].copy(content = status)
+                    val curr = messages[idx].content
+                    val updated = if (call.rawCallText.isNotBlank() && curr.contains(call.rawCallText)) {
+                        curr.replace(call.rawCallText, "\n\n_${status}_\n\n")
+                    } else curr
+                    messages[idx] = messages[idx].copy(content = updated)
                 }
             },
         )
         val toolContext = dispatched.toolContext
         val executedBlock: String? = dispatched.block
+        if (currentConversationId != targetChatId) return currentSources
+
+        // In-place replace tool call with executed block in the message
+        if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+            val curr = messages[idx].content
+            val block = executedBlock.orEmpty()
+            val withBlock = when {
+                call.rawCallText.isNotBlank() && curr.contains(call.rawCallText) ->
+                    curr.replace(call.rawCallText, block)
+                curr.contains("\n_Running ") || curr.contains("\n_Executing ") -> {
+                    val clean = curr.replace(Regex("\n*_[A-Za-z0-9 `.…_-]+_\n*"), "\n\n")
+                    if (block.isNotBlank()) clean.trimEnd() + "\n\n" + block else clean
+                }
+                block.isNotBlank() ->
+                    curr.trimEnd() + "\n\n" + block
+                else -> curr
+            }
+            messages[idx] = messages[idx].copy(content = withBlock.trimEnd() + "\n\n")
+        }
+
         // Inject the tool outcome into the last user turn and stream a follow-up.
         val followUpHistory = history.mapIndexed { i, msg ->
             if (i == history.lastIndex && msg.role.equals(ChatConstants.ROLE_USER, ignoreCase = true)) {
@@ -2032,9 +2061,6 @@ class ChatViewModel(
 
         // B42: never mutate a new conversation with this chat's tool-call state.
         if (currentConversationId != targetChatId) return currentSources
-        if (idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-            messages[idx] = messages[idx].copy(content = "")
-        }
 
         collectStreamIntoMessage(
             deltas =
@@ -2054,12 +2080,6 @@ class ChatViewModel(
                 ),
             targetChatId = targetChatId,
         )
-        // Verbose mode: keep the executed command + output visible above the summary.
-        executedBlock?.let { block ->
-            if (idx < messages.size && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                messages[idx] = messages[idx].copy(content = block + "\n\n" + messages[idx].content)
-            }
-        }
 
         return currentSources
     }
@@ -3266,7 +3286,11 @@ class ChatViewModel(
                 followUpOutCap = 3500, followUpErrCap = 600,
                 onStatus = { status ->
                     if (currentConversationId == targetChatId && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                        messages[idx] = messages[idx].copy(content = status)
+                        val curr = messages[idx].content
+                        val updated = if (call.rawCallText.isNotBlank() && curr.contains(call.rawCallText)) {
+                            curr.replace(call.rawCallText, "\n\n_${status}_\n\n")
+                        } else curr
+                        messages[idx] = messages[idx].copy(content = updated)
                     }
                 },
             )
@@ -3274,47 +3298,66 @@ class ChatViewModel(
             val toolContext = dispatched.toolContext
             if (currentConversationId != targetChatId) return
 
+            // Replace tool call in message in-place (never wipe assistant text or generated code)
+            val block = dispatched.block.orEmpty()
+            val curr = messages[idx].content
+            val withBlock = when {
+                call.rawCallText.isNotBlank() && curr.contains(call.rawCallText) ->
+                    curr.replace(call.rawCallText, block)
+                curr.contains("\n_Running ") || curr.contains("\n_Executing ") -> {
+                    val clean = curr.replace(Regex("\n*_[A-Za-z0-9 `.…_-]+_\n*"), "\n\n")
+                    if (block.isNotBlank()) clean.trimEnd() + "\n\n" + block else clean
+                }
+                block.isNotBlank() ->
+                    curr.trimEnd() + "\n\n" + block
+                else -> curr
+            }
+            messages[idx] = messages[idx].copy(content = withBlock.trim())
+
             // Record this turn in the ongoing agent conversation
             agentMessages.add(RemoteChatMessage(role = "assistant", text = assistantCallText))
             agentMessages.add(RemoteChatMessage(role = "user", text = toolContext))
 
+            // If there's another tool call already present in this message, execute it in the next round
+            val nextQueuedCall = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content)
+            if (nextQueuedCall != null && isContainerToolCall(nextQueuedCall.name)) {
+                continue
+            }
+
+            // All queued calls in current message executed: stream LLM follow-up
             val prunedMessages = pruneOlderToolResults(agentMessages, keepLastN = 4)
             val counts = prunedMessages.map { estimateTokens(it.text) }
             val cappedFollow = capMessagesToWindow(prunedMessages, counts, remoteWindow, s.maxTokens + 256)
             onPromptCounted(counts.sum())
-            messages[idx] = messages[idx].copy(content = "")
+
+            // Append spacing before streaming follow-up without deleting prior content
+            val beforeStream = messages[idx].content.trimEnd()
+            messages[idx] = messages[idx].copy(content = "$beforeStream\n\n")
+
             var followFinishReason: String? = null
-            collectStreamIntoMessage(
-                deltas =
-                    RemoteAiClient.streamChat(
-                        baseUrl = s.remoteBaseUrl,
-                        apiKey = s.remoteApiKey,
-                        model = s.remoteModelId,
-                        messages = cappedFollow,
-                        temperature = effectiveTemperature(s),
-                        topP = s.topP,
-                        maxTokens = s.maxTokens,
-                        onUsageTokens = onUsageTokens,
-                        onFinishReason = { followFinishReason = it },
-                    ),
-                targetChatId = targetChatId,
-                onDelta = {},
-            )
-            followFinishReason?.let { KLog.d("ChatVM", "Remote container follow-up finish_reason=$it") }
-            // Provider cut the reply mid-thinking (or returned nothing): the
-            // finally-block would delete this message as "empty". Keep the raw
-            // command outputs instead so the turn is never a dead end.
-            if (currentConversationId == targetChatId &&
-                stripThinking(messages[idx].content).isBlank() && executedBlocks.isNotEmpty()
-            ) {
-                KLog.w("ChatVM", "Remote container follow-up came back empty; keeping raw outputs")
-                messages[idx] = messages[idx].copy(
-                    content = executedBlocks.joinToString("\n\n") +
-                        "\n\n_(The model returned no summary — results above are the raw command outputs.)_",
+            try {
+                collectStreamIntoMessage(
+                    deltas =
+                        RemoteAiClient.streamChat(
+                            baseUrl = s.remoteBaseUrl,
+                            apiKey = s.remoteApiKey,
+                            model = s.remoteModelId,
+                            messages = cappedFollow,
+                            temperature = effectiveTemperature(s),
+                            topP = s.topP,
+                            maxTokens = s.maxTokens,
+                            onUsageTokens = onUsageTokens,
+                            onFinishReason = { followFinishReason = it },
+                        ),
+                    targetChatId = targetChatId,
+                    onDelta = {},
                 )
-                keptRawFallback = true
-                return
+            } catch (e: Exception) {
+                KLog.w("ChatVM", "Remote container follow-up stream failed: ${e.message}")
+                errorMessage.value = "Follow-up stream interrupted: ${e.message ?: e.javaClass.simpleName}"
+                break
             }
+            followFinishReason?.let { KLog.d("ChatVM", "Remote container follow-up finish_reason=$it") }
         }
         if (rounds >= MAX_CONTAINER_ROUNDS && currentConversationId == targetChatId &&
             messages[idx].role == ChatConstants.ROLE_ASSISTANT
@@ -3326,15 +3369,6 @@ class ChatViewModel(
                         "\n\n_(Stopped after $MAX_CONTAINER_ROUNDS tool rounds — ask me to continue if needed.)_",
                 )
             }
-        }
-        // Verbose mode: keep every executed command + output visible above the summary.
-        // Skipped when the raw-fallback above already laid the blocks out.
-        if (!keptRawFallback && executedBlocks.isNotEmpty() && idx < messages.size &&
-            messages[idx].role == ChatConstants.ROLE_ASSISTANT
-        ) {
-            messages[idx] = messages[idx].copy(
-                content = executedBlocks.joinToString("\n\n") + "\n\n" + messages[idx].content,
-            )
         }
     }
 
