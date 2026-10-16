@@ -7,15 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-## [Unreleased]
+## [0.1.3] - 2026-10-16
 
-### Added (branch `feat/alpine-proot`, not merged)
-- **Alpine Linux Environment (PRoot, no root)**: On-demand Alpine userland with a persistent `/workspace` folder shared between chat, terminal, and AI.
-- **Bundled proot Engine**: proot 5.1.107.96 + deps ship as native libs (`jniLibs`) so the installer extracts them executable; only the ~3 MB Alpine minirootfs downloads from upstream.
-- **Linux Env Screen**: Termux-style terminal (command history, extra-keys row, Ctrl+C interrupt) plus a Files tab (preview, Share, save to Download, send to chat, SAF import).
-- **AI Sandbox Tools**: `execute_in_container` / `ensure_package` with ALLOW/ASK/DENY policy gate and explicit approval dialog, working in both local and remote model modes.
-- **Tolerant Tool-Call Parsing**: Accepts JSON and XML-shaped tool calls plus model-invented names (`run_command`, `shell`, `exec`…) and argument keys.
-- **Slash Commands**: `/run`, `/serve`, `/env`, `/stop-serve`; localhost preview of `/workspace` via busybox httpd.
+### Added
+- **On-Device Alpine Linux Sandbox (PRoot, No Root)**: Embedded Alpine userland with a persistent `/workspace` folder shared directly between chat attachments (`/workspace/chat_uploads/`), manual terminal, and AI tool calls. PRoot engine and dependencies ship directly inside the APK (`jniLibs`); only the minimal ~3 MB Alpine rootfs downloads from upstream.
+- **Termux-Style Terminal**: Shell-in-a-box terminal with a compact 3-row virtual keypad (`ESC`, `TAB`, `CTRL`, `ALT`, `SHIFT`, arrows, `PGUP`, `PGDN`, etc.), sticky modifiers, TAB auto-completion for files and directories, command history navigation (`↑`/`↓`), and 11sp monospace font.
+- **Workspace File Manager**: Full folder navigation inside `/workspace`, recursive directory deletion, file previews, SAF import, and direct export/share to system Downloads or chat.
+- **Autonomous Agent Loop & Background Daemons**: 6-round OpenCode-style execution loop with automatic repeat-command deduplication and explicit daemon tracking (`run_in_background`), allowing non-blocking web servers and background processes with `/daemons` and `/killdaemon`.
+- **Dynamic DNS Syncing**: Automatic synchronization of Android active network DNS configuration into container `/etc/resolv.conf` to avoid dead DNS states across Wi-Fi and cellular switches. Added `/fix-dns` and `/nettest` diagnostic tools.
+- **In-Chat Sandbox Permissions**: Quick permission management via `/permission` command (`yolo`, `allow`, `forget`, `clear`, status) and persistent "Always Allow" action in approval dialogs without leaving chat.
+- **Bundled Curl Compatibility Shim**: Built-in `/usr/local/bin/curl` wrapper around busybox `wget` with coaching hints to support standard curl commands out-of-the-box.
+
+### Fixed
+- **Slash Command Cursor Alignment**: Resolved issue where tapping slash command chips (`/permission`, `/run`, `/compact`) placed the cursor in the middle or beginning of the text field instead of at the end.
+- **Package Installation Syscall Error**: Configured `PROOT_NO_SECCOMP=1` to prevent bogus `EACCES` errors during `apk add` on modern Android kernels.
+- **Thinking-Only Model Responses**: Preserved thinking-only model outputs instead of deleting bubbles and raising empty response errors.
+- **Compaction History Preservation**: Retained the last 4 verbatim conversation turns during `/compact` with validated structured headings.
+- **UI Decrapification**: Removed all pictographic emojis from system messages, status badges, and command outputs.
+- **Models Hub Cleanup**: Removed redundant Linux Environment card from Models Hub in favor of the dedicated `/env` screen and `/permission` commands.
 
 ## [0.1.2] - 2026-10-15
 
