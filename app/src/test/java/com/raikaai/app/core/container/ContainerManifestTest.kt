@@ -92,4 +92,16 @@ class ContainerManifestTest {
         assertEquals(false, containsBackgroundOp("echo \"&\""))
         assertEquals(false, containsBackgroundOp("ls -la /workspace"))
     }
+
+    @Test
+    fun dedupKeyIgnoresHeadTailWindows() {
+        val a = dedupKeyOf("unzip -p 'f.zip' doc.md | head -n 45")
+        val b = dedupKeyOf("unzip -p 'f.zip' doc.md | head -n 100")
+        assertEquals(a, b)
+        assertEquals(
+            dedupKeyOf("unzip -p 'f.zip' doc.md"),
+            dedupKeyOf("unzip  -p  'f.zip'   doc.md"),
+        )
+        assertTrue(dedupKeyOf("ls /a") != dedupKeyOf("ls /b"))
+    }
 }

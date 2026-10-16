@@ -215,6 +215,17 @@ internal fun joinBrokenPaths(command: String): String {
 
 private val slashWrapRegex = Regex("/[ \\t]*\\r?\\n[ \\t]*")
 
+/**
+ * Normalizes a command for repeat detection: strips `| head/tail -n N`
+ * suffixes (same read, different window) and collapses whitespace, so
+ * `unzip -p f | head -45` and `unzip -p f | head -100` count as one.
+ */
+internal fun dedupKeyOf(command: String): String {
+    var s = command.replace(Regex("\\|\\s*(head|tail)\\s+(-n\\s+)?\\d+"), "")
+    s = s.replace(Regex("\\s+"), " ").trim()
+    return s
+}
+
 fun installPolicyFor(command: String): InstallPolicy {
     val cmd = command.trim()
     if (cmd.isEmpty()) return InstallPolicy.DENY
