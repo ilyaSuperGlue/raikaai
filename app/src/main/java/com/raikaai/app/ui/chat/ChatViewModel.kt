@@ -1675,6 +1675,7 @@ class ChatViewModel(
         val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
 
         val toolContext: String
+        var executedBlock: String? = null
         if (command.isBlank()) {
             toolContext = "[CONTAINER TOOL ERROR]\nEmpty command. Provide {\"command\": \"<shell>\"}."
         } else if (policy == com.raikaai.app.core.container.InstallPolicy.DENY) {
@@ -1684,7 +1685,7 @@ class ChatViewModel(
             if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
                 messages[idx] = messages[idx].copy(content = "Running `$command` in Linux Environment…")
             }
-            val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK) {
+            val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !s.containerYolo) {
                 requestContainerApproval(command)
             } else true
             if (!approved) {
@@ -1695,6 +1696,10 @@ class ChatViewModel(
                 }
                 val res = containerManager.run(command)
                 KLog.d("ChatVM", "Container tool exit=${res.exitCode} timedOut=${res.timedOut}")
+                executedBlock = formatContainerRunBlock(
+                    command, res.stdout, res.stderr, res.exitCode, res.timedOut,
+                    autoApproved = policy == com.raikaai.app.core.container.InstallPolicy.ALLOW || s.containerYolo,
+                )
                 toolContext = "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
                     "stdout:\n${res.stdout.take(4000)}\n" +
                     (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
@@ -1746,6 +1751,12 @@ class ChatViewModel(
                 ),
             targetChatId = targetChatId,
         )
+        // Verbose mode: keep the executed command + output visible above the summary.
+        executedBlock?.let { block ->
+            if (idx < messages.size && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                messages[idx] = messages[idx].copy(content = block + "\n\n" + messages[idx].content)
+            }
+        }
 
         return currentSources
     }
@@ -1963,7 +1974,8 @@ class ChatViewModel(
                         if (policy == com.raikaai.app.core.container.InstallPolicy.DENY) {
                             "⛔ Command blocked by policy (destructive / untrusted source)."
                         } else {
-                            val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK) {
+                            val yolo = settings.value.containerYolo
+                            val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !yolo) {
                                 requestContainerApproval(cmd)
                             } else true
                             if (!approved) "Cancelled." else containerManager.run(cmd).render()
@@ -1994,6 +2006,31 @@ class ChatViewModel(
                         else -> "Usage: /env install | /env wipe"
                     }
                 }
+            }
+            appendLocalExchange(trimmed, reply)
+        }
+        return true
+    }
+
+    /**
+     * Handles `/yolo on|off|status`: YOLO mode auto-approves ASK-policy
+     * sandbox commands. DENY-policy stays blocked no matter what.
+     */
+    private fun tryHandleYoloCommand(body: String): Boolean {
+        val trimmed = body.trim()
+        if (!trimmed.startsWith("/yolo", ignoreCase = true)) return false
+        viewModelScope.launch {
+            val arg = trimmed.drop("/yolo".length).trim().lowercase()
+            val reply = when (arg) {
+                "on", "enable", "true", "1" -> {
+                    settingsRepo.setContainerYolo(true)
+                    "YOLO mode ON — sandbox commands auto-run (destructive ones stay blocked). Toggle in Models Hub → Linux Environment."
+                }
+                "off", "disable", "false", "0" -> {
+                    settingsRepo.setContainerYolo(false)
+                    "YOLO mode OFF — back to asking approval."
+                }
+                else -> "YOLO mode is currently ${if (settings.value.containerYolo) "ON" else "OFF"}. Usage: /yolo on | /yolo off"
             }
             appendLocalExchange(trimmed, reply)
         }
@@ -2299,6 +2336,7 @@ class ChatViewModel(
         if (pending.isEmpty() && currentAudioFile == null && tryHandleImageCommand(body)) return
         if (pending.isEmpty() && currentAudioFile == null && tryHandleCompactCommand(body)) return
         if (pending.isEmpty() && currentAudioFile == null && tryHandleContainerCommand(body)) return
+        if (pending.isEmpty() && currentAudioFile == null && tryHandleYoloCommand(body)) return
         // Set flag immediately to prevent double-send race condition
         isGenerating.value = true
         errorMessage.value = null
@@ -2741,6 +2779,7 @@ class ChatViewModel(
         }
         var rounds = 0
         val ranThisTurn = mutableMapOf<String, Int>()
+        val executedBlocks = mutableListOf<String>()
         while (rounds < 3) {
             if (currentConversationId != targetChatId) return
             val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
@@ -2762,7 +2801,7 @@ class ChatViewModel(
             }
             else -> {
                 messages[idx] = messages[idx].copy(content = "Running `$command` in Linux Environment…")
-                val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK) {
+                val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !s.containerYolo) {
                     requestContainerApproval(command)
                 } else true
                 if (!approved) {
@@ -2771,6 +2810,12 @@ class ChatViewModel(
                     val res = containerManager.run(command)
                     ranThisTurn[command] = res.exitCode
                     KLog.d("ChatVM", "Remote container tool exit=${res.exitCode}")
+                    executedBlocks.add(
+                        formatContainerRunBlock(
+                            command, res.stdout, res.stderr, res.exitCode, res.timedOut,
+                            autoApproved = policy == com.raikaai.app.core.container.InstallPolicy.ALLOW || s.containerYolo,
+                        ),
+                    )
                     "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
                         "stdout:\n${res.stdout.take(4000)}\n" +
                         (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
@@ -2821,6 +2866,14 @@ class ChatViewModel(
                         "\n\n_(Stopped after 3 tool rounds — ask me to continue if needed.)_",
                 )
             }
+        }
+        // Verbose mode: keep every executed command + output visible above the summary.
+        if (executedBlocks.isNotEmpty() && idx < messages.size &&
+            messages[idx].role == ChatConstants.ROLE_ASSISTANT
+        ) {
+            messages[idx] = messages[idx].copy(
+                content = executedBlocks.joinToString("\n\n") + "\n\n" + messages[idx].content,
+            )
         }
     }
 
@@ -3682,7 +3735,39 @@ class ChatViewModel(
 
     fun setKeepAwake(v: Boolean) = launchSetting { settingsRepo.setKeepAwake(v) }
 
+    fun setContainerYolo(v: Boolean) = launchSetting { settingsRepo.setContainerYolo(v) }
+
     private fun launchSetting(block: suspend () -> Unit) {
         viewModelScope.launch { block() }
     }
+}
+
+/**
+ * Verbose transcript block for one executed sandbox command: stays visible
+ * above the AI summary so every requested command and its output can be
+ * reviewed without a special mode. Capped to stay context-cheap.
+ */
+internal fun formatContainerRunBlock(
+    command: String,
+    stdout: String,
+    stderr: String,
+    exitCode: Int,
+    timedOut: Boolean,
+    autoApproved: Boolean,
+): String {
+    val head = if (autoApproved) "🔧 `$command` · auto" else "🔧 `$command`"
+    return buildString {
+        append(head)
+        append("\n```\n")
+        val out = stdout.take(1000)
+        val err = stderr.take(300)
+        if (out.isBlank() && err.isBlank()) append("(no output)") else append(out)
+        if (err.isNotBlank()) {
+            append("\n[stderr]\n")
+            append(err)
+        }
+        append("\nexit=$exitCode")
+        if (timedOut) append(" (timed out)")
+        append("\n```")
+    }.take(1600)
 }

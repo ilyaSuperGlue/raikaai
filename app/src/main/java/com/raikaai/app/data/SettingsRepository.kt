@@ -114,6 +114,8 @@ data class Settings(
     // Linux container (Alpine via PRoot) — Fase 0: status only
     val alpineInstalled: Boolean = false,
     val alpineVersion: String = "",
+    /** YOLO mode: auto-approve ASK-policy sandbox commands (DENY still blocked). */
+    val containerYolo: Boolean = false,
 )
 
 /**
@@ -271,6 +273,7 @@ class SettingsRepository(
         val ENABLE_WEB_SEARCH = booleanPreferencesKey("enable_web_search")
         val ALPINE_INSTALLED = booleanPreferencesKey("alpine_installed")
         val ALPINE_VERSION = stringPreferencesKey("alpine_version")
+        val CONTAINER_YOLO = booleanPreferencesKey("container_yolo")
 
         // Legacy DataStore keys for sensitive tokens. Tokens used to live here in
         // plaintext; they are migrated to EncryptedSharedPreferences on first read
@@ -531,6 +534,7 @@ class SettingsRepository(
                     enableWebSearch = prefs[Keys.ENABLE_WEB_SEARCH] ?: false,
                     alpineInstalled = prefs[Keys.ALPINE_INSTALLED] ?: false,
                     alpineVersion = prefs[Keys.ALPINE_VERSION] ?: "",
+                    containerYolo = prefs[Keys.CONTAINER_YOLO] ?: false,
                 )
             }
         }
@@ -791,6 +795,9 @@ class SettingsRepository(
     suspend fun setAlpineInstalled(value: Boolean) = edit { it[Keys.ALPINE_INSTALLED] = value }
 
     suspend fun setAlpineVersion(value: String) = edit { it[Keys.ALPINE_VERSION] = value.take(32) }
+
+    /** YOLO mode: auto-approve ASK-policy sandbox commands. DENY-policy stays blocked. */
+    suspend fun setContainerYolo(value: Boolean) = edit { it[Keys.CONTAINER_YOLO] = value }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit { block(it) }

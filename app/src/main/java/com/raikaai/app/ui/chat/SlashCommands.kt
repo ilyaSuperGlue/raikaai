@@ -107,4 +107,11 @@ val DEFAULT_SLASH_COMMANDS =
             promptTemplate = "/env ",
             icon = Icons.Default.CloudDownload,
         ),
+        SlashCommand(
+            command = "/yolo",
+            title = "YOLO Mode",
+            description = "Auto-approve sandbox commands",
+            promptTemplate = "/yolo ",
+            icon = Icons.Default.AutoAwesome,
+        ),
     )
