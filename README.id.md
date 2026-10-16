@@ -43,7 +43,11 @@ Aplikasi ini juga menyertakan **server HTTP kompatibel OpenAI (`/v1`)** berbasis
 
 ## Fitur
 
-- **Obrolan on-device**: respon streaming token per token, bisa dihentikan kapan saja, pengaturan temperature / Top-K / Top-P, indikator pemakaian konteks, tampilan markdown dengan tombol salin kode, text-to-speech, dan riwayat chat tersimpan.
+- **Obrolan on-device**: respon streaming token per token, bisa dihentikan kapan saja, pengaturan temperature / Top-K / Top-P, indikator pemakaian konteks, blok kode markdown yang dapat dilipat (default 10 baris dengan toggle expand), text-to-speech, dan riwayat chat tersimpan.
+- **Linux Environment (Alpine PRoot, Tanpa Root)**: sistem Linux userland mandiri di dalam HP dengan direktori `/workspace` permanen. Dilengkapi virtual keypad ala Termux (`ESC`, `TAB`, `CTRL`, `ALT`, `SHIFT`, panah), pelengkap TAB otomatis, dan riwayat perintah.
+- **Terminal Multi-Tab Gaya Chrome**: jalankan beberapa sesi terminal sekaligus (`Term 1`, `Term 2`, tombol `+`) tanpa saling mengunci (*non-blocking*). Server (Vite/Node) bisa berjalan di tab 1 sambil mengetik perintah lain di tab 2, lengkap dengan live streaming output log, tombol stop cepat (`✕`), dan persistensi state saat berpindah menu.
+- **Autonomous Coding Agent Loop**: agen pemrograman mandiri ala OpenCode (hingga 30 ronde) dengan tool manipulasi file lokal (`read_file`, `write_file`, `edit_file`), kelanjutan otomatis saat limit tercapai, eksekusi server latar belakang (`&`), serta kontrol izin langsung dari chat (`/permission`).
+- **Peringkas Konteks Gaya OpenCode (`/compact`)**: merangkum percakapan panjang menjadi briefing terstruktur tanpa kehilangan konteks kerja penting sekaligus menghemat token context window.
 - **Server kompatibel OpenAI**: `POST /v1/chat/completions` (streaming SSE atau JSON tunggal), `POST /v1/completions`, `GET /v1/models`, `GET /health`. Autentikasi bearer-token opsional dan dukungan CORS.
 - **Manajemen model**: katalog bawaan berisi model yang sudah diuji; cari dan unduh bobot `.litertlm` dari Hugging Face (repo gated didukung via access token) dengan jeda dan lanjut; atau impor file model dari penyimpanan HP (SAF).
 - **Karakter**: buat persona kustom berisi avatar, system prompt, sapaan, dan contoh dialog. Bisa ganti persona di tengah percakapan. Impor/ekspor sebagai JSON.

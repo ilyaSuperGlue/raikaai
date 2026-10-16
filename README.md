@@ -43,7 +43,11 @@ It also includes a built-in **OpenAI-compatible HTTP server (`/v1`)** based on *
 
 ## Features
 
-- **On-device chat**: token-by-token streaming, stop generation anytime, adjustable temperature / Top-K / Top-P, context usage indicator, markdown rendering with code copy button, text-to-speech, and saved chat history.
+- **On-device chat**: token-by-token streaming, stop generation anytime, adjustable temperature / Top-K / Top-P, context usage indicator, collapsible markdown code blocks (10 lines default with expand toggle), text-to-speech, and saved chat history.
+- **Linux Environment (Alpine PRoot, No Root)**: embedded on-device Linux userland with a persistent `/workspace` folder. Includes a Termux-style virtual keypad (`ESC`, `TAB`, `CTRL`, `ALT`, `SHIFT`, arrows), TAB auto-completion, and command history.
+- **Chrome-Style Multi-Tab Terminal**: run multiple concurrent terminal sessions (`Term 1`, `Term 2`, `+`) without blocking threads. Run servers (Vite/Node) in one tab while executing shell commands in another, with live streaming logs, instant stop button (`✕`), and ViewModel state persistence.
+- **Autonomous Coding Agent Loop**: multi-round OpenCode-style coding agent (up to 30 rounds) with dedicated file tools (`read_file`, `write_file`, `edit_file`), length auto-continuation, background server execution (`&`), and in-chat permission management (`/permission`).
+- **OpenCode-Style Context Compaction (`/compact`)**: summarizes multi-turn conversation into a structured briefing, freeing context window tokens without losing work state.
 - **OpenAI-compatible server**: `POST /v1/chat/completions` (SSE streaming or single JSON), `POST /v1/completions`, `GET /v1/models`, `GET /health`. Optional bearer-token auth and CORS support.
 - **Model manager**: built-in catalog of tested mobile models; search and download `.litertlm` weights from Hugging Face (gated repos supported via access token) with pause and resume; or import model files from device storage (SAF).
 - **Characters**: create custom personas with avatar, system prompt, greeting, and example dialogues. Switch persona mid-conversation. Import/export as JSON.
