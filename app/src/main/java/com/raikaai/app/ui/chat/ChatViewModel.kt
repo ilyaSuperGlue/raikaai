@@ -2784,8 +2784,24 @@ class ChatViewModel(
                             // visible body (cut connection, all chunks malformed)
                             // must not persist as a silent empty bubble.
                             if (stripThinking(current.content).isBlank()) {
-                                messages.removeAt(idx)
-                                errorMessage.value = "Remote model returned an empty response. Please try again."
+                                if (current.content.isNotBlank()) {
+                                    // Thinking-only reply: common when a thinking
+                                    // model (e.g. Gemini Flash) burns a capped
+                                    // free-tier budget inside reasoning and never
+                                    // emits the final answer. Keep it visible
+                                    // instead of deleting into a red error.
+                                    KLog.w("ChatVM", "Remote reply thinking-only; keeping raw content")
+                                    val outputTokens = usageCompletionTokens ?: estimateTokens(current.content)
+                                    val cutSuffix = if (remoteFinishReason == "length") " · provider limit" else ""
+                                    val badge = "%.1f tok/s · %d tokens · Remote$cutSuffix · thinking only".format(
+                                        outputTokens / maxOf(0.1f, (System.currentTimeMillis() - start) / 1000f),
+                                        outputTokens,
+                                    )
+                                    messages[idx] = current.copy(stats = badge)
+                                } else {
+                                    messages.removeAt(idx)
+                                    errorMessage.value = "Remote model returned an empty response. Please try again."
+                                }
                             } else {
                                 val outputTokens = usageCompletionTokens ?: estimateTokens(current.content)
                                 val decodeStart = if (firstChunkAt > 0L) firstChunkAt else start
