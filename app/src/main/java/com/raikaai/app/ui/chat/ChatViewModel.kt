@@ -1928,6 +1928,7 @@ class ChatViewModel(
     /**
      * Handles explicit container slash commands (no model call):
      * - `/run <shell>` → execute in Alpine, reply with output
+     * - `/verbose <shell>` → same with proot syscall tracing (tail kept)
      * - `/serve [port]` → serve /workspace on 127.0.0.1, reply with URL
      * - `/stop-serve` → stop the preview server
      * - `/env install` | `/env wipe` → install / delete the environment
@@ -1935,12 +1936,25 @@ class ChatViewModel(
     private fun tryHandleContainerCommand(body: String): Boolean {
         val trimmed = body.trim()
         if (!trimmed.startsWith("/run", ignoreCase = true) &&
+            !trimmed.startsWith("/verbose", ignoreCase = true) &&
             !trimmed.startsWith("/serve", ignoreCase = true) &&
             !trimmed.startsWith("/stop-serve", ignoreCase = true) &&
             !trimmed.startsWith("/env", ignoreCase = true)
         ) return false
         viewModelScope.launch {
             val reply = when {
+                trimmed.startsWith("/verbose", ignoreCase = true) -> {
+                    val cmd = Regex("^/verbose\\s+(.+)", RegexOption.IGNORE_CASE)
+                        .find(trimmed)?.groupValues?.get(1)?.trim().orEmpty()
+                    if (cmd.isBlank()) "Usage: /verbose <shell command>" else {
+                        containerManager.run(
+                            cmd,
+                            timeoutSec = 120,
+                            keepTailOutput = true,
+                            extraEnv = mapOf("PROOT_VERBOSE" to "1"),
+                        ).render()
+                    }
+                }
                 trimmed.startsWith("/run", ignoreCase = true) -> {
                     val cmd = Regex("^/run\\s+(.+)", RegexOption.IGNORE_CASE)
                         .find(trimmed)?.groupValues?.get(1)?.trim().orEmpty()

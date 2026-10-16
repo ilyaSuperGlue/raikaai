@@ -265,7 +265,12 @@ class ContainerManager private constructor(
      * Runs [command] via `proot -r alpine -b workspace:/workspace -0 -w /workspace sh -c`.
      * Single-flight (mutex): concurrent callers queue. Timeout kills the process.
      */
-    suspend fun run(command: String, timeoutSec: Long = 15): RunResult {
+    suspend fun run(
+        command: String,
+        timeoutSec: Long = 15,
+        keepTailOutput: Boolean = false,
+        extraEnv: Map<String, String> = emptyMap(),
+    ): RunResult {
         if (!isInstalled()) {
             val hint = if (isOutdated()) {
                 "Linux Environment format is outdated. Press Install again to update it."
@@ -279,7 +284,9 @@ class ContainerManager private constructor(
         workspaceDir.mkdirs()
         return execProot(
             args = baseArgs() + listOf("/bin/sh", "-c", clean),
+            extraEnv = extraEnv,
             timeoutSec = timeoutSec,
+            keepTailOutput = keepTailOutput,
         )
     }
 
@@ -304,6 +311,7 @@ class ContainerManager private constructor(
         args: List<String>,
         extraEnv: Map<String, String> = emptyMap(),
         timeoutSec: Long = 15,
+        keepTailOutput: Boolean = false,
     ): RunResult {
         return runMutex.withLock {
             withContext(Dispatchers.IO) {
@@ -323,13 +331,17 @@ class ContainerManager private constructor(
                     if (!finished) {
                         proc.destroyForcibly()
                         return@withContext RunResult(
-                            readCapped(proc.inputStream),
-                            readCapped(proc.errorStream),
+                            readCapped(proc.inputStream, keepTailOutput),
+                            readCapped(proc.errorStream, keepTailOutput),
                             -1,
                             timedOut = true,
                         )
                     }
-                    RunResult(readCapped(proc.inputStream), readCapped(proc.errorStream), proc.exitValue())
+                    RunResult(
+                        readCapped(proc.inputStream, keepTailOutput),
+                        readCapped(proc.errorStream, keepTailOutput),
+                        proc.exitValue(),
+                    )
                 } catch (t: Throwable) {
                     try { proc?.destroyForcibly() } catch (_: Throwable) {}
                     RunResult("", "run failed: ${t.message ?: t.javaClass.simpleName}", -1)
@@ -764,19 +776,42 @@ class ContainerManager private constructor(
         }
     }
 
-    private fun readCapped(stream: java.io.InputStream): String {
+    private fun readCapped(stream: java.io.InputStream, keepTail: Boolean = false): String {
         return try {
-            val buf = ByteArray(OUTPUT_CAP + 1)
-            var total = 0
-            while (total <= OUTPUT_CAP) {
-                val n = stream.read(buf, total, minOf(buf.size - total, 8192))
-                if (n < 0) break
-                total += n
-                if (total > OUTPUT_CAP) break
+            if (!keepTail) {
+                val buf = ByteArray(OUTPUT_CAP + 1)
+                var total = 0
+                while (total <= OUTPUT_CAP) {
+                    val n = stream.read(buf, total, minOf(buf.size - total, 8192))
+                    if (n < 0) break
+                    total += n
+                    if (total > OUTPUT_CAP) break
+                }
+                var text = String(buf, 0, minOf(total, OUTPUT_CAP), Charsets.UTF_8)
+                if (total > OUTPUT_CAP) text += "\n…(output truncated)"
+                text
+            } else {
+                // Verbose traces: the failure is at the END. Keep the tail.
+                val chunks = ArrayDeque<ByteArray>()
+                var total = 0
+                val buf = ByteArray(8192)
+                while (true) {
+                    val n = stream.read(buf)
+                    if (n < 0) break
+                    chunks.addLast(buf.copyOf(n))
+                    total += n
+                    while (total > OUTPUT_CAP) {
+                        total -= chunks.removeFirst().size
+                    }
+                }
+                val out = ByteArray(total)
+                var off = 0
+                for (c in chunks) {
+                    c.copyInto(out, off)
+                    off += c.size
+                }
+                "…(showing last ${total / 1024}KB)\n" + String(out, Charsets.UTF_8)
             }
-            var text = String(buf, 0, minOf(total, OUTPUT_CAP), Charsets.UTF_8)
-            if (total > OUTPUT_CAP) text += "\n…(output truncated)"
-            text
         } catch (_: Throwable) {
             ""
         }
