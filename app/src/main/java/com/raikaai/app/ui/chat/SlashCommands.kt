@@ -128,4 +128,11 @@ val DEFAULT_SLASH_COMMANDS =
             promptTemplate = "/fix-dns",
             icon = Icons.Default.Language,
         ),
+        SlashCommand(
+            command = "/nettest",
+            title = "Network Test",
+            description = "Compare phone vs container connectivity",
+            promptTemplate = "/nettest",
+            icon = Icons.Default.Language,
+        ),
     )

@@ -147,6 +147,7 @@ fi
     private var serveJob: Job? = null
     private var installJob: Job? = null
     @Volatile private var currentProc: Process? = null
+    private var resolvLastRefresh = 0L
     private val daemons = mutableMapOf<Int, Process>()
     private var daemonSeq = 0
     private val MAX_DAEMONS = 5
@@ -317,6 +318,12 @@ fi
         val clean = command.trim()
         if (clean.isEmpty()) return RunResult("", "empty command", -1)
         workspaceDir.mkdirs()
+        // Networks change mid-session (WiFi/data/VPN flips): refresh guest
+        // DNS when the copy is older than 15 minutes. Cheap system call,
+        // avoids stale-DNS "network unreachable" ghosts.
+        if (isInstalled() && System.currentTimeMillis() - resolvLastRefresh > 15 * 60_000L) {
+            runCatching { refreshResolvConf() }
+        }
         return execProot(
             args = baseArgs() + listOf("/bin/sh", "-c", clean),
             extraEnv = extraEnv,
@@ -800,6 +807,7 @@ fi
             val f = File(alpineDir, "etc/resolv.conf")
             f.parentFile?.mkdirs()
             f.writeText(servers.joinToString(separator = "") { "nameserver $it\n" })
+            resolvLastRefresh = System.currentTimeMillis()
             KLog.d(TAG, "resolv.conf DNS: ${servers.joinToString()}")
             servers.joinToString()
         }

@@ -2062,6 +2062,7 @@ class ChatViewModel(
             !trimmed.startsWith("/serve", ignoreCase = true) &&
             !trimmed.startsWith("/stop-serve", ignoreCase = true) &&
             !trimmed.startsWith("/fix-dns", ignoreCase = true) &&
+            !trimmed.startsWith("/nettest", ignoreCase = true) &&
             !trimmed.startsWith("/daemons", ignoreCase = true) &&
             !trimmed.startsWith("/killdaemon", ignoreCase = true) &&
             !trimmed.startsWith("/env", ignoreCase = true)
@@ -2105,6 +2106,22 @@ class ChatViewModel(
                 trimmed.startsWith("/fix-dns", ignoreCase = true) -> {
                     val servers = containerManager.refreshResolvConf()
                     "Guest DNS now: $servers\nRetry the failed download (e.g. apk update)."
+                }
+                trimmed.startsWith("/nettest", ignoreCase = true) -> {
+                    // App side (proves the phone itself is online).
+                    val appSide = runCatching {
+                        val req = okhttp3.Request.Builder()
+                            .url("https://www.google.com/generate_204")
+                            .head()
+                            .build()
+                        com.raikaai.app.util.NetworkUtils.HttpClient.searchClient
+                            .newCall(req).execute().use { "HTTP ${it.code}" }
+                    }.getOrElse { "FAIL: ${it.message?.take(120)}" }
+                    // Guest side (proves the container path works).
+                    val guestResolv = containerManager.run("cat /etc/resolv.conf").stdout.trim().take(200)
+                    val guestIpRoute = containerManager.run("wget -qO- --timeout=8 http://8.8.8.8/ 2>&1 | head -c 60; echo; echo wget-ip-exit=$?").stdout.trim().take(200)
+                    val guestDns = containerManager.run("wget -qO- --timeout=8 http://google.com/ 2>&1 | head -c 60; echo; echo wget-dns-exit=$?").stdout.trim().take(200)
+                    "Phone net: $appSide\nGuest resolv.conf:\n$guestResolv\nGuest route (IP literal):\n$guestIpRoute\nGuest DNS+route (hostname):\n$guestDns"
                 }
                 trimmed.startsWith("/daemons", ignoreCase = true) -> {
                     containerManager.listDaemons()
