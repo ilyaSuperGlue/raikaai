@@ -5,6 +5,7 @@ import com.google.gson.Gson
 import com.google.gson.reflect.TypeToken
 import com.raikaai.app.util.KLog
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -327,7 +328,29 @@ class ChatRepository(
             }
         }
 
-    suspend fun save(conversation: Conversation): Conversation =
+    /**
+     * Persists one conversation. Race-hardened: UI streaming mutates message
+     * lists on Main while Gson serializes them here on IO, so a torn
+     * iteration throws ConcurrentModificationException. Retried (the next
+     * persist covers the same content); after retries the save is skipped
+     * with a log instead of crashing the app.
+     */
+    suspend fun save(conversation: Conversation): Conversation {
+        var attempt = 0
+        while (true) {
+            try {
+                return saveOnce(conversation)
+            } catch (e: ConcurrentModificationException) {
+                if (++attempt >= 3) {
+                    KLog.e("ChatRepository", "save() racing stream, skipping this round for ${conversation.id}")
+                    return conversation
+                }
+                delay(50L * attempt)
+            }
+        }
+    }
+
+    private suspend fun saveOnce(conversation: Conversation): Conversation =
         withContext(Dispatchers.IO) {
             // All writes for one conversation id are serialized: concurrent
             // save() calls (e.g. summary compression racing a normal persist)

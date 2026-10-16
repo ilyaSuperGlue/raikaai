@@ -120,5 +120,18 @@ class ToolCallParserTest {
         assert(cmd.contains("unzip -l"))
         assert(cmd.contains("kzkt-license-web-main.zip"))
     }
+
+    @Test
+    fun testArgumentsObjectOnNextLine() {
+        // Exact on-device shape: "arguments": newline {"command": ...}
+        val text = "<tool_call>{\"name\": \"execute_in_container\", \"arguments\":\n" +
+            "{\"command\": \"unzip -l '/workspace/\nkzkt-license-web-main.zip'\"}}</tool_call>"
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("execute_in_container", parsed?.name)
+        val cmd = parsed?.arguments?.get("command")?.asString.orEmpty()
+        assert(cmd.contains("unzip -l"))
+        assert(cmd.contains("kzkt-license-web-main.zip"))
+    }
 }
 

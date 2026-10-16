@@ -1474,17 +1474,22 @@ class ChatViewModel(
                     }
                     return currentSources
                 }
-                if (isContainerToolCall(genericCall.name) && containerReady(s)) {
-                    return handleContainerToolCall(
-                        call = genericCall,
-                        modelPath = modelPath,
-                        s = s,
-                        targetChatId = targetChatId,
-                        history = history,
-                        effectiveSystem = effectiveSystem,
-                        currentSources = currentSources,
-                        onMetricsUpdate = onMetricsUpdate,
-                    )
+                if (isContainerToolCall(genericCall.name)) {
+                    if (!containerReady(s)) {
+                        errorMessage.value = "Linux Environment not ready — open Models Hub → Linux Environment → Install/Update, then retry."
+                        KLog.w("ChatVM", "Container call skipped: environment not ready")
+                    } else {
+                        return handleContainerToolCall(
+                            call = genericCall,
+                            modelPath = modelPath,
+                            s = s,
+                            targetChatId = targetChatId,
+                            history = history,
+                            effectiveSystem = effectiveSystem,
+                            currentSources = currentSources,
+                            onMetricsUpdate = onMetricsUpdate,
+                        )
+                    }
                 }
                 if (s.mcpEnabled && s.modelSource == ChatConstants.SOURCE_LOCAL) {
                     return handleMcpToolCall(
@@ -2712,7 +2717,12 @@ class ChatViewModel(
         if (idx < 0 || messages[idx].role != ChatConstants.ROLE_ASSISTANT) return
         if (currentConversationId != targetChatId) return
         val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
-        if (!isContainerToolCall(call.name) || !containerReady(s)) return
+        if (!isContainerToolCall(call.name)) return
+        if (!containerReady(s)) {
+            errorMessage.value = "Linux Environment not ready — open Models Hub → Linux Environment → Install/Update, then retry."
+            KLog.w("ChatVM", "Remote container call skipped: environment not ready")
+            return
+        }
         val command = extractToolCommand(call.arguments, call.name)
         val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
         val toolContext: String = when {
