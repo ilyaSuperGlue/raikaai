@@ -34,3 +34,11 @@
 
 -keepattributes Signature
 -keepattributes *Annotation*
+
+# PTY bridge: JNI entry points resolved by name at runtime + vendored
+# Termux terminal-emulator (Apache 2.0) backing the interactive terminal.
+-keep class com.termux.terminal.JNI { *; }
+-keep class com.termux.terminal.TerminalSession { *; }
+-keep class com.termux.terminal.TerminalEmulator { *; }
+-keep class com.termux.terminal.TerminalBuffer { *; }
+-keep class com.termux.terminal.TerminalSessionClient { *; }

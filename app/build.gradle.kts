@@ -27,6 +27,16 @@ android {
         targetSdk = 36
         versionCode = 3
         versionName = "0.1.2"
+        ndk {
+            version = "27.2.12479018"
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     splits {

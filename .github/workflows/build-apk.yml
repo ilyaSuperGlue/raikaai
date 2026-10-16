@@ -39,6 +39,11 @@ jobs:
           cp -r "$ANDROID_HOME/platforms/android-36" "$ANDROID_HOME/platforms/android-37"
           ls "$ANDROID_HOME/platforms/"
 
+      - name: Install Android NDK r27 (JNI PTY bridge)
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          "$SDKMANAGER" --install "ndk;27.2.12479018" "cmake;3.22.1"
+
       - name: Decode release keystore
         if: env.KEYSTORE_BASE64 != ''
         env:
