@@ -83,4 +83,13 @@ class ContainerManifestTest {
             joinBrokenPaths("cat /workspace/kzkt_app/\nkzkt-license-web-main/web_server.py"),
         )
     }
+
+    @Test
+    fun backgroundOpDetection() {
+        assertTrue(containsBackgroundOp("python3 server.py --port 8080 &"))
+        assertTrue(containsBackgroundOp("sleep 100 &"))
+        assertEquals(false, containsBackgroundOp("apk update && apk add python3"))
+        assertEquals(false, containsBackgroundOp("echo \"&\""))
+        assertEquals(false, containsBackgroundOp("ls -la /workspace"))
+    }
 }

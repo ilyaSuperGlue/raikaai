@@ -117,6 +117,40 @@ private val safeReadonlyBinaries = setOf(
 private val shellOperators = setOf(";", "&", "|", "`", "$", "(", ")", "<", ">", "\\", "\n")
 
 /**
+ * True when [command] backgrounds something (`cmd &`), ignoring `&&` and
+ * quoted ampersands. Such commands must run detached: proot lives as long as
+ * any tracee, so waiting on them hangs until timeout and then kills the server.
+ */
+internal fun containsBackgroundOp(command: String): Boolean {
+    var i = 0
+    var quote = '\u0000'
+    while (i < command.length) {
+        val c = command[i]
+        if (quote != '\u0000') {
+            if (c == '\\' && i + 1 < command.length) {
+                i += 2
+                continue
+            }
+            if (c == quote) quote = '\u0000'
+            i++
+            continue
+        }
+        if (c == '"' || c == '\'') {
+            quote = c
+            i++
+            continue
+        }
+        if (c == '&' && (i + 1 >= command.length || command[i + 1] != '&') &&
+            (i == 0 || command[i - 1] != '&')
+        ) {
+            return true
+        }
+        i++
+    }
+    return false
+}
+
+/**
  * Joins newlines that split a path inside quotes (`"/workspace/\nkzkt.zip"`
  * → `"/workspace/kzkt.zip"`). Models hard-wrap long tool-call lines at
  * exactly such spots. Newlines OUTSIDE quotes are real command separators

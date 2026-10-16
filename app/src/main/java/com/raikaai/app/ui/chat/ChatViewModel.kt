@@ -85,6 +85,9 @@ data class PersonaPreset(
     }
 }
 
+/** Max autonomous container rounds per remote turn (OpenCode-style agent loop). */
+internal const val MAX_CONTAINER_ROUNDS = 6
+
 val PERSONA_PRESETS =
     listOf(
         PersonaPreset(
@@ -1616,7 +1619,7 @@ class ChatViewModel(
 
     private fun isContainerToolCall(name: String): Boolean {
         val n = name.lowercase()
-        return n in CONTAINER_EXEC_NAMES || n in CONTAINER_INSTALL_NAMES
+        return n in CONTAINER_EXEC_NAMES || n in CONTAINER_INSTALL_NAMES || n in CONTAINER_DAEMON_NAMES
     }
 
     /** Models invent their own names (run_command, shell, exec…): normalize all. */
@@ -1626,6 +1629,9 @@ class ChatViewModel(
     )
     private val CONTAINER_INSTALL_NAMES = setOf(
         "ensure_package", "install_package", "apk_add",
+    )
+    private val CONTAINER_DAEMON_NAMES = setOf(
+        "list_daemons", "stop_daemon",
     )
 
     /** Models also vary the argument key (command/cmd/script/code…): try all. */
@@ -1655,6 +1661,101 @@ class ChatViewModel(
         return ""
     }
 
+    private data class ContainerDispatch(
+        val toolContext: String,
+        val block: String?,
+        val exitCode: Int?,
+    )
+
+    /**
+     * Shared executor for all container tools (local + remote): daemon
+     * manager calls, policy gate, approval, run-or-detach, verbose block.
+     * Returns the model-facing context, an optional user-visible block,
+     * and the exit code when something actually ran.
+     */
+    private suspend fun dispatchContainerTool(
+        toolName: String,
+        args: com.google.gson.JsonObject,
+        yolo: Boolean,
+        ranThisTurn: MutableMap<String, Int>?,
+        onStatus: (String) -> Unit,
+    ): ContainerDispatch {
+        val lower = toolName.lowercase()
+        if (lower == "list_daemons") {
+            val list = containerManager.listDaemons()
+            return ContainerDispatch(
+                "[CONTAINER TOOL RESULT]\nlist_daemons:\n$list\nSummarize briefly.",
+                null, 0,
+            )
+        }
+        if (lower == "stop_daemon") {
+            val id = args.get("id")?.takeIf { it.isJsonPrimitive }?.asString?.trim()?.toIntOrNull()
+            if (id == null) {
+                return ContainerDispatch(
+                    "[CONTAINER TOOL ERROR]\nstop_daemon needs {\"id\": \"<number>\"} (see list_daemons).",
+                    null, null,
+                )
+            }
+            val ok = containerManager.stopDaemon(id)
+            return ContainerDispatch(
+                "[CONTAINER TOOL RESULT]\nstop_daemon $id: ${if (ok) "stopped" else "no daemon with that id"}.",
+                null, if (ok) 0 else 1,
+            )
+        }
+        val command = extractToolCommand(args, toolName)
+        if (command.isNotBlank() && ranThisTurn?.containsKey(command) == true) {
+            KLog.d("ChatVM", "Container: identical command already ran this turn, skipping re-run")
+            return ContainerDispatch(
+                "[CONTAINER TOOL SKIPPED]\nThat exact command already ran this turn " +
+                    "(exit=${ranThisTurn[command]}). Do NOT emit it again. Fix the command or try a different one.",
+                null, ranThisTurn[command],
+            )
+        }
+        val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { toolName })
+        if (command.isBlank()) {
+            return ContainerDispatch(
+                "[CONTAINER TOOL ERROR]\nEmpty command. Provide {\"command\": \"<shell>\"}.",
+                null, null,
+            )
+        }
+        if (policy == com.raikaai.app.core.container.InstallPolicy.DENY) {
+            KLog.w("ChatVM", "Container call denied by policy: $command")
+            return ContainerDispatch(
+                "[CONTAINER TOOL DENIED]\nThat command is blocked by policy (destructive or untrusted source). " +
+                    "Apologize briefly and offer a safe alternative under /workspace.",
+                null, null,
+            )
+        }
+        onStatus("Running `$command` in Linux Environment…")
+        val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !yolo) {
+            requestContainerApproval(command)
+        } else true
+        if (!approved) {
+            return ContainerDispatch(
+                "[CONTAINER TOOL CALL DENIED]\nThe user denied running `$command`. " +
+                    "Apologize briefly and ask how to proceed without the sandbox.",
+                null, null,
+            )
+        }
+        val auto = policy == com.raikaai.app.core.container.InstallPolicy.ALLOW || yolo
+        val res = if (com.raikaai.app.core.container.containsBackgroundOp(command)) {
+            containerManager.startDaemon(command)
+        } else {
+            containerManager.run(command)
+        }
+        KLog.d("ChatVM", "Container tool exit=${res.exitCode} timedOut=${res.timedOut}")
+        ranThisTurn?.set(command, res.exitCode)
+        val block = formatContainerRunBlock(
+            command, res.stdout, res.stderr, res.exitCode, res.timedOut, autoApproved = auto,
+        )
+        val ctx = "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
+            "stdout:\n${res.stdout.take(4000)}\n" +
+            (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
+            (if (res.exitCode != 0 && command.contains('\n')) "\nHINT: the command contained a line break. If a path or package name got split across lines, re-emit the ENTIRE tool call on ONE single line.\n" else "") +
+            "Summarize the result for the user. Never claim you ran anything else."
+        return ContainerDispatch(ctx, block, res.exitCode)
+    }
+
     /**
      * Executes one autonomous container tool call round: policy gate
      * (ALLOW → run, ASK → approval → run, DENY → refuse) → follow-up stream
@@ -1671,41 +1772,13 @@ class ChatViewModel(
         onMetricsUpdate: (LiteRtEngineManager.InferenceMetrics) -> Unit,
     ): List<String>? {
         val idx = messages.lastIndex
-        val command = extractToolCommand(call.arguments, call.name)
-        val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
-
-        val toolContext: String
-        var executedBlock: String? = null
-        if (command.isBlank()) {
-            toolContext = "[CONTAINER TOOL ERROR]\nEmpty command. Provide {\"command\": \"<shell>\"}."
-        } else if (policy == com.raikaai.app.core.container.InstallPolicy.DENY) {
-            KLog.w("ChatVM", "Container call denied by policy: $command")
-            toolContext = "[CONTAINER TOOL DENIED]\nThat command is blocked by policy (destructive or untrusted source). Apologize briefly and offer a safe alternative under /workspace."
-        } else {
+        val dispatched = dispatchContainerTool(call.name, call.arguments, s.containerYolo, null) { status ->
             if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                messages[idx] = messages[idx].copy(content = "Running `$command` in Linux Environment…")
-            }
-            val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !s.containerYolo) {
-                requestContainerApproval(command)
-            } else true
-            if (!approved) {
-                toolContext = "[CONTAINER TOOL CALL DENIED]\nThe user denied running `$command`. Apologize briefly and ask how to proceed without the sandbox."
-            } else {
-                if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
-                    messages[idx] = messages[idx].copy(content = "Running `$command` in Linux Environment…")
-                }
-                val res = containerManager.run(command)
-                KLog.d("ChatVM", "Container tool exit=${res.exitCode} timedOut=${res.timedOut}")
-                executedBlock = formatContainerRunBlock(
-                    command, res.stdout, res.stderr, res.exitCode, res.timedOut,
-                    autoApproved = policy == com.raikaai.app.core.container.InstallPolicy.ALLOW || s.containerYolo,
-                )
-                toolContext = "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
-                    "stdout:\n${res.stdout.take(4000)}\n" +
-                    (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
-                    "Summarize the result for the user. Never claim you ran anything else."
+                messages[idx] = messages[idx].copy(content = status)
             }
         }
+        val toolContext = dispatched.toolContext
+        val executedBlock: String? = dispatched.block
         // Inject the tool outcome into the last user turn and stream a follow-up.
         val followUpHistory = history.mapIndexed { i, msg ->
             if (i == history.lastIndex && msg.role.equals(ChatConstants.ROLE_USER, ignoreCase = true)) {
@@ -1942,6 +2015,7 @@ class ChatViewModel(
      * - `/verbose <shell>` → same with proot syscall tracing (tail kept)
      * - `/serve [port]` → serve /workspace on 127.0.0.1, reply with URL
      * - `/stop-serve` → stop the preview server
+     * - `/daemons` → list background servers, `/killdaemon <id>` → stop one
      * - `/env install` | `/env wipe` → install / delete the environment
      */
     private fun tryHandleContainerCommand(body: String): Boolean {
@@ -1950,6 +2024,8 @@ class ChatViewModel(
             !trimmed.startsWith("/verbose", ignoreCase = true) &&
             !trimmed.startsWith("/serve", ignoreCase = true) &&
             !trimmed.startsWith("/stop-serve", ignoreCase = true) &&
+            !trimmed.startsWith("/daemons", ignoreCase = true) &&
+            !trimmed.startsWith("/killdaemon", ignoreCase = true) &&
             !trimmed.startsWith("/env", ignoreCase = true)
         ) return false
         viewModelScope.launch {
@@ -1985,6 +2061,15 @@ class ChatViewModel(
                 trimmed.startsWith("/stop-serve", ignoreCase = true) -> {
                     containerManager.stopServe()
                     "Preview server stopped."
+                }
+                trimmed.startsWith("/daemons", ignoreCase = true) -> {
+                    containerManager.listDaemons()
+                }
+                trimmed.startsWith("/killdaemon", ignoreCase = true) -> {
+                    val id = trimmed.drop("/killdaemon".length).trim().toIntOrNull()
+                    if (id == null) "Usage: /killdaemon <id> (see /daemons)"
+                    else if (containerManager.stopDaemon(id)) "Daemon #$id stopped."
+                    else "No daemon #$id."
                 }
                 trimmed.startsWith("/serve", ignoreCase = true) -> {
                     val arg = trimmed.drop("/serve".length).trim().toIntOrNull()
@@ -2780,90 +2865,61 @@ class ChatViewModel(
         var rounds = 0
         val ranThisTurn = mutableMapOf<String, Int>()
         val executedBlocks = mutableListOf<String>()
-        while (rounds < 3) {
+        // True agent loop: each round's follow-up becomes the next round's
+        // input, so the model chains ls -> cat -> run -> verify by itself.
+        while (rounds < MAX_CONTAINER_ROUNDS) {
             if (currentConversationId != targetChatId) return
-            val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
-            if (!isContainerToolCall(call.name)) return
+            val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: break
+            if (!isContainerToolCall(call.name)) break
             rounds++
-            KLog.d("ChatVM", "Remote container round $rounds: ${call.name}")
-            val command = extractToolCommand(call.arguments, call.name)
-            val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
-            val toolContext: String = if (command.isNotBlank() && ranThisTurn.containsKey(command)) {
-                KLog.d("ChatVM", "Remote container: identical command already ran, skipping re-run")
-                "[CONTAINER TOOL SKIPPED] That exact command already ran this turn. " +
-                    "Do NOT emit it again. Fix the command or try a different one."
-            } else when {
-            command.isBlank() ->
-                "[CONTAINER TOOL ERROR]\nEmpty command. Provide the shell to run."
-            policy == com.raikaai.app.core.container.InstallPolicy.DENY -> {
-                KLog.w("ChatVM", "Remote container call denied by policy: $command")
-                "[CONTAINER TOOL DENIED]\nThat command is blocked by policy (destructive or untrusted source). Apologize briefly and offer a safe alternative under /workspace."
-            }
-            else -> {
-                messages[idx] = messages[idx].copy(content = "Running `$command` in Linux Environment…")
-                val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !s.containerYolo) {
-                    requestContainerApproval(command)
-                } else true
-                if (!approved) {
-                    "[CONTAINER TOOL CALL DENIED]\nThe user denied running `$command`. Apologize briefly and ask how to proceed without the sandbox."
-                } else {
-                    val res = containerManager.run(command)
-                    ranThisTurn[command] = res.exitCode
-                    KLog.d("ChatVM", "Remote container tool exit=${res.exitCode}")
-                    executedBlocks.add(
-                        formatContainerRunBlock(
-                            command, res.stdout, res.stderr, res.exitCode, res.timedOut,
-                            autoApproved = policy == com.raikaai.app.core.container.InstallPolicy.ALLOW || s.containerYolo,
-                        ),
-                    )
-                    "[CONTAINER TOOL RESULT]\nCommand: $command\nExit: ${res.exitCode}${if (res.timedOut) " (timed out)" else ""}\n" +
-                        "stdout:\n${res.stdout.take(4000)}\n" +
-                        (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(1000)}\n" else "") +
-                        (if (res.exitCode != 0 && command.contains('\n')) "\nHINT: the command contained a line break. If a path or package name got split across lines, re-emit the ENTIRE tool call on ONE single line.\n" else "") +
-                        "Summarize the result for the user. Never claim you ran anything else."
+            KLog.d("ChatVM", "Remote container round $rounds/$MAX_CONTAINER_ROUNDS: ${call.name}")
+            val dispatched = dispatchContainerTool(call.name, call.arguments, s.containerYolo, ranThisTurn) { status ->
+                if (currentConversationId == targetChatId && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
+                    messages[idx] = messages[idx].copy(content = status)
                 }
             }
+            dispatched.block?.let { executedBlocks.add(it) }
+            val toolContext = dispatched.toolContext
+            if (currentConversationId != targetChatId) return
+            val windowed = promptWindowMessages().dropLast(1)
+            val lastUser = windowed.indexOfLast { it.role == ChatConstants.ROLE_USER }
+            val follow = mutableListOf<RemoteChatMessage>()
+            if (finalSystem.isNotBlank()) follow.add(RemoteChatMessage(role = "system", text = finalSystem))
+            windowed.forEachIndexed { i, m ->
+                val text = if (i == lastUser) "${m.content}\n\n$toolContext" else m.content
+                follow.add(RemoteChatMessage(role = m.role, text = text))
+            }
+            val counts = follow.map { estimateTokens(it.text) }
+            val cappedFollow = capMessagesToWindow(follow, counts, remoteWindow, s.maxTokens + 256)
+            onPromptCounted(counts.sum())
+            messages[idx] = messages[idx].copy(content = "")
+            var followFinishReason: String? = null
+            collectStreamIntoMessage(
+                deltas =
+                    RemoteAiClient.streamChat(
+                        baseUrl = s.remoteBaseUrl,
+                        apiKey = s.remoteApiKey,
+                        model = s.remoteModelId,
+                        messages = cappedFollow,
+                        temperature = effectiveTemperature(s),
+                        topP = s.topP,
+                        maxTokens = s.maxTokens,
+                        onUsageTokens = onUsageTokens,
+                        onFinishReason = { followFinishReason = it },
+                    ),
+                targetChatId = targetChatId,
+                onDelta = {},
+            )
+            followFinishReason?.let { KLog.d("ChatVM", "Remote container follow-up finish_reason=$it") }
         }
-        if (currentConversationId != targetChatId) return
-        val windowed = promptWindowMessages().dropLast(1)
-        val lastUser = windowed.indexOfLast { it.role == ChatConstants.ROLE_USER }
-        val follow = mutableListOf<RemoteChatMessage>()
-        if (finalSystem.isNotBlank()) follow.add(RemoteChatMessage(role = "system", text = finalSystem))
-        windowed.forEachIndexed { i, m ->
-            val text = if (i == lastUser) "${m.content}\n\n$toolContext" else m.content
-            follow.add(RemoteChatMessage(role = m.role, text = text))
-        }
-        val counts = follow.map { estimateTokens(it.text) }
-        val cappedFollow = capMessagesToWindow(follow, counts, remoteWindow, s.maxTokens + 256)
-        onPromptCounted(counts.sum())
-        messages[idx] = messages[idx].copy(content = "")
-        var followFinishReason: String? = null
-        collectStreamIntoMessage(
-            deltas =
-                RemoteAiClient.streamChat(
-                    baseUrl = s.remoteBaseUrl,
-                    apiKey = s.remoteApiKey,
-                    model = s.remoteModelId,
-                    messages = cappedFollow,
-                    temperature = effectiveTemperature(s),
-                    topP = s.topP,
-                    maxTokens = s.maxTokens,
-                    onUsageTokens = onUsageTokens,
-                    onFinishReason = { followFinishReason = it },
-                ),
-            targetChatId = targetChatId,
-            onDelta = {},
-        )
-        followFinishReason?.let { KLog.d("ChatVM", "Remote container follow-up finish_reason=$it") }
-        }
-        if (rounds >= 3 && currentConversationId == targetChatId &&
+        if (rounds >= MAX_CONTAINER_ROUNDS && currentConversationId == targetChatId &&
             messages[idx].role == ChatConstants.ROLE_ASSISTANT
         ) {
             val more = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content)
             if (more != null && isContainerToolCall(more.name)) {
                 messages[idx] = messages[idx].copy(
                     content = messages[idx].content +
-                        "\n\n_(Stopped after 3 tool rounds — ask me to continue if needed.)_",
+                        "\n\n_(Stopped after $MAX_CONTAINER_ROUNDS tool rounds — ask me to continue if needed.)_",
                 )
             }
         }
@@ -3542,6 +3598,10 @@ class ChatViewModel(
             "Rules: only write files under /workspace; keep commands short and non-interactive; " +
             "never run rm -rf / or --allow-untrusted. Small official packages install automatically; " +
             "other installs ask the user first. Never invent command results. " +
+            "Long-running servers: end the command with `&` and it keeps running detached " +
+            "(e.g. `python3 server.py --port 8080 &`); verify with `wget -qO- http://127.0.0.1:PORT` " +
+            "in your NEXT call — never curl/netstat/ss (not installed, use wget). " +
+            "Manage servers with `list_daemons` and `stop_daemon` {\"id\"} tools. " +
             "Act directly: emit the tool call instead of asking the user what to run. " +
             "Respond concisely; do not narrate your reasoning steps. " +
             "When the user mentions a file, first run `ls /workspace` to locate it — " +

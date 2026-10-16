@@ -114,6 +114,9 @@ class ContainerManager private constructor(
     private var serveJob: Job? = null
     private var installJob: Job? = null
     @Volatile private var currentProc: Process? = null
+    private val daemons = mutableMapOf<Int, Process>()
+    private var daemonSeq = 0
+    private val MAX_DAEMONS = 5
 
     /** Marker content is "<version>#<schema>". Missing/stale → not installed. */
     private fun markerSchema(): Int? {
@@ -404,6 +407,91 @@ class ContainerManager private constructor(
         try { currentProc?.destroyForcibly() } catch (_: Throwable) {}
     }
 
+    /**
+     * Starts [command] as a detached daemon (for `&` background servers):
+     * returns at once while the process tree keeps running. Proot lives as
+     * long as any tracee, so fire-and-forget through [run] would hang until
+     * timeout and then kill the server — this is the correct primitive.
+     */
+    suspend fun startDaemon(command: String): RunResult {
+        return runMutex.withLock {
+            withContext(Dispatchers.IO) {
+                if (daemons.size >= MAX_DAEMONS) {
+                    return@withContext RunResult(
+                        "",
+                        "Too many background servers (${daemons.size}). Stop one first: stop_daemon tool or /killdaemon <id>.",
+                        -1,
+                    )
+                }
+                try {
+                    workspaceDir.mkdirs()
+                    val pb = ProcessBuilder(
+                        listOf(prootBin.absolutePath) + baseArgs() + listOf("/bin/sh", "-c", command),
+                    )
+                    pb.redirectErrorStream(false)
+                    withContainerEnv(pb)
+                    val proc = pb.start()
+                    val id = ++daemonSeq
+                    daemons[id] = proc
+                    // Drain so a chatty daemon never blocks on a full pipe; reap on exit.
+                    scope.launch {
+                        runCatching {
+                            val buf = ByteArray(8192)
+                            while (proc.inputStream.read(buf) >= 0) {}
+                        }
+                        runCatching {
+                            val buf = ByteArray(8192)
+                            while (proc.errorStream.read(buf) >= 0) {}
+                        }
+                    }
+                    scope.launch {
+                        try { proc.waitFor() } catch (_: Throwable) {}
+                        daemons.remove(id)
+                    }
+                    RunResult(
+                        "Started in background as daemon #$id. It keeps running after this call returns. " +
+                            "Verify it with a follow-up command (e.g. wget -qO- http://127.0.0.1:PORT). " +
+                            "Stop it with the stop_daemon tool {\"id\": \"$id\"}.",
+                        "",
+                        0,
+                    )
+                } catch (t: Throwable) {
+                    RunResult("", "daemon start failed: ${t.message ?: t.javaClass.simpleName}", -1)
+                }
+            }
+        }
+    }
+
+    /** Stops one daemon by id. Returns false when unknown. */
+    suspend fun stopDaemon(id: Int): Boolean {
+        return runMutex.withLock {
+            withContext(Dispatchers.IO) {
+                val proc = daemons.remove(id) ?: return@withContext false
+                try { proc.destroy() } catch (_: Throwable) {}
+                try { proc.waitFor(2, TimeUnit.SECONDS) } catch (_: Throwable) {}
+                try { proc.destroyForcibly() } catch (_: Throwable) {}
+                true
+            }
+        }
+    }
+
+    /** Human-readable daemon list for tools/chat. */
+    suspend fun listDaemons(): String {
+        return runMutex.withLock {
+            withContext(Dispatchers.IO) {
+                if (daemons.isEmpty()) "No background daemons running."
+                else daemons.keys.sorted().joinToString("\n") { "#$it: running" }
+            }
+        }
+    }
+
+    private suspend fun killAllDaemons() {
+        val ids: List<Int> = runMutex.withLock {
+            withContext(Dispatchers.IO) { daemons.keys.toList() }
+        }
+        ids.forEach { stopDaemon(it) }
+    }
+
     // ── Serve localhost ───────────────────────────────────────────────
 
     /**
@@ -452,6 +540,7 @@ class ContainerManager private constructor(
     }
 
     suspend fun stopServe() {
+        killAllDaemons()
         serveJob?.cancel()
         serveJob = null
         withContext(Dispatchers.IO) {
