@@ -2701,9 +2701,10 @@ class ChatViewModel(
     // ── Chat UX: Edit User Message & Swiping Variants ────────────────
 
     /**
-     * Executes one autonomous container round on the remote path: parse →
-     * policy gate (ASK → approval) → run → single follow-up stream with the
-     * result injected into the last user turn. Never re-parsed: no loops.
+     * OpenCode-style agent loop on the remote path, bounded to 3 tool rounds:
+     * parse → policy gate (ASK → approval) → run → follow-up stream, then
+     * re-parse the follow-up for the next call. Stops on no-call, denial
+     * handling, conversation switch, or round cap.
      */
     private suspend fun handleRemoteContainerFollowUp(
         s: Settings,
@@ -2716,14 +2717,21 @@ class ChatViewModel(
         val idx = messages.lastIndex
         if (idx < 0 || messages[idx].role != ChatConstants.ROLE_ASSISTANT) return
         if (currentConversationId != targetChatId) return
-        val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
-        if (!isContainerToolCall(call.name)) return
+        val firstCall = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
+        if (!isContainerToolCall(firstCall.name)) return
         if (!containerReady(s)) {
             errorMessage.value = "Linux Environment not ready — open Models Hub → Linux Environment → Install/Update, then retry."
             KLog.w("ChatVM", "Remote container call skipped: environment not ready")
             return
         }
-        val command = extractToolCommand(call.arguments, call.name)
+        var rounds = 0
+        while (rounds < 3) {
+            if (currentConversationId != targetChatId) return
+            val call = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content) ?: return
+            if (!isContainerToolCall(call.name)) return
+            rounds++
+            KLog.d("ChatVM", "Remote container round $rounds: ${call.name}")
+            val command = extractToolCommand(call.arguments, call.name)
         val policy = com.raikaai.app.core.container.installPolicyFor(command.ifBlank { call.name })
         val toolContext: String = when {
             command.isBlank() ->
@@ -2780,6 +2788,18 @@ class ChatViewModel(
             onDelta = {},
         )
         followFinishReason?.let { KLog.d("ChatVM", "Remote container follow-up finish_reason=$it") }
+        }
+        if (rounds >= 3 && currentConversationId == targetChatId &&
+            messages[idx].role == ChatConstants.ROLE_ASSISTANT
+        ) {
+            val more = com.raikaai.app.skills.ToolCallParser.parseGenericCall(messages[idx].content)
+            if (more != null && isContainerToolCall(more.name)) {
+                messages[idx] = messages[idx].copy(
+                    content = messages[idx].content +
+                        "\n\n_(Stopped after 3 tool rounds — ask me to continue if needed.)_",
+                )
+            }
+        }
     }
 
     /**
