@@ -30,11 +30,16 @@ object ContainerFileOps {
      * Strips leading `/workspace/`, `workspace/`, or `/`.
      */
     fun resolveWorkspaceFile(relativePath: String, baseDir: File): File {
-        val clean = relativePath.trim()
-            .removePrefix("/workspace/")
-            .removePrefix("workspace/")
-            .removePrefix("/")
-            .trim()
+        var clean = relativePath.trim()
+        while (clean.startsWith("/workspace/") || clean.startsWith("workspace/") ||
+            clean.startsWith("./") || clean.startsWith("/")
+        ) {
+            clean = clean.removePrefix("/workspace/")
+                .removePrefix("workspace/")
+                .removePrefix("./")
+                .removePrefix("/")
+                .trim()
+        }
         if (clean.isBlank()) throw IllegalArgumentException("Empty file path")
         baseDir.mkdirs()
         val target = File(baseDir, clean).canonicalFile

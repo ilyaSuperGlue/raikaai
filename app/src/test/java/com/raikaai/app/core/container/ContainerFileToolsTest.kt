@@ -138,7 +138,11 @@ class ContainerFileToolsTest {
         val f1 = ContainerFileOps.resolveWorkspaceFile("/workspace/app.js", tempDir)
         val f2 = ContainerFileOps.resolveWorkspaceFile("workspace/app.js", tempDir)
         val f3 = ContainerFileOps.resolveWorkspaceFile("app.js", tempDir)
+        val f4 = ContainerFileOps.resolveWorkspaceFile("./app.js", tempDir)
+        val f5 = ContainerFileOps.resolveWorkspaceFile("/workspace/./app.js", tempDir)
         assertEquals(f1.absolutePath, f2.absolutePath)
         assertEquals(f1.absolutePath, f3.absolutePath)
+        assertEquals(f1.absolutePath, f4.absolutePath)
+        assertEquals(f1.absolutePath, f5.absolutePath)
     }
 }

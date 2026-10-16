@@ -1786,7 +1786,8 @@ class ChatViewModel(
                     autoApproved = auto,
                 )
                 ContainerDispatch(
-                    "[CONTAINER TOOL RESULT]\nwrite_file /workspace/${res.path}: success (${res.lines} lines, ${res.bytes} bytes written).\nProceed with next step.",
+                    "[CONTAINER TOOL RESULT]\nwrite_file /workspace/${res.path}: success (${res.lines} lines, ${res.bytes} bytes written).\n" +
+                        "[NEXT ACTION]\nFile saved. If needed, test it via execute_in_container or proceed with other files. When finished, provide your final response to the user.",
                     block,
                     0,
                 )
@@ -1850,13 +1851,17 @@ class ChatViewModel(
                     autoApproved = auto,
                 )
                 ContainerDispatch(
-                    "[CONTAINER TOOL RESULT]\nedit_file /workspace/${res.path}: success (${res.occurrences} occurrence(s) replaced).\nProceed with next step.",
+                    "[CONTAINER TOOL RESULT]\nedit_file /workspace/${res.path}: success (${res.occurrences} occurrence(s) replaced).\n" +
+                        "[NEXT ACTION]\nChanges applied. If more edits are needed, continue editing. When finished, summarize your work for the user.",
                     block,
                     0,
                 )
             } catch (e: Exception) {
                 KLog.w("ChatVM", "edit_file failed: ${e.message}")
-                ContainerDispatch("[CONTAINER TOOL ERROR]\nedit_file failed: ${e.message}", null, 1)
+                val hint = if (e.message?.contains("not found") == true) {
+                    "\nHINT: old_string indentation or formatting did not match. Instead of retrying edit_file, use `write_file` with the complete file content to avoid mismatch."
+                } else ""
+                ContainerDispatch("[CONTAINER TOOL ERROR]\nedit_file failed: ${e.message}$hint", null, 1)
             }
         }
         if (lower in CONTAINER_READ_NAMES) {
@@ -1897,7 +1902,9 @@ class ChatViewModel(
                     autoApproved = true,
                 )
                 ContainerDispatch(
-                    "[CONTAINER TOOL RESULT]\nread_file /workspace/${res.path} ($summary):\n${res.content}\n",
+                    "[CONTAINER TOOL RESULT]\nread_file /workspace/${res.path} ($summary):\n${res.content}\n\n" +
+                        "[NEXT ACTION]\nFile content is loaded in context. You MUST NOT call read_file on this file again. " +
+                        "Directly make edits with edit_file, overwrite with write_file, or run commands.",
                     block,
                     0,
                 )
@@ -1972,7 +1979,7 @@ class ChatViewModel(
             (if (res.stderr.isNotBlank()) "stderr:\n${res.stderr.take(followUpErrCap)}\n" else "") +
             (if (res.exitCode == 127) "\nHINT: 'command not found' — this minimal rootfs has busybox applets (wget, netstat, unzip, ifconfig) plus a curl shim; anything else needs `apk add` first.\n" else "") +
             (if (res.exitCode != 0 && command.contains('\n')) "\nHINT: the command contained a line break. If a path or package name got split across lines, re-emit the ENTIRE tool call on ONE single line.\n" else "") +
-            "Summarize the result for the user. Never claim you ran anything else."
+            "[NEXT ACTION]\nIf you got the information you needed, proceed directly to reading/writing files or answer the user. Do NOT repeat the same shell command."
         return ContainerDispatch(ctx, block, res.exitCode)
     }
 
@@ -3271,8 +3278,9 @@ class ChatViewModel(
             agentMessages.add(RemoteChatMessage(role = "assistant", text = assistantCallText))
             agentMessages.add(RemoteChatMessage(role = "user", text = toolContext))
 
-            val counts = agentMessages.map { estimateTokens(it.text) }
-            val cappedFollow = capMessagesToWindow(agentMessages, counts, remoteWindow, s.maxTokens + 256)
+            val prunedMessages = pruneOlderToolResults(agentMessages, keepLastN = 4)
+            val counts = prunedMessages.map { estimateTokens(it.text) }
+            val cappedFollow = capMessagesToWindow(prunedMessages, counts, remoteWindow, s.maxTokens + 256)
             onPromptCounted(counts.sum())
             messages[idx] = messages[idx].copy(content = "")
             var followFinishReason: String? = null
@@ -3327,6 +3335,28 @@ class ChatViewModel(
             messages[idx] = messages[idx].copy(
                 content = executedBlocks.joinToString("\n\n") + "\n\n" + messages[idx].content,
             )
+        }
+    }
+
+    /**
+     * Prunes older tool outputs in multi-round agent turns to prevent context bloat
+     * while retaining full fidelity for recent rounds.
+     */
+    private fun pruneOlderToolResults(
+        messages: List<RemoteChatMessage>,
+        keepLastN: Int = 4,
+    ): List<RemoteChatMessage> {
+        if (messages.size <= keepLastN) return messages
+        val cutoff = messages.size - keepLastN
+        return messages.mapIndexed { i, m ->
+            if (i < cutoff && m.role == "user" && m.text.startsWith("[CONTAINER TOOL RESULT]") && m.text.length > 1000) {
+                val lines = m.text.lines()
+                val head = lines.take(12).joinToString("\n")
+                val tail = lines.takeLast(4).joinToString("\n")
+                m.copy(text = "$head\n\n[... output trimmed to preserve context ...]\n\n$tail")
+            } else {
+                m
+            }
         }
     }
 
