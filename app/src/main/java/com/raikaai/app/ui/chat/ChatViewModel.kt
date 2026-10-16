@@ -86,7 +86,7 @@ data class PersonaPreset(
 }
 
 /** Max autonomous container rounds per remote turn (OpenCode-style agent loop). */
-internal const val MAX_CONTAINER_ROUNDS = 6
+internal const val MAX_CONTAINER_ROUNDS = 10
 
 /** Fresh turns kept verbatim beside a compaction summary (never folded). */
 internal const val VERBATIM_TAIL_COUNT = 4
@@ -1775,6 +1775,7 @@ class ChatViewModel(
             }
             return try {
                 val res = containerManager.writeFile(path, content)
+                ranThisTurn?.set("write_file:${res.path}", 0)
                 val auto = yolo || alwaysAllowed
                 val block = formatContainerRunBlock(
                     "write_file $path",
@@ -1838,6 +1839,7 @@ class ChatViewModel(
             }
             return try {
                 val res = containerManager.editFile(path, oldString, newString, replaceAll)
+                ranThisTurn?.set("edit_file:${res.path}", 0)
                 val auto = yolo || alwaysAllowed
                 val block = formatContainerRunBlock(
                     "edit_file $path",
@@ -1867,13 +1869,28 @@ class ChatViewModel(
             }
             val offset = runCatching { args.get("offset")?.asInt }.getOrNull() ?: 1
             val limit = runCatching { args.get("limit")?.asInt }.getOrNull() ?: 400
+            val normPath = path.trim().removePrefix("/workspace/").removePrefix("workspace/").removePrefix("/")
+            val readKey = "read_file:$normPath:$offset"
+            if (ranThisTurn?.containsKey(readKey) == true) {
+                KLog.d("ChatVM", "Container: identical read_file already ran this turn, skipping re-run")
+                return ContainerDispatch(
+                    "[CONTAINER TOOL SKIPPED]\nYou already read /workspace/$normPath (offset $offset) earlier in this turn. " +
+                        "Its content is already in the conversation history above. Do NOT re-read the same file. " +
+                        "Proceed to editing or writing files with write_file / edit_file, or provide your final response.",
+                    null, 0,
+                )
+            }
             return try {
                 val res = containerManager.readFile(path, offset, limit)
+                ranThisTurn?.set(readKey, 0)
                 val summary = "Lines ${res.startLine}-${res.endLine} of ${res.totalLines}" +
                     if (res.truncated) " (truncated, offset=${res.endLine + 1} for more)" else ""
+                val snippet = if (res.content.isNotBlank() && res.content != "(empty file)") {
+                    summary + "\n" + res.content.take(800)
+                } else summary
                 val block = formatContainerRunBlock(
                     "read_file $path",
-                    summary,
+                    snippet,
                     "",
                     0,
                     false,
@@ -3217,6 +3234,17 @@ class ChatViewModel(
         val ranThisTurn = mutableMapOf<String, Int>()
         val executedBlocks = mutableListOf<String>()
         var keptRawFallback = false
+
+        // Base conversation history up to the current user message
+        val baseWindowed = promptWindowMessages().dropLast(1)
+        val agentMessages = mutableListOf<RemoteChatMessage>()
+        if (finalSystem.isNotBlank()) {
+            agentMessages.add(RemoteChatMessage(role = "system", text = finalSystem))
+        }
+        baseWindowed.forEach { m ->
+            agentMessages.add(RemoteChatMessage(role = m.role, text = m.content))
+        }
+
         // True agent loop: each round's follow-up becomes the next round's
         // input, so the model chains ls -> cat -> run -> verify by itself.
         while (rounds < MAX_CONTAINER_ROUNDS) {
@@ -3225,6 +3253,7 @@ class ChatViewModel(
             if (!isContainerToolCall(call.name)) break
             rounds++
             KLog.d("ChatVM", "Remote container round $rounds/$MAX_CONTAINER_ROUNDS: ${call.name}")
+            val assistantCallText = messages[idx].content
             val dispatched = dispatchContainerTool(
                 call.name, call.arguments, s.containerYolo, ranThisTurn, s.containerAlwaysAllowJson,
                 followUpOutCap = 3500, followUpErrCap = 600,
@@ -3237,16 +3266,13 @@ class ChatViewModel(
             dispatched.block?.let { executedBlocks.add(it) }
             val toolContext = dispatched.toolContext
             if (currentConversationId != targetChatId) return
-            val windowed = promptWindowMessages().dropLast(1)
-            val lastUser = windowed.indexOfLast { it.role == ChatConstants.ROLE_USER }
-            val follow = mutableListOf<RemoteChatMessage>()
-            if (finalSystem.isNotBlank()) follow.add(RemoteChatMessage(role = "system", text = finalSystem))
-            windowed.forEachIndexed { i, m ->
-                val text = if (i == lastUser) "${m.content}\n\n$toolContext" else m.content
-                follow.add(RemoteChatMessage(role = m.role, text = text))
-            }
-            val counts = follow.map { estimateTokens(it.text) }
-            val cappedFollow = capMessagesToWindow(follow, counts, remoteWindow, s.maxTokens + 256)
+
+            // Record this turn in the ongoing agent conversation
+            agentMessages.add(RemoteChatMessage(role = "assistant", text = assistantCallText))
+            agentMessages.add(RemoteChatMessage(role = "user", text = toolContext))
+
+            val counts = agentMessages.map { estimateTokens(it.text) }
+            val cappedFollow = capMessagesToWindow(agentMessages, counts, remoteWindow, s.maxTokens + 256)
             onPromptCounted(counts.sum())
             messages[idx] = messages[idx].copy(content = "")
             var followFinishReason: String? = null
@@ -3989,9 +4015,13 @@ class ChatViewModel(
             "Add \"run_in_background\": true for long-running servers. Prefer single quotes for paths with spaces.\n\n" +
             "5. Install missing packages:\n" +
             "<tool_call>{\"name\": \"ensure_package\", \"arguments\": {\"command\": \"apk add --no-cache <pkg>\"}}</tool_call>\n\n" +
-            "Rules: files live strictly in /workspace. Chat attachments are mirrored to /workspace/chat_uploads/. " +
-            "Manage servers with list_daemons and stop_daemon {\"id\"}. " +
-            "Act directly: emit tool calls instead of asking what to run. Do not narrate reasoning steps."
+            "CRITICAL RULES:\n" +
+            "- Files live strictly in /workspace. Chat attachments are mirrored to /workspace/chat_uploads/.\n" +
+            "- Do NOT repeat exploration commands or re-read files you already inspected in earlier turns. Move directly to editing or writing files.\n" +
+            "- When writing code, write the complete file or make targeted edits with edit_file. Do not loop reading the same file.\n" +
+            "- When work is complete, provide your final response explaining what was done.\n" +
+            "- Manage servers with list_daemons and stop_daemon {\"id\"}.\n" +
+            "- Act directly: emit tool calls instead of asking what to run. Do not narrate reasoning steps."
     }
 
     /** Records the estimated USD cost of one remote generation (owned by ServerControls). */
