@@ -12,7 +12,9 @@ data class ParsedToolCall(
 )
 
 object ToolCallParser {
-    private val gson = Gson()
+    private val gson = com.google.gson.GsonBuilder()
+        .setStrictness(com.google.gson.Strictness.LENIENT)
+        .create()
     private val SEARCH_FN_REGEX = Pattern.compile(
         "(?<![\\w])(?:call:)?(web_search(?:_id|_en|_indonesia|_global)?)\\s*\\(\\s*query\\s*=\\s*[\"']([^\"']+)[\"']\\s*\\)",
         Pattern.CASE_INSENSITIVE,
@@ -301,7 +303,7 @@ object ToolCallParser {
             ?.groupValues?.get(1)?.trim().orEmpty()
         if (name.isBlank() || name.startsWith("web_search", ignoreCase = true)) return null
         val args = JsonObject()
-        val pairPattern = Regex("\"([A-Za-z0-9_.-]+)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"")
+        val pairPattern = Regex("\"([A-Za-z0-9_.-]+)\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"", RegexOption.DOT_MATCHES_ALL)
         for (m in pairPattern.findAll(jsonStr)) {
             val key = m.groupValues[1]
             if (key.equals("name", ignoreCase = true)) continue

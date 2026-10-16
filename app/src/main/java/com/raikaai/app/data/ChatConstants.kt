@@ -47,7 +47,7 @@ object SamplingDefaults {
 /** Single source of truth for size/count caps (DoS guards). */
 object AppLimits {
     const val REMOTE_IMAGE_MAX_BYTES = 8_000_000L
-    const val TOOL_JSON_MAX_CHARS = 8192
+    const val TOOL_JSON_MAX_CHARS = 131072
     const val SAFE_FILENAME_CHARS = 80
     const val SUMMARY_MAX_WORDS = 180
     const val PERSONA_IMPORT_MAX_CHARS = 200_000

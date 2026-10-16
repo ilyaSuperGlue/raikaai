@@ -209,6 +209,27 @@ fi
         return dir.listFiles()?.sortedBy { it.name.lowercase() } ?: emptyList()
     }
 
+    fun resolveWorkspaceFile(relativePath: String): File =
+        ContainerFileOps.resolveWorkspaceFile(relativePath, workspaceDir)
+
+    fun writeFile(relativePath: String, content: String): FileWriteResult =
+        ContainerFileOps.writeFile(relativePath, content, workspaceDir)
+
+    fun editFile(
+        relativePath: String,
+        oldString: String,
+        newString: String,
+        replaceAll: Boolean = false,
+    ): FileEditResult =
+        ContainerFileOps.editFile(relativePath, oldString, newString, replaceAll, workspaceDir)
+
+    fun readFile(
+        relativePath: String,
+        offset: Int = 1,
+        limit: Int = 400,
+    ): FileReadResult =
+        ContainerFileOps.readFile(relativePath, offset, limit, workspaceDir)
+
     // ── Install / wipe ────────────────────────────────────────────────
 
     /**

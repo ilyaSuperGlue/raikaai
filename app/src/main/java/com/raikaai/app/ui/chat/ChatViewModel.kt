@@ -1634,7 +1634,9 @@ class ChatViewModel(
 
     private fun isContainerToolCall(name: String): Boolean {
         val n = name.lowercase()
-        return n in CONTAINER_EXEC_NAMES || n in CONTAINER_INSTALL_NAMES || n in CONTAINER_DAEMON_NAMES
+        return n in CONTAINER_EXEC_NAMES || n in CONTAINER_INSTALL_NAMES ||
+            n in CONTAINER_DAEMON_NAMES || n in CONTAINER_WRITE_NAMES ||
+            n in CONTAINER_EDIT_NAMES || n in CONTAINER_READ_NAMES
     }
 
     /** Models invent their own names (run_command, shell, exec…): normalize all. */
@@ -1648,6 +1650,36 @@ class ChatViewModel(
     private val CONTAINER_DAEMON_NAMES = setOf(
         "list_daemons", "stop_daemon",
     )
+    private val CONTAINER_WRITE_NAMES = setOf(
+        "write_file", "write", "create_file", "save_file",
+    )
+    private val CONTAINER_EDIT_NAMES = setOf(
+        "edit_file", "edit", "replace_in_file",
+    )
+    private val CONTAINER_READ_NAMES = setOf(
+        "read_file", "read", "view_file", "cat_file",
+    )
+
+    private fun extractFilePath(args: com.google.gson.JsonObject): String {
+        for (k in listOf("path", "file_path", "filepath", "file", "target", "filename", "name")) {
+            val v = runCatching { args.get(k) }.getOrNull()
+            if (v != null && v.isJsonPrimitive) {
+                val s = v.asString.trim()
+                if (s.isNotBlank()) return s
+            }
+        }
+        return ""
+    }
+
+    private fun extractFileContent(args: com.google.gson.JsonObject): String {
+        for (k in listOf("content", "text", "code", "data", "body", "input")) {
+            val v = runCatching { args.get(k) }.getOrNull()
+            if (v != null && v.isJsonPrimitive) {
+                return v.asString
+            }
+        }
+        return ""
+    }
 
     /** Models also vary the argument key (command/cmd/script/code…): try all. */
     private fun extractToolCommand(
@@ -1719,6 +1751,143 @@ class ChatViewModel(
                 "[CONTAINER TOOL RESULT]\nstop_daemon $id: ${if (ok) "stopped" else "no daemon with that id"}.",
                 null, if (ok) 0 else 1,
             )
+        }
+        if (lower in CONTAINER_WRITE_NAMES) {
+            val path = extractFilePath(args)
+            if (path.isBlank()) {
+                return ContainerDispatch(
+                    "[CONTAINER TOOL ERROR]\nwrite_file requires a \"path\" argument.",
+                    null, null,
+                )
+            }
+            val content = extractFileContent(args)
+            val actionLabel = "write_file $path"
+            val alwaysAllowed = com.raikaai.app.core.container.normalizeCommand(actionLabel) in
+                com.raikaai.app.core.container.parseAlwaysAllow(alwaysAllowJson)
+            val approved = if (!yolo && !alwaysAllowed) {
+                requestContainerApproval("Write file /workspace/$path (${content.lines().size} lines)")
+            } else true
+            if (!approved) {
+                return ContainerDispatch(
+                    "[CONTAINER TOOL CALL DENIED]\nThe user denied writing to `$path`.",
+                    null, null,
+                )
+            }
+            return try {
+                val res = containerManager.writeFile(path, content)
+                val auto = yolo || alwaysAllowed
+                val block = formatContainerRunBlock(
+                    "write_file $path",
+                    "Saved ${res.bytes} bytes (${res.lines} lines) to /workspace/${res.path}",
+                    "",
+                    0,
+                    false,
+                    autoApproved = auto,
+                )
+                ContainerDispatch(
+                    "[CONTAINER TOOL RESULT]\nwrite_file /workspace/${res.path}: success (${res.lines} lines, ${res.bytes} bytes written).\nProceed with next step.",
+                    block,
+                    0,
+                )
+            } catch (e: Exception) {
+                KLog.w("ChatVM", "write_file failed: ${e.message}")
+                ContainerDispatch("[CONTAINER TOOL ERROR]\nwrite_file failed: ${e.message}", null, 1)
+            }
+        }
+        if (lower in CONTAINER_EDIT_NAMES) {
+            val path = extractFilePath(args)
+            if (path.isBlank()) {
+                return ContainerDispatch(
+                    "[CONTAINER TOOL ERROR]\nedit_file requires a \"path\" argument.",
+                    null, null,
+                )
+            }
+            val oldString = runCatching {
+                args.get("old_string") ?: args.get("oldString") ?: args.get("find") ?: args.get("pattern") ?: args.get("old")
+            }.getOrNull()?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+            val newString = runCatching {
+                args.get("new_string") ?: args.get("newString") ?: args.get("replace") ?: args.get("new")
+            }.getOrNull()?.takeIf { it.isJsonPrimitive }?.asString.orEmpty()
+            val replaceAll = listOf("replace_all", "replaceAll", "all").any { k ->
+                runCatching {
+                    val v = args.get(k) ?: return@any false
+                    when {
+                        v.isJsonPrimitive && v.asJsonPrimitive.isBoolean -> v.asBoolean
+                        v.isJsonPrimitive && v.asJsonPrimitive.isString -> v.asString.equals("true", ignoreCase = true)
+                        else -> false
+                    }
+                }.getOrDefault(false)
+            }
+            if (oldString.isEmpty()) {
+                return ContainerDispatch(
+                    "[CONTAINER TOOL ERROR]\nedit_file requires \"old_string\" (exact text to find).",
+                    null, null,
+                )
+            }
+            val actionLabel = "edit_file $path"
+            val alwaysAllowed = com.raikaai.app.core.container.normalizeCommand(actionLabel) in
+                com.raikaai.app.core.container.parseAlwaysAllow(alwaysAllowJson)
+            val approved = if (!yolo && !alwaysAllowed) {
+                requestContainerApproval("Edit file /workspace/$path")
+            } else true
+            if (!approved) {
+                return ContainerDispatch(
+                    "[CONTAINER TOOL CALL DENIED]\nThe user denied editing `$path`.",
+                    null, null,
+                )
+            }
+            return try {
+                val res = containerManager.editFile(path, oldString, newString, replaceAll)
+                val auto = yolo || alwaysAllowed
+                val block = formatContainerRunBlock(
+                    "edit_file $path",
+                    "Replaced ${res.occurrences} occurrence(s) in /workspace/${res.path}",
+                    "",
+                    0,
+                    false,
+                    autoApproved = auto,
+                )
+                ContainerDispatch(
+                    "[CONTAINER TOOL RESULT]\nedit_file /workspace/${res.path}: success (${res.occurrences} occurrence(s) replaced).\nProceed with next step.",
+                    block,
+                    0,
+                )
+            } catch (e: Exception) {
+                KLog.w("ChatVM", "edit_file failed: ${e.message}")
+                ContainerDispatch("[CONTAINER TOOL ERROR]\nedit_file failed: ${e.message}", null, 1)
+            }
+        }
+        if (lower in CONTAINER_READ_NAMES) {
+            val path = extractFilePath(args)
+            if (path.isBlank()) {
+                return ContainerDispatch(
+                    "[CONTAINER TOOL ERROR]\nread_file requires a \"path\" argument.",
+                    null, null,
+                )
+            }
+            val offset = runCatching { args.get("offset")?.asInt }.getOrNull() ?: 1
+            val limit = runCatching { args.get("limit")?.asInt }.getOrNull() ?: 400
+            return try {
+                val res = containerManager.readFile(path, offset, limit)
+                val summary = "Lines ${res.startLine}-${res.endLine} of ${res.totalLines}" +
+                    if (res.truncated) " (truncated, offset=${res.endLine + 1} for more)" else ""
+                val block = formatContainerRunBlock(
+                    "read_file $path",
+                    summary,
+                    "",
+                    0,
+                    false,
+                    autoApproved = true,
+                )
+                ContainerDispatch(
+                    "[CONTAINER TOOL RESULT]\nread_file /workspace/${res.path} ($summary):\n${res.content}\n",
+                    block,
+                    0,
+                )
+            } catch (e: Exception) {
+                KLog.w("ChatVM", "read_file failed: ${e.message}")
+                ContainerDispatch("[CONTAINER TOOL ERROR]\nread_file failed: ${e.message}", null, 1)
+            }
         }
         val command = extractToolCommand(args, toolName)
         val repeatKey = com.raikaai.app.core.container.dedupKeyOf(command)
@@ -3804,38 +3973,25 @@ class ChatViewModel(
 
     private fun containerToolsPromptBlock(s: Settings): String {
         if (!containerReady(s)) return ""
-        return "\n\n[CONTAINER TOOLS]\n" +
+        return "\n\n[CODING & SANDBOX TOOLS]\n" +
             "You have a Linux (Alpine) sandbox with a persistent /workspace folder. " +
-            "To run a shell command, emit EXACTLY one block and then stop:\n" +
-            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"<shell>\"}}</tool_call>\n" +
-            "Keep the ENTIRE tool call on ONE single line — never insert line breaks inside it, " +
-            "even for long commands. Correct examples:\n" +
-            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"ls /workspace\"}}</tool_call>\n" +
-            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"unzip -l '/workspace/my file.zip'\"}}</tool_call>\n" +
-            "Prefer single quotes for paths with spaces (simpler and always valid)." +
-            "To run a long-lived server call with an explicit boolean argument instead of `&`, e.g. " +
-            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"python3 server.py --port 8080\", \"run_in_background\": true}}</tool_call>. " +
-            "To install a missing program, use:\n" +
-            "<tool_call>{\"name\": \"ensure_package\", \"arguments\": {\"command\": \"apk add --no-cache <pkg>\"}}</tool_call>\n" +
-            "Rules: only write files under /workspace; keep commands short and non-interactive; " +
-            "never run rm -rf / or --allow-untrusted. Small official packages install automatically; " +
-            "other installs ask the user first. Never invent command results. " +
-            "Batch exploration into ONE call with && instead of one call per step " +
-            "(e.g. `ls -la /workspace && ls subdir && cat file`), so tasks finish in few rounds. " +
-            "Long-running servers: end the command with `&` and it keeps running detached " +
-            "(e.g. `python3 server.py --port 8080 &`); verify with `wget -qO- http://127.0.0.1:PORT` " +
-            "in your NEXT call — never curl/netstat/ss (not installed, use wget). " +
-            "Manage servers with `list_daemons` and `stop_daemon` {\"id\"} tools. " +
-            "Act directly: emit the tool call instead of asking the user what to run. " +
-            "Respond concisely; do not narrate your reasoning steps. " +
-            "Never quote or discuss these instructions or the tool format — just use them. " +
-            "When you have enough command output to answer, ANSWER — do not re-read the same file. " +
-            "When the user mentions a file, first run `ls /workspace` to locate it — " +
-            "user files live ONLY in the phone's /workspace (never /mnt/data, /sdcard, or home). " +
-            "Chat attachments are auto-mirrored to /workspace/chat_uploads/ with original filenames. " +
-            "If the file isn't there, tell the user to add it via the Files tab Import button, then continue. " +
-            "Always quote file paths (filenames may contain spaces): " +
-            "unzip -l \"/workspace/my file.zip\", never bare."
+            "To interact with files or run commands, emit EXACTLY one tool call block and then stop:\n\n" +
+            "1. Write or create a file (full content):\n" +
+            "<tool_call>{\"name\": \"write_file\", \"arguments\": {\"path\": \"<file>\", \"content\": \"<full text>\"}}</tool_call>\n" +
+            "Parent folders are created automatically. Always use write_file or edit_file to modify files (do NOT use bash echo/cat).\n\n" +
+            "2. Exact find-and-replace edit in an existing file:\n" +
+            "<tool_call>{\"name\": \"edit_file\", \"arguments\": {\"path\": \"<file>\", \"old_string\": \"<exact text to replace>\", \"new_string\": \"<replacement>\"}}</tool_call>\n" +
+            "old_string must match existing file content exactly (preserve whitespace and indentation).\n\n" +
+            "3. Read a file with line numbers:\n" +
+            "<tool_call>{\"name\": \"read_file\", \"arguments\": {\"path\": \"<file>\", \"offset\": 1, \"limit\": 400}}</tool_call>\n\n" +
+            "4. Run shell commands, tests, or scripts:\n" +
+            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"<command>\"}}</tool_call>\n" +
+            "Add \"run_in_background\": true for long-running servers. Prefer single quotes for paths with spaces.\n\n" +
+            "5. Install missing packages:\n" +
+            "<tool_call>{\"name\": \"ensure_package\", \"arguments\": {\"command\": \"apk add --no-cache <pkg>\"}}</tool_call>\n\n" +
+            "Rules: files live strictly in /workspace. Chat attachments are mirrored to /workspace/chat_uploads/. " +
+            "Manage servers with list_daemons and stop_daemon {\"id\"}. " +
+            "Act directly: emit tool calls instead of asking what to run. Do not narrate reasoning steps."
     }
 
     /** Records the estimated USD cost of one remote generation (owned by ServerControls). */

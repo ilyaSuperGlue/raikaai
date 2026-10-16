@@ -144,5 +144,39 @@ class ToolCallParserTest {
         assert(cmd.contains("unzip -l"))
         assert(cmd.contains("kzkt-license-web-main.zip"))
     }
+
+    @Test
+    fun testWriteFileToolCall() {
+        val text = """
+            <tool_call>
+            {
+              "name": "write_file",
+              "arguments": {
+                "path": "hello.py",
+                "content": "print('hello world')\nprint('second line')"
+              }
+            }
+            </tool_call>
+        """.trimIndent()
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("write_file", parsed?.name)
+        assertEquals("hello.py", parsed?.arguments?.get("path")?.asString)
+        assertEquals("print('hello world')\nprint('second line')", parsed?.arguments?.get("content")?.asString)
+    }
+
+    @Test
+    fun testEditFileToolCall() {
+        val text = """
+            <tool_call>{"name": "edit_file", "arguments": {"path": "main.py", "old_string": "def foo():\n    pass", "new_string": "def foo():\n    return 42"}}</tool_call>
+        """.trimIndent()
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("edit_file", parsed?.name)
+        assertEquals("main.py", parsed?.arguments?.get("path")?.asString)
+        assertEquals("def foo():\n    pass", parsed?.arguments?.get("old_string")?.asString)
+        assertEquals("def foo():\n    return 42", parsed?.arguments?.get("new_string")?.asString)
+    }
 }
+
 

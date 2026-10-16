@@ -1,0 +1,150 @@
+package com.raikaai.app.core.container
+
+import java.io.File
+import java.io.FileNotFoundException
+
+data class FileWriteResult(
+    val path: String,
+    val bytes: Long,
+    val lines: Int,
+)
+
+data class FileEditResult(
+    val path: String,
+    val occurrences: Int,
+)
+
+data class FileReadResult(
+    val path: String,
+    val content: String,
+    val totalLines: Int,
+    val startLine: Int,
+    val endLine: Int,
+    val truncated: Boolean,
+)
+
+object ContainerFileOps {
+
+    /**
+     * Resolves [relativePath] within [baseDir], preventing path traversal.
+     * Strips leading `/workspace/`, `workspace/`, or `/`.
+     */
+    fun resolveWorkspaceFile(relativePath: String, baseDir: File): File {
+        val clean = relativePath.trim()
+            .removePrefix("/workspace/")
+            .removePrefix("workspace/")
+            .removePrefix("/")
+            .trim()
+        if (clean.isBlank()) throw IllegalArgumentException("Empty file path")
+        baseDir.mkdirs()
+        val target = File(baseDir, clean).canonicalFile
+        val base = baseDir.canonicalFile
+        if (!target.path.startsWith(base.path)) {
+            throw SecurityException("Access denied: path escapes /workspace: $relativePath")
+        }
+        return target
+    }
+
+    /**
+     * Writes [content] to [relativePath] under [baseDir], creating any
+     * missing parent folders automatically. Overwrites existing files.
+     */
+    fun writeFile(
+        relativePath: String,
+        content: String,
+        baseDir: File,
+    ): FileWriteResult {
+        val target = resolveWorkspaceFile(relativePath, baseDir)
+        target.parentFile?.mkdirs()
+        target.writeText(content, Charsets.UTF_8)
+        val relPath = target.relativeTo(baseDir).path
+        val lineCount = if (content.isEmpty()) 0 else content.lines().size
+        return FileWriteResult(relPath, target.length(), lineCount)
+    }
+
+    /**
+     * Performs exact text replacement in [relativePath] under [baseDir].
+     * If [replaceAll] is false, requires [oldString] to occur exactly once.
+     */
+    fun editFile(
+        relativePath: String,
+        oldString: String,
+        newString: String,
+        replaceAll: Boolean = false,
+        baseDir: File,
+    ): FileEditResult {
+        if (oldString == newString) {
+            throw IllegalArgumentException("old_string and new_string must differ")
+        }
+        val target = resolveWorkspaceFile(relativePath, baseDir)
+        if (!target.exists() || !target.isFile) {
+            throw FileNotFoundException("File not found: $relativePath")
+        }
+        val original = target.readText(Charsets.UTF_8)
+        if (!original.contains(oldString)) {
+            throw IllegalArgumentException("old_string not found in $relativePath. Ensure exact indentation and whitespace match.")
+        }
+        var count = 0
+        var idx = 0
+        while (idx <= original.length - oldString.length) {
+            val found = original.indexOf(oldString, idx)
+            if (found < 0) break
+            count++
+            idx = found + oldString.length
+        }
+        if (count > 1 && !replaceAll) {
+            throw IllegalArgumentException("old_string occurs $count times in $relativePath. Add more surrounding context to disambiguate or set replace_all: true.")
+        }
+        val updated = if (replaceAll) {
+            original.replace(oldString, newString)
+        } else {
+            val pos = original.indexOf(oldString)
+            original.substring(0, pos) + newString + original.substring(pos + oldString.length)
+        }
+        target.writeText(updated, Charsets.UTF_8)
+        val relPath = target.relativeTo(baseDir).path
+        return FileEditResult(relPath, count)
+    }
+
+    /**
+     * Reads lines from [relativePath] under [baseDir] with 1-based line
+     * number prefixes.
+     */
+    fun readFile(
+        relativePath: String,
+        offset: Int = 1,
+        limit: Int = 400,
+        baseDir: File,
+    ): FileReadResult {
+        val target = resolveWorkspaceFile(relativePath, baseDir)
+        if (!target.exists()) {
+            throw FileNotFoundException("File not found: $relativePath")
+        }
+        if (target.isDirectory) {
+            throw IllegalArgumentException("Path is a directory, not a file: $relativePath (use `ls` to list directory)")
+        }
+        val lines = target.readLines(Charsets.UTF_8)
+        val relPath = target.relativeTo(baseDir).path
+        if (lines.isEmpty()) {
+            return FileReadResult(relPath, "(empty file)", 0, 0, 0, false)
+        }
+        val safeOffset = offset.coerceAtLeast(1)
+        val safeLimit = limit.coerceIn(1, 2000)
+        val startIdx = (safeOffset - 1).coerceAtMost(lines.size)
+        val slice = lines.drop(startIdx).take(safeLimit)
+        val sb = StringBuilder()
+        slice.forEachIndexed { i, line ->
+            sb.append("${startIdx + i + 1}: $line\n")
+        }
+        val endLine = startIdx + slice.size
+        val truncated = endLine < lines.size
+        return FileReadResult(
+            path = relPath,
+            content = sb.toString().trimEnd(),
+            totalLines = lines.size,
+            startLine = startIdx + 1,
+            endLine = endLine,
+            truncated = truncated,
+        )
+    }
+}
