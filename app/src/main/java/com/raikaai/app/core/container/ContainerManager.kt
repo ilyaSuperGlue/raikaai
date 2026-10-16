@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -121,6 +122,9 @@ fi
             return sb.toString()
         }
     }
+
+    enum class TermKind { CMD, OUT, ERR, SYS }
+    data class TermLine(val kind: TermKind, val text: String)
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val runMutex = Mutex()
@@ -408,6 +412,92 @@ fi
                 } catch (t: Throwable) {
                     try { proc?.destroyForcibly() } catch (_: Throwable) {}
                     RunResult("", "run failed: ${t.message ?: t.javaClass.simpleName}", -1)
+                }
+            }
+        }
+    }
+
+    /**
+     * Executes [command] with real-time stdout/stderr streaming.
+     * Prevents buffer saturation for verbose programs (like vite/npm)
+     * and streams lines as they are produced without killing background servers.
+     */
+    suspend fun runStreaming(
+        command: String,
+        timeoutSec: Long = 600,
+        onLine: (TermKind, String) -> Unit,
+    ): Int {
+        if (!isInstalled()) {
+            onLine(TermKind.ERR, "Linux Environment is not installed. Press Install Alpine first.")
+            return -1
+        }
+        return runMutex.withLock {
+            withContext(Dispatchers.IO) {
+                var proc: Process? = null
+                try {
+                    workspaceDir.mkdirs()
+                    val pb = ProcessBuilder(
+                        listOf(prootBin.absolutePath) + baseArgs() + listOf("/bin/sh", "-c", command),
+                    )
+                    pb.redirectErrorStream(false)
+                    withContainerEnv(pb)
+                    proc = pb.start()
+                    currentProc = proc
+
+                    val outJob = scope.launch(Dispatchers.IO) {
+                        try {
+                            val reader = proc.inputStream.bufferedReader()
+                            while (isActive) {
+                                val line = reader.readLine() ?: break
+                                withContext(Dispatchers.Main) {
+                                    onLine(TermKind.OUT, line)
+                                }
+                            }
+                        } catch (_: Throwable) {}
+                    }
+
+                    val errJob = scope.launch(Dispatchers.IO) {
+                        try {
+                            val reader = proc.errorStream.bufferedReader()
+                            while (isActive) {
+                                val line = reader.readLine() ?: break
+                                withContext(Dispatchers.Main) {
+                                    onLine(TermKind.ERR, line)
+                                }
+                            }
+                        } catch (_: Throwable) {}
+                    }
+
+                    val finished = try {
+                        proc.waitFor(timeoutSec, TimeUnit.SECONDS)
+                    } finally {
+                        if (currentProc === proc) currentProc = null
+                    }
+
+                    try {
+                        kotlinx.coroutines.withTimeoutOrNull(800) {
+                            outJob.join()
+                            errJob.join()
+                        }
+                    } catch (_: Throwable) {}
+
+                    if (!finished) {
+                        proc.destroyForcibly()
+                        withContext(Dispatchers.Main) {
+                            onLine(TermKind.SYS, "[timed out after ${timeoutSec}s]")
+                        }
+                        return@withContext -1
+                    }
+                    proc.exitValue()
+                } catch (c: kotlinx.coroutines.CancellationException) {
+                    try { proc?.destroyForcibly() } catch (_: Throwable) {}
+                    throw c
+                } catch (t: Throwable) {
+                    try { proc?.destroyForcibly() } catch (_: Throwable) {}
+                    withContext(Dispatchers.Main) {
+                        onLine(TermKind.ERR, "run failed: ${t.message ?: t.javaClass.simpleName}")
+                    }
+                    -1
                 }
             }
         }

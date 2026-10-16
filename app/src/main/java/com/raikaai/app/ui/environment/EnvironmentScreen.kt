@@ -85,6 +85,8 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.FileProvider
 import com.raikaai.app.core.container.ContainerManager
+import com.raikaai.app.core.container.ContainerManager.TermKind
+import com.raikaai.app.core.container.ContainerManager.TermLine
 import com.raikaai.app.ui.chat.ChatViewModel
 import java.io.File
 import java.util.Locale
@@ -188,6 +190,7 @@ fun EnvironmentScreen(
 
             if (tab == 0) {
                 TerminalTab(
+                    viewModel = viewModel,
                     manager = manager,
                     onCommandDone = { filesTick++ },
                 )
@@ -252,23 +255,20 @@ private fun NotInstalledCard(
     }
 }
 
-/** One terminal transcript line (Termux-style coloring). */
-private data class TermLine(val kind: TermKind, val text: String)
-private enum class TermKind { CMD, OUT, ERR, SYS }
-
 private val TermGreen = Color(0xFF4CAF50)
 
 @Composable
 private fun TerminalTab(
+    viewModel: ChatViewModel,
     manager: ContainerManager,
     onCommandDone: () -> Unit,
 ) {
+    val lines = viewModel.terminalLines
+    val history = viewModel.terminalHistory
+    val running = viewModel.isTerminalRunning
     val scope = rememberCoroutineScope()
-    val lines = remember { mutableStateListOf<TermLine>() }
-    val history = remember { mutableStateListOf<String>() }
     var histPos by remember { mutableIntStateOf(-1) }
     var input by remember { mutableStateOf(TextFieldValue("")) }
-    var running by remember { mutableStateOf(false) }
     // Sticky modifiers like Termux: tap one, then tap the target key.
     // Only one sticky at a time; any tap consumes it.
     var ctrlActive by remember { mutableStateOf(false) }
@@ -304,20 +304,10 @@ private fun TerminalTab(
     fun exec(cmd: String) {
         val clean = cmd.trim()
         if (clean.isEmpty() || running) return
-        running = true
-        lines.add(TermLine(TermKind.CMD, clean))
-        history.add(clean)
-        histPos = -1
         input = TextFieldValue("")
-        scope.launch(Dispatchers.IO) {
-            val res = manager.run(clean, timeoutSec = 60)
-            withContext(Dispatchers.Main) {
-                if (res.stdout.isNotBlank()) lines.add(TermLine(TermKind.OUT, res.stdout.take(3000)))
-                if (res.stderr.isNotBlank()) lines.add(TermLine(TermKind.ERR, res.stderr.take(1000)))
-                if (res.timedOut) lines.add(TermLine(TermKind.SYS, "[timed out after 60s]"))
-                running = false
-                onCommandDone()
-            }
+        histPos = -1
+        viewModel.execTerminal(clean) {
+            onCommandDone()
         }
     }
 
@@ -438,10 +428,9 @@ private fun TerminalTab(
             val wasAlt = altActive
             clearModifiers()
             if (!wasAlt && key == 'c') {
-                scope.launch(Dispatchers.IO) { manager.cancelRun() }
-                lines.add(TermLine(TermKind.SYS, "^C"))
+                viewModel.cancelTerminal()
             } else if (!wasAlt && key == 'l') {
-                lines.clear()
+                viewModel.clearTerminal()
             } else if (!wasAlt && key == 'u') {
                 setInputText("")
             } else {
@@ -476,7 +465,7 @@ private fun TerminalTab(
             Column(modifier = Modifier.fillMaxSize().padding(12.dp)) {
                 if (lines.isEmpty()) {
                     Text(
-                        "Alpine shell — type below. TAB completes, ↑↓ history, CTRL/ALT/SHIFT sticky.",
+                        "Alpine shell — type below. TAB completes, ↑↓ history, CTRL/ALT/SHIFT sticky.\nTip: add '&' for background servers (e.g. npm run dev &).",
                         style = MaterialTheme.typography.bodySmall,
                         fontFamily = FontFamily.Monospace,
                         fontSize = 11.sp,

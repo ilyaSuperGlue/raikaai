@@ -12,6 +12,8 @@ import com.raikaai.app.data.ChatConstants
 import com.raikaai.app.web.UrlSummarizer
 import java.io.File
 import androidx.compose.runtime.State
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -281,6 +283,64 @@ class ChatViewModel(
     val containerInstallState: StateFlow<com.raikaai.app.core.container.ContainerManager.InstallState>
         get() = containerManager.installState
     val containerServedPort: StateFlow<Int?> get() = containerManager.servedPort
+
+    // Persistent Linux Terminal state (lives with ViewModel so navigation never wipes transcript/history)
+    val terminalLines = androidx.compose.runtime.mutableStateListOf<com.raikaai.app.core.container.ContainerManager.TermLine>()
+    val terminalHistory = androidx.compose.runtime.mutableStateListOf<String>()
+    var isTerminalRunning by androidx.compose.runtime.mutableStateOf(false)
+        private set
+    private var terminalJob: Job? = null
+
+    fun execTerminal(cmd: String, onDone: () -> Unit = {}) {
+        val clean = cmd.trim()
+        if (clean.isEmpty() || isTerminalRunning) return
+        isTerminalRunning = true
+        terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.CMD, clean))
+        if (terminalHistory.isEmpty() || terminalHistory.last() != clean) {
+            terminalHistory.add(clean)
+        }
+        terminalJob = viewModelScope.launch(Dispatchers.IO) {
+            try {
+                if (com.raikaai.app.core.container.containsBackgroundOp(clean)) {
+                    val res = containerManager.startDaemon(clean)
+                    withContext(Dispatchers.Main) {
+                        if (res.stdout.isNotBlank()) terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.SYS, res.stdout))
+                        if (res.stderr.isNotBlank()) terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.ERR, res.stderr))
+                    }
+                } else {
+                    containerManager.runStreaming(clean, timeoutSec = 600) { kind, line ->
+                        terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(kind, line))
+                        if (terminalLines.size > 1500) {
+                            terminalLines.removeRange(0, 100)
+                        }
+                    }
+                }
+            } catch (_: kotlinx.coroutines.CancellationException) {
+                withContext(Dispatchers.Main) {
+                    terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.SYS, "^C"))
+                }
+            } catch (t: Throwable) {
+                withContext(Dispatchers.Main) {
+                    terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.ERR, "Error: ${t.message}"))
+                }
+            } finally {
+                withContext(Dispatchers.Main) {
+                    isTerminalRunning = false
+                    terminalJob = null
+                    onDone()
+                }
+            }
+        }
+    }
+
+    fun cancelTerminal() {
+        terminalJob?.cancel()
+        containerManager.cancelRun()
+    }
+
+    fun clearTerminal() {
+        terminalLines.clear()
+    }
 
     // Embedded-server controls + spend tracking live in ServerControls.
     private val serverControls = ServerControls(
