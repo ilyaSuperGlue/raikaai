@@ -246,10 +246,9 @@ fi
                 makeBusyboxExecutable()
                 verifyRootfs(entries)
 
-                File(alpineDir, "etc/resolv.conf").apply {
-                    parentFile?.mkdirs()
-                    writeText("nameserver 8.8.8.8\nnameserver 1.1.1.1\n")
-                }
+                File(alpineDir, "etc").mkdirs()
+                // Real DNS comes after unpack (needs etc/ to exist first).
+                refreshResolvConf()
                 // apk expects these to exist (minirootfs omits some).
                 listOf("tmp", "var/cache/apk", "etc/apk", "lib/apk/db", "root").forEach {
                     File(alpineDir, it).mkdirs()
@@ -779,6 +778,31 @@ fi
         return runCatching {
             (alpineDir.listFiles()?.take(12)?.map { it.name } ?: emptyList()).toString()
         }.getOrDefault("?")
+    }
+
+    /**
+     * Rewrites the guest resolv.conf from Android's CURRENT DNS servers
+     * (captive portals / carriers / VPNs often block third-party DNS, so a
+     * hardcoded 8.8.8.8 goes dark when the network changes). Returns the
+     * servers used, for chat feedback.
+     */
+    suspend fun refreshResolvConf(): String {
+        return withContext(Dispatchers.IO) {
+            val servers = runCatching {
+                val cm = app.getSystemService(android.net.ConnectivityManager::class.java)
+                    ?: return@runCatching emptyList<String>()
+                val props = cm.getLinkProperties(cm.activeNetwork) ?: return@runCatching emptyList<String>()
+                val all = props.dnsServers.mapNotNull { it.hostAddress?.takeIf { h -> h.isNotBlank() } }
+                // IPv4 first: some mobile IPv6 DNS answers never arrive.
+                (all.filter { !it.contains(':') } + all.filter { it.contains(':') }).distinct()
+            }.getOrDefault(emptyList()).take(3)
+                .ifEmpty { listOf("8.8.8.8", "1.1.1.1") }
+            val f = File(alpineDir, "etc/resolv.conf")
+            f.parentFile?.mkdirs()
+            f.writeText(servers.joinToString(separator = "") { "nameserver $it\n" })
+            KLog.d(TAG, "resolv.conf DNS: ${servers.joinToString()}")
+            servers.joinToString()
+        }
     }
 
     /** Minimal tar.gz extractor: regular files + dirs + symlinks. Returns entry count. */

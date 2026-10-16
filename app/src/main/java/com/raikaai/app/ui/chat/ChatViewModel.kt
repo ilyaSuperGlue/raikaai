@@ -2061,6 +2061,7 @@ class ChatViewModel(
             !trimmed.startsWith("/verbose", ignoreCase = true) &&
             !trimmed.startsWith("/serve", ignoreCase = true) &&
             !trimmed.startsWith("/stop-serve", ignoreCase = true) &&
+            !trimmed.startsWith("/fix-dns", ignoreCase = true) &&
             !trimmed.startsWith("/daemons", ignoreCase = true) &&
             !trimmed.startsWith("/killdaemon", ignoreCase = true) &&
             !trimmed.startsWith("/env", ignoreCase = true)
@@ -2100,6 +2101,10 @@ class ChatViewModel(
                 trimmed.startsWith("/stop-serve", ignoreCase = true) -> {
                     containerManager.stopServe()
                     "Preview server stopped."
+                }
+                trimmed.startsWith("/fix-dns", ignoreCase = true) -> {
+                    val servers = containerManager.refreshResolvConf()
+                    "Guest DNS now: $servers\nRetry the failed download (e.g. apk update)."
                 }
                 trimmed.startsWith("/daemons", ignoreCase = true) -> {
                     containerManager.listDaemons()

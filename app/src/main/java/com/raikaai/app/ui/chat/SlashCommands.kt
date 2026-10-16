@@ -121,4 +121,11 @@ val DEFAULT_SLASH_COMMANDS =
             promptTemplate = "/permission ",
             icon = Icons.Default.AutoAwesome,
         ),
+        SlashCommand(
+            command = "/fix-dns",
+            title = "Fix Guest DNS",
+            description = "Sync container DNS with current network",
+            promptTemplate = "/fix-dns",
+            icon = Icons.Default.Language,
+        ),
     )
