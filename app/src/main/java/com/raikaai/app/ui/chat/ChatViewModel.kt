@@ -284,62 +284,111 @@ class ChatViewModel(
         get() = containerManager.installState
     val containerServedPort: StateFlow<Int?> get() = containerManager.servedPort
 
-    // Persistent Linux Terminal state (lives with ViewModel so navigation never wipes transcript/history)
-    val terminalLines = androidx.compose.runtime.mutableStateListOf<com.raikaai.app.core.container.ContainerManager.TermLine>()
-    val terminalHistory = androidx.compose.runtime.mutableStateListOf<String>()
-    var isTerminalRunning by androidx.compose.runtime.mutableStateOf(false)
-        private set
-    private var terminalJob: Job? = null
+    // Chrome-style multiple Linux Terminal sessions (persistent in ViewModel)
+    class TerminalSession(
+        val id: String = java.util.UUID.randomUUID().toString(),
+        initialTitle: String = "Term 1",
+    ) {
+        var title by androidx.compose.runtime.mutableStateOf(initialTitle)
+        val lines = androidx.compose.runtime.mutableStateListOf<com.raikaai.app.core.container.ContainerManager.TermLine>()
+        val history = androidx.compose.runtime.mutableStateListOf<String>()
+        var isRunning by androidx.compose.runtime.mutableStateOf(false)
+        var input by androidx.compose.runtime.mutableStateOf(androidx.compose.ui.text.input.TextFieldValue(""))
+        var histPos by androidx.compose.runtime.mutableIntStateOf(-1)
+        var job: Job? = null
+    }
 
-    fun execTerminal(cmd: String, onDone: () -> Unit = {}) {
-        val clean = cmd.trim()
-        if (clean.isEmpty() || isTerminalRunning) return
-        isTerminalRunning = true
-        terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.CMD, clean))
-        if (terminalHistory.isEmpty() || terminalHistory.last() != clean) {
-            terminalHistory.add(clean)
+    val terminalSessions = androidx.compose.runtime.mutableStateListOf<TerminalSession>().apply {
+        add(TerminalSession(initialTitle = "Term 1"))
+    }
+    var activeTerminalSessionId by androidx.compose.runtime.mutableStateOf(terminalSessions.first().id)
+
+    val activeTerminalSession: TerminalSession
+        get() = terminalSessions.firstOrNull { it.id == activeTerminalSessionId } ?: terminalSessions.first()
+
+    fun newTerminalSession(): TerminalSession {
+        val num = terminalSessions.size + 1
+        val session = TerminalSession(initialTitle = "Term $num")
+        terminalSessions.add(session)
+        activeTerminalSessionId = session.id
+        return session
+    }
+
+    fun closeTerminalSession(sessionId: String) {
+        if (terminalSessions.size <= 1) return
+        val idx = terminalSessions.indexOfFirst { it.id == sessionId }
+        if (idx >= 0) {
+            val s = terminalSessions[idx]
+            s.job?.cancel()
+            terminalSessions.removeAt(idx)
+            if (activeTerminalSessionId == sessionId) {
+                val nextIdx = (idx - 1).coerceAtLeast(0)
+                activeTerminalSessionId = terminalSessions[nextIdx].id
+            }
         }
-        terminalJob = viewModelScope.launch(Dispatchers.IO) {
+    }
+
+    fun selectTerminalSession(sessionId: String) {
+        activeTerminalSessionId = sessionId
+    }
+
+    fun execTerminal(cmd: String, sessionId: String = activeTerminalSessionId, onDone: () -> Unit = {}) {
+        val session = terminalSessions.firstOrNull { it.id == sessionId } ?: return
+        val clean = cmd.trim()
+        if (clean.isEmpty() || session.isRunning) return
+        session.isRunning = true
+
+        if (session.title.startsWith("Term ")) {
+            val shortCmd = clean.split(" ").firstOrNull()?.take(12) ?: "cmd"
+            session.title = shortCmd
+        }
+
+        session.lines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.CMD, clean))
+        if (session.history.isEmpty() || session.history.last() != clean) {
+            session.history.add(clean)
+        }
+        session.job = viewModelScope.launch(Dispatchers.IO) {
             try {
                 if (com.raikaai.app.core.container.containsBackgroundOp(clean)) {
                     val res = containerManager.startDaemon(clean)
                     withContext(Dispatchers.Main) {
-                        if (res.stdout.isNotBlank()) terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.SYS, res.stdout))
-                        if (res.stderr.isNotBlank()) terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.ERR, res.stderr))
+                        if (res.stdout.isNotBlank()) session.lines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.SYS, res.stdout))
+                        if (res.stderr.isNotBlank()) session.lines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.ERR, res.stderr))
                     }
                 } else {
                     containerManager.runStreaming(clean, timeoutSec = 600) { kind, line ->
-                        terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(kind, line))
-                        if (terminalLines.size > 1500) {
-                            terminalLines.removeRange(0, 100)
+                        session.lines.add(com.raikaai.app.core.container.ContainerManager.TermLine(kind, line))
+                        if (session.lines.size > 1500) {
+                            session.lines.removeRange(0, 100)
                         }
                     }
                 }
             } catch (_: kotlinx.coroutines.CancellationException) {
                 withContext(Dispatchers.Main) {
-                    terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.SYS, "^C"))
+                    session.lines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.SYS, "^C"))
                 }
             } catch (t: Throwable) {
                 withContext(Dispatchers.Main) {
-                    terminalLines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.ERR, "Error: ${t.message}"))
+                    session.lines.add(com.raikaai.app.core.container.ContainerManager.TermLine(com.raikaai.app.core.container.ContainerManager.TermKind.ERR, "Error: ${t.message}"))
                 }
             } finally {
                 withContext(Dispatchers.Main) {
-                    isTerminalRunning = false
-                    terminalJob = null
+                    session.isRunning = false
+                    session.job = null
                     onDone()
                 }
             }
         }
     }
 
-    fun cancelTerminal() {
-        terminalJob?.cancel()
-        containerManager.cancelRun()
+    fun cancelTerminal(sessionId: String = activeTerminalSessionId) {
+        val session = terminalSessions.firstOrNull { it.id == sessionId } ?: return
+        session.job?.cancel()
     }
 
-    fun clearTerminal() {
-        terminalLines.clear()
+    fun clearTerminal(sessionId: String = activeTerminalSessionId) {
+        val session = terminalSessions.firstOrNull { it.id == sessionId } ?: return
+        session.lines.clear()
     }
 
     // Embedded-server controls + spend tracking live in ServerControls.

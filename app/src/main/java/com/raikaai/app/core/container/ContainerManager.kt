@@ -150,7 +150,7 @@ fi
     private var serveProcess: Process? = null
     private var serveJob: Job? = null
     private var installJob: Job? = null
-    @Volatile private var currentProc: Process? = null
+    private val activeProcs = java.util.concurrent.ConcurrentHashMap.newKeySet<Process>()
     private var resolvLastRefresh = 0L
     private val daemons = mutableMapOf<Int, Process>()
     private var daemonSeq = 0
@@ -389,11 +389,11 @@ fi
                     withContainerEnv(pb)
                     extraEnv.forEach { (k, v) -> pb.environment()[k] = v }
                     proc = pb.start()
-                    currentProc = proc
+                    activeProcs.add(proc)
                     val finished = try {
                         proc.waitFor(timeoutSec, TimeUnit.SECONDS)
                     } finally {
-                        if (currentProc === proc) currentProc = null
+                        activeProcs.remove(proc)
                     }
                     if (!finished) {
                         proc.destroyForcibly()
@@ -431,74 +431,72 @@ fi
             onLine(TermKind.ERR, "Linux Environment is not installed. Press Install Alpine first.")
             return -1
         }
-        return runMutex.withLock {
-            withContext(Dispatchers.IO) {
-                var proc: Process? = null
-                try {
-                    workspaceDir.mkdirs()
-                    val pb = ProcessBuilder(
-                        listOf(prootBin.absolutePath) + baseArgs() + listOf("/bin/sh", "-c", command),
-                    )
-                    pb.redirectErrorStream(false)
-                    withContainerEnv(pb)
-                    proc = pb.start()
-                    currentProc = proc
+        return withContext(Dispatchers.IO) {
+            var proc: Process? = null
+            try {
+                workspaceDir.mkdirs()
+                val pb = ProcessBuilder(
+                    listOf(prootBin.absolutePath) + baseArgs() + listOf("/bin/sh", "-c", command),
+                )
+                pb.redirectErrorStream(false)
+                withContainerEnv(pb)
+                proc = pb.start()
+                activeProcs.add(proc)
 
-                    val outJob = scope.launch(Dispatchers.IO) {
-                        try {
-                            val reader = proc.inputStream.bufferedReader()
-                            while (isActive) {
-                                val line = reader.readLine() ?: break
-                                withContext(Dispatchers.Main) {
-                                    onLine(TermKind.OUT, line)
-                                }
-                            }
-                        } catch (_: Throwable) {}
-                    }
-
-                    val errJob = scope.launch(Dispatchers.IO) {
-                        try {
-                            val reader = proc.errorStream.bufferedReader()
-                            while (isActive) {
-                                val line = reader.readLine() ?: break
-                                withContext(Dispatchers.Main) {
-                                    onLine(TermKind.ERR, line)
-                                }
-                            }
-                        } catch (_: Throwable) {}
-                    }
-
-                    val finished = try {
-                        proc.waitFor(timeoutSec, TimeUnit.SECONDS)
-                    } finally {
-                        if (currentProc === proc) currentProc = null
-                    }
-
+                val outJob = scope.launch(Dispatchers.IO) {
                     try {
-                        kotlinx.coroutines.withTimeoutOrNull(800) {
-                            outJob.join()
-                            errJob.join()
+                        val reader = proc.inputStream.bufferedReader()
+                        while (isActive) {
+                            val line = reader.readLine() ?: break
+                            withContext(Dispatchers.Main) {
+                                onLine(TermKind.OUT, line)
+                            }
                         }
                     } catch (_: Throwable) {}
-
-                    if (!finished) {
-                        proc.destroyForcibly()
-                        withContext(Dispatchers.Main) {
-                            onLine(TermKind.SYS, "[timed out after ${timeoutSec}s]")
-                        }
-                        return@withContext -1
-                    }
-                    proc.exitValue()
-                } catch (c: kotlinx.coroutines.CancellationException) {
-                    try { proc?.destroyForcibly() } catch (_: Throwable) {}
-                    throw c
-                } catch (t: Throwable) {
-                    try { proc?.destroyForcibly() } catch (_: Throwable) {}
-                    withContext(Dispatchers.Main) {
-                        onLine(TermKind.ERR, "run failed: ${t.message ?: t.javaClass.simpleName}")
-                    }
-                    -1
                 }
+
+                val errJob = scope.launch(Dispatchers.IO) {
+                    try {
+                        val reader = proc.errorStream.bufferedReader()
+                        while (isActive) {
+                            val line = reader.readLine() ?: break
+                            withContext(Dispatchers.Main) {
+                                onLine(TermKind.ERR, line)
+                            }
+                        }
+                    } catch (_: Throwable) {}
+                }
+
+                val finished = try {
+                    proc.waitFor(timeoutSec, TimeUnit.SECONDS)
+                } finally {
+                    activeProcs.remove(proc)
+                }
+
+                try {
+                    kotlinx.coroutines.withTimeoutOrNull(800) {
+                        outJob.join()
+                        errJob.join()
+                    }
+                } catch (_: Throwable) {}
+
+                if (!finished) {
+                    proc.destroyForcibly()
+                    withContext(Dispatchers.Main) {
+                        onLine(TermKind.SYS, "[timed out after ${timeoutSec}s]")
+                    }
+                    return@withContext -1
+                }
+                proc.exitValue()
+            } catch (c: kotlinx.coroutines.CancellationException) {
+                try { proc?.destroyForcibly() } catch (_: Throwable) {}
+                throw c
+            } catch (t: Throwable) {
+                try { proc?.destroyForcibly() } catch (_: Throwable) {}
+                withContext(Dispatchers.Main) {
+                    onLine(TermKind.ERR, "run failed: ${t.message ?: t.javaClass.simpleName}")
+                }
+                -1
             }
         }
     }
@@ -552,9 +550,12 @@ fi
         return sb.toString()
     }
 
-    /** Forcibly stops the currently running command, if any (terminal Ctrl+C). */
+    /** Forcibly stops all currently running foreground commands, if any (terminal Ctrl+C). */
     fun cancelRun() {
-        try { currentProc?.destroyForcibly() } catch (_: Throwable) {}
+        activeProcs.forEach { proc ->
+            try { proc.destroyForcibly() } catch (_: Throwable) {}
+        }
+        activeProcs.clear()
     }
 
     /**

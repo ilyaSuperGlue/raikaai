@@ -8,8 +8,11 @@ import android.os.Environment
 import android.provider.MediaStore
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.defaultMinSize
 import androidx.compose.foundation.layout.Row
@@ -34,6 +37,8 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Folder
@@ -263,12 +268,18 @@ private fun TerminalTab(
     manager: ContainerManager,
     onCommandDone: () -> Unit,
 ) {
-    val lines = viewModel.terminalLines
-    val history = viewModel.terminalHistory
-    val running = viewModel.isTerminalRunning
+    val sessions = viewModel.terminalSessions
+    val activeSession = viewModel.activeTerminalSession
+    val lines = activeSession.lines
+    val history = activeSession.history
+    val running = activeSession.isRunning
     val scope = rememberCoroutineScope()
-    var histPos by remember { mutableIntStateOf(-1) }
-    var input by remember { mutableStateOf(TextFieldValue("")) }
+    var histPos by remember(activeSession.id) { mutableIntStateOf(activeSession.histPos) }
+    var input by remember(activeSession.id) { mutableStateOf(activeSession.input) }
+
+    LaunchedEffect(input) { activeSession.input = input }
+    LaunchedEffect(histPos) { activeSession.histPos = histPos }
+
     // Sticky modifiers like Termux: tap one, then tap the target key.
     // Only one sticky at a time; any tap consumes it.
     var ctrlActive by remember { mutableStateOf(false) }
@@ -280,7 +291,7 @@ private fun TerminalTab(
     // a stale buffer and typed text appears to vanish.
     val fieldFocus = remember { FocusRequester() }
 
-    LaunchedEffect(lines.size) {
+    LaunchedEffect(lines.size, activeSession.id) {
         if (lines.isNotEmpty()) listState.animateScrollToItem(lines.size - 1)
     }
 
@@ -306,7 +317,7 @@ private fun TerminalTab(
         if (clean.isEmpty() || running) return
         input = TextFieldValue("")
         histPos = -1
-        viewModel.execTerminal(clean) {
+        viewModel.execTerminal(clean, sessionId = activeSession.id) {
             onCommandDone()
         }
     }
@@ -428,9 +439,9 @@ private fun TerminalTab(
             val wasAlt = altActive
             clearModifiers()
             if (!wasAlt && key == 'c') {
-                viewModel.cancelTerminal()
+                viewModel.cancelTerminal(activeSession.id)
             } else if (!wasAlt && key == 'l') {
-                viewModel.clearTerminal()
+                viewModel.clearTerminal(activeSession.id)
             } else if (!wasAlt && key == 'u') {
                 setInputText("")
             } else {
@@ -457,6 +468,87 @@ private fun TerminalTab(
     }
 
     Column(modifier = Modifier.fillMaxSize().imePadding().padding(horizontal = 16.dp, vertical = 8.dp)) {
+        // Chrome-style Horizontal Tabs for multiple Terminal sessions
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 6.dp)
+                .horizontalScroll(rememberScrollState()),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+        ) {
+            sessions.forEach { s ->
+                val isSelected = s.id == activeSession.id
+                Surface(
+                    shape = RoundedCornerShape(topStart = 8.dp, topEnd = 8.dp, bottomStart = 4.dp, bottomEnd = 4.dp),
+                    color = if (isSelected) MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surfaceContainerLowest.copy(alpha = 0.5f),
+                    border = if (isSelected) BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.5f)) else null,
+                    modifier = Modifier.clickable { viewModel.selectTerminalSession(s.id) },
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    ) {
+                        if (s.isRunning) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(10.dp),
+                                strokeWidth = 1.5.dp,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+                        } else {
+                            Icon(
+                                Icons.Default.Terminal,
+                                contentDescription = null,
+                                modifier = Modifier.size(12.dp),
+                                tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            )
+                        }
+                        Text(
+                            text = s.title,
+                            style = MaterialTheme.typography.labelMedium,
+                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                            color = if (isSelected) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                            maxLines = 1,
+                        )
+                        if (sessions.size > 1) {
+                            Box(
+                                modifier = Modifier
+                                    .size(16.dp)
+                                    .clickable { viewModel.closeTerminalSession(s.id) },
+                                contentAlignment = Alignment.Center,
+                            ) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Close tab",
+                                    modifier = Modifier.size(11.dp),
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            // '+' New Tab button
+            Surface(
+                shape = RoundedCornerShape(6.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                modifier = Modifier
+                    .size(28.dp)
+                    .clickable { viewModel.newTerminalSession() },
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Add,
+                        contentDescription = "New Tab",
+                        modifier = Modifier.size(16.dp),
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
         Card(
             shape = RoundedCornerShape(12.dp),
             colors = CardDefaults.cardColors(containerColor = Color.Black),
@@ -540,6 +632,19 @@ private fun TerminalTab(
                         keyboardOptions = KeyboardOptions(imeAction = ImeAction.Go),
                         keyboardActions = KeyboardActions(onGo = { exec(input.text) }),
                     )
+                    if (running) {
+                        IconButton(
+                            onClick = { viewModel.cancelTerminal(activeSession.id) },
+                            modifier = Modifier.size(22.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Stop (^C)",
+                                tint = Color(0xFFEF5350),
+                                modifier = Modifier.size(16.dp),
+                            )
+                        }
+                    }
                 }
             }
         }
