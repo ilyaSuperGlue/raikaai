@@ -3639,6 +3639,8 @@ class ChatViewModel(
             "Rules: only write files under /workspace; keep commands short and non-interactive; " +
             "never run rm -rf / or --allow-untrusted. Small official packages install automatically; " +
             "other installs ask the user first. Never invent command results. " +
+            "Batch exploration into ONE call with && instead of one call per step " +
+            "(e.g. `ls -la /workspace && ls subdir && cat file`), so tasks finish in few rounds. " +
             "Long-running servers: end the command with `&` and it keeps running detached " +
             "(e.g. `python3 server.py --port 8080 &`); verify with `wget -qO- http://127.0.0.1:PORT` " +
             "in your NEXT call — never curl/netstat/ss (not installed, use wget). " +
