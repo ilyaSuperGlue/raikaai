@@ -63,6 +63,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.raikaai.app.util.CodeArtifacts
 import com.raikaai.app.util.FileSaver
+import java.util.regex.Pattern
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -90,7 +91,8 @@ fun MarkdownText(
 
     // Extract thinking tags (<think>...</think>)
     val parsedThinking = remember(markdown, enableThinking) { extractThinking(markdown, enableThinking) }
-    val blocks = remember(parsedThinking.mainText) { parseBlocks(parsedThinking.mainText) }
+    val formattedText = remember(parsedThinking.mainText) { formatToolCallsForDisplay(parsedThinking.mainText) }
+    val blocks = remember(formattedText) { parseBlocks(formattedText) }
 
     Column(
         modifier = modifier,
@@ -252,6 +254,173 @@ private fun ThinkingCard(
             }
         }
     }
+}
+
+private fun findUnescapedQuote(s: String): Int {
+    var i = 0
+    while (i < s.length) {
+        if (s[i] == '\\') {
+            i += 2
+        } else if (s[i] == '"') {
+            return i
+        } else {
+            i++
+        }
+    }
+    return -1
+}
+
+private fun unescapeJsonString(raw: String): String {
+    if (raw.isEmpty()) return ""
+    val text = if (raw.endsWith("\\")) raw.dropLast(1) else raw
+    val sb = StringBuilder(text.length)
+    var i = 0
+    while (i < text.length) {
+        val c = text[i]
+        if (c == '\\' && i + 1 < text.length) {
+            when (val next = text[i + 1]) {
+                'n' -> sb.append('\n')
+                'r' -> sb.append('\r')
+                't' -> sb.append('\t')
+                '"' -> sb.append('"')
+                '\\' -> sb.append('\\')
+                '/' -> sb.append('/')
+                'u' -> {
+                    if (i + 5 < text.length) {
+                        val hex = text.substring(i + 2, i + 6)
+                        val code = hex.toIntOrNull(16)
+                        if (code != null) {
+                            sb.append(code.toChar())
+                            i += 6
+                            continue
+                        }
+                    }
+                    sb.append(c)
+                }
+                else -> sb.append(next)
+            }
+            i += 2
+        } else {
+            sb.append(c)
+            i++
+        }
+    }
+    return sb.toString()
+}
+
+private fun formatToolCallBlock(body: String, isComplete: Boolean): String {
+    val cleanBody = body.trim()
+    if (cleanBody.isBlank()) return if (isComplete) "" else "**Tool call** _(preparing...)_"
+
+    val nameMatch = Regex("\"name\"\\s*:\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(cleanBody)
+    val toolName = nameMatch?.groupValues?.get(1)?.trim().orEmpty()
+
+    val pathMatch = Regex("\"path\"\\s*:\\s*\"([^\"]+)\"", RegexOption.IGNORE_CASE).find(cleanBody)
+    val path = pathMatch?.groupValues?.get(1)?.trim().orEmpty()
+
+    val cmdMatch = Regex("\"command\"\\s*:\\s*\"((?:[^\"\\\\]|\\\\.)*)\"", RegexOption.IGNORE_CASE).find(cleanBody)
+    val command = cmdMatch?.let { unescapeJsonString(it.groupValues[1]) }.orEmpty()
+
+    val statusTag = if (isComplete) "" else " _(writing...)_"
+
+    return when {
+        toolName.contains("write_file", ignoreCase = true) -> {
+            val contentIdx = cleanBody.indexOf("\"content\"")
+            val content = if (contentIdx >= 0) {
+                val colon = cleanBody.indexOf(':', contentIdx)
+                if (colon >= 0) {
+                    val firstQuote = cleanBody.indexOf('"', colon)
+                    if (firstQuote >= 0) {
+                        val rawContent = cleanBody.substring(firstQuote + 1)
+                        val endQuote = findUnescapedQuote(rawContent)
+                        val cleanRaw = if (endQuote >= 0) {
+                            rawContent.substring(0, endQuote)
+                        } else {
+                            rawContent.removeSuffix("\"").removeSuffix("}").trimEnd()
+                        }
+                        unescapeJsonString(cleanRaw)
+                    } else ""
+                } else ""
+            } else ""
+
+            val ext = if (path.contains('.')) path.substringAfterLast('.').lowercase() else "code"
+            buildString {
+                if (path.isNotBlank()) {
+                    append("**Write file:** `$path`$statusTag\n\n")
+                } else {
+                    append("**Write file**$statusTag\n\n")
+                }
+                if (content.isNotBlank()) {
+                    append("```$ext\n")
+                    append(content)
+                    append("\n```\n")
+                }
+            }
+        }
+        toolName.contains("edit_file", ignoreCase = true) -> {
+            buildString {
+                if (path.isNotBlank()) {
+                    append("**Edit file:** `$path`$statusTag\n\n")
+                } else {
+                    append("**Edit file**$statusTag\n\n")
+                }
+            }
+        }
+        toolName.contains("read_file", ignoreCase = true) -> {
+            if (path.isNotBlank()) "**Read file:** `$path`" else "**Read file**"
+        }
+        toolName.contains("execute_in_container", ignoreCase = true) ||
+            toolName.contains("run_command", ignoreCase = true) -> {
+            if (command.isNotBlank()) "**Run:** `$command`$statusTag" else "**Run in container**$statusTag"
+        }
+        toolName.isNotBlank() -> {
+            "**Tool:** `$toolName`$statusTag"
+        }
+        else -> {
+            if (isComplete) "" else "**Tool call** _(streaming...)_"
+        }
+    }
+}
+
+private fun formatToolCallsForDisplay(text: String): String {
+    if (!text.contains("<tool_call", ignoreCase = true) &&
+        !text.contains("```tool_call", ignoreCase = true) &&
+        !text.contains("```tool", ignoreCase = true)
+    ) {
+        return text
+    }
+
+    var result = text
+
+    val xmlPattern = Pattern.compile("<tool_call>([\\s\\S]*?)(?:<\\/tool_call>|$)", Pattern.CASE_INSENSITIVE)
+    val xmlMatcher = xmlPattern.matcher(result)
+    val xmlReplacements = mutableListOf<Pair<String, String>>()
+    while (xmlMatcher.find()) {
+        val fullMatch = xmlMatcher.group(0) ?: continue
+        val body = xmlMatcher.group(1).orEmpty()
+        val isComplete = fullMatch.contains("</tool_call>", ignoreCase = true)
+        val formatted = formatToolCallBlock(body, isComplete)
+        xmlReplacements.add(fullMatch to formatted)
+    }
+    for ((orig, repl) in xmlReplacements) {
+        result = result.replace(orig, "\n\n$repl\n\n")
+    }
+
+    val mdPattern = Pattern.compile("```(?:tool_call|tool)(?:\\s+([\\s\\S]*?))?(?:```|$)", Pattern.CASE_INSENSITIVE)
+    val mdMatcher = mdPattern.matcher(result)
+    val mdReplacements = mutableListOf<Pair<String, String>>()
+    while (mdMatcher.find()) {
+        val fullMatch = mdMatcher.group(0) ?: continue
+        val body = mdMatcher.group(1).orEmpty()
+        val isComplete = fullMatch.endsWith("```")
+        val formatted = formatToolCallBlock(body, isComplete)
+        mdReplacements.add(fullMatch to formatted)
+    }
+    for ((orig, repl) in mdReplacements) {
+        result = result.replace(orig, "\n\n$repl\n\n")
+    }
+
+    return result.trim()
 }
 
 private data class ParsedThinking(
