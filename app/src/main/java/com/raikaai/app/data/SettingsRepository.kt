@@ -116,6 +116,8 @@ data class Settings(
     val alpineVersion: String = "",
     /** YOLO mode: auto-approve ASK-policy sandbox commands (DENY still blocked). */
     val containerYolo: Boolean = false,
+    /** JSON array of normalized commands always auto-approved (ASK-policy). */
+    val containerAlwaysAllowJson: String = "[]",
 )
 
 /**
@@ -274,6 +276,7 @@ class SettingsRepository(
         val ALPINE_INSTALLED = booleanPreferencesKey("alpine_installed")
         val ALPINE_VERSION = stringPreferencesKey("alpine_version")
         val CONTAINER_YOLO = booleanPreferencesKey("container_yolo")
+        val CONTAINER_ALWAYS_ALLOW = stringPreferencesKey("container_always_allow_json")
 
         // Legacy DataStore keys for sensitive tokens. Tokens used to live here in
         // plaintext; they are migrated to EncryptedSharedPreferences on first read
@@ -535,6 +538,7 @@ class SettingsRepository(
                     alpineInstalled = prefs[Keys.ALPINE_INSTALLED] ?: false,
                     alpineVersion = prefs[Keys.ALPINE_VERSION] ?: "",
                     containerYolo = prefs[Keys.CONTAINER_YOLO] ?: false,
+                    containerAlwaysAllowJson = prefs[Keys.CONTAINER_ALWAYS_ALLOW] ?: "[]",
                 )
             }
         }
@@ -798,6 +802,10 @@ class SettingsRepository(
 
     /** YOLO mode: auto-approve ASK-policy sandbox commands. DENY-policy stays blocked. */
     suspend fun setContainerYolo(value: Boolean) = edit { it[Keys.CONTAINER_YOLO] = value }
+
+    /** Replaces the always-approve command list (normalized commands JSON array). */
+    suspend fun setContainerAlwaysAllowJson(json: String) =
+        edit { it[Keys.CONTAINER_ALWAYS_ALLOW] = json.take(50_000) }
 
     private suspend fun edit(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit { block(it) }

@@ -116,6 +116,32 @@ private val safeReadonlyBinaries = setOf(
 /** Shell metacharacters that can smuggle side effects into "read-only" calls. */
 private val shellOperators = setOf(";", "&", "|", "`", "$", "(", ")", "<", ">", "\\", "\n")
 
+/** Normalizes a command for always-allow matching (trim + single spaces). */
+internal fun normalizeCommand(cmd: String): String =
+    cmd.trim().replace(Regex("\\s+"), " ")
+
+/** Parses the always-allow command set (JSON array of normalized commands). */
+internal fun parseAlwaysAllow(json: String): Set<String> {
+    if (json.isBlank()) return emptySet()
+    return runCatching {
+        val arr = org.json.JSONArray(json)
+        val out = LinkedHashSet<String>()
+        for (i in 0 until arr.length().coerceAtMost(200)) {
+            val s = arr.optString(i, "").trim()
+            if (s.isNotBlank()) out.add(s.take(500))
+            if (out.size >= 50) break
+        }
+        out.toSet()
+    }.getOrDefault(emptySet())
+}
+
+/** Serializes the always-allow set back to JSON (capped). */
+internal fun alwaysAllowToJson(set: Set<String>): String {
+    val arr = org.json.JSONArray()
+    set.take(50).forEach { arr.put(it.take(500)) }
+    return arr.toString()
+}
+
 /**
  * True when [command] backgrounds something (`cmd &`), ignoring `&&` and
  * quoted ampersands. Such commands must run detached: proot lives as long as

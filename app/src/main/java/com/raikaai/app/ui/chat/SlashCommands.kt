@@ -114,4 +114,11 @@ val DEFAULT_SLASH_COMMANDS =
             promptTemplate = "/yolo ",
             icon = Icons.Default.AutoAwesome,
         ),
+        SlashCommand(
+            command = "/permission",
+            title = "Permissions",
+            description = "View and manage sandbox permissions",
+            promptTemplate = "/permission ",
+            icon = Icons.Default.AutoAwesome,
+        ),
     )

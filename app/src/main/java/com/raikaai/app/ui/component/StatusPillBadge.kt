@@ -113,7 +113,7 @@ fun EngineStatusBadge(
             val backendLabel = if (backend.equals("gpu", ignoreCase = true)) "GPU" else "CPU"
             StatusChip(
                 icon = Icons.Default.CheckCircle,
-                text = "✓ $shortName ($backendLabel)",
+                text = "$shortName ($backendLabel)",
                 container = MaterialTheme.colorScheme.primaryContainer,
                 content = MaterialTheme.colorScheme.onPrimaryContainer,
                 modifier = modifier,

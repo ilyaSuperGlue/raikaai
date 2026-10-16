@@ -1,6 +1,7 @@
 package com.raikaai.app.ui.chat
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -52,5 +53,33 @@ class CompactCommandTest {
         assertEquals("9routerAll", parsed[0].id)
         assertEquals("9router", parsed[0].provider)
         assertEquals("meta-llama/llama-3.3-70b", parsed[1].id)
+    }
+
+    @Test
+    fun validCompactionSummaryPasses() {
+        val good = "## Objective\n- goals\n\n## Requirements\n- reqs\n\n## Decisions\n- d\n\n## Work State\n- w"
+        assertTrue(com.raikaai.app.ui.chat.isValidCompactionSummary(good))
+        assertTrue(com.raikaai.app.ui.chat.isValidCompactionSummary("  \n" + good))
+    }
+
+    @Test
+    fun malformedCompactionSummaryFails() {
+        assertFalse(com.raikaai.app.ui.chat.isValidCompactionSummary(""))
+        assertFalse(com.raikaai.app.ui.chat.isValidCompactionSummary("Here is your summary:\n## Objective\n- x"))
+        assertFalse(com.raikaai.app.ui.chat.isValidCompactionSummary("## Objective\n- x\n\n## Decisions\n- y"))
+    }
+
+    @Test
+    fun normalizeAndAlwaysAllowRoundtrip() {
+        assertEquals(
+            "apk add python3",
+            com.raikaai.app.core.container.normalizeCommand("  apk   add   python3  "),
+        )
+        val set = setOf("ls /workspace", "apk add python3")
+        val json = com.raikaai.app.core.container.alwaysAllowToJson(set)
+        val back = com.raikaai.app.core.container.parseAlwaysAllow(json)
+        assertTrue(back.containsAll(set))
+        assertTrue(com.raikaai.app.core.container.parseAlwaysAllow("").isEmpty())
+        assertTrue(com.raikaai.app.core.container.parseAlwaysAllow("nope").isEmpty())
     }
 }

@@ -459,7 +459,10 @@ fun ChatDialogsHost(
                 }
             },
             confirmButton = {
-                TextButton(onClick = { viewModel.respondContainerApproval(true) }) { Text(stringResource(R.string.chat_mcp_allow)) }
+                Row {
+                    TextButton(onClick = { viewModel.approveContainerAlways() }) { Text("Always") }
+                    TextButton(onClick = { viewModel.respondContainerApproval(true) }) { Text(stringResource(R.string.chat_mcp_allow)) }
+                }
             },
             dismissButton = {
                 TextButton(onClick = { viewModel.respondContainerApproval(false) }) { Text(stringResource(R.string.chat_mcp_deny)) }

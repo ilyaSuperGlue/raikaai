@@ -88,6 +88,21 @@ data class PersonaPreset(
 /** Max autonomous container rounds per remote turn (OpenCode-style agent loop). */
 internal const val MAX_CONTAINER_ROUNDS = 6
 
+/** Fresh turns kept verbatim beside a compaction summary (never folded). */
+internal const val VERBATIM_TAIL_COUNT = 4
+
+/**
+ * Structural check for compaction output: must start with the Objective
+ * heading and contain the Decisions + Work State sections. Used to trigger
+ * one tool-free retry instead of persisting a malformed summary.
+ */
+internal fun isValidCompactionSummary(md: String): Boolean {
+    val t = md.trimStart()
+    return t.startsWith("## Objective") &&
+        t.contains("## Decisions") &&
+        t.contains("## Work State")
+}
+
 val PERSONA_PRESETS =
     listOf(
         PersonaPreset(
@@ -1678,6 +1693,7 @@ class ChatViewModel(
         args: com.google.gson.JsonObject,
         yolo: Boolean,
         ranThisTurn: MutableMap<String, Int>?,
+        alwaysAllowJson: String,
         onStatus: (String) -> Unit,
         followUpOutCap: Int = 4000,
         followUpErrCap: Int = 1000,
@@ -1731,7 +1747,9 @@ class ChatViewModel(
             )
         }
         onStatus("Running `$command` in Linux Environment…")
-        val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !yolo) {
+        val normalized = com.raikaai.app.core.container.normalizeCommand(command)
+        val alwaysAllowed = normalized in com.raikaai.app.core.container.parseAlwaysAllow(alwaysAllowJson)
+        val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !yolo && !alwaysAllowed) {
             requestContainerApproval(command)
         } else true
         if (!approved) {
@@ -1741,8 +1759,19 @@ class ChatViewModel(
                 null, null,
             )
         }
-        val auto = policy == com.raikaai.app.core.container.InstallPolicy.ALLOW || yolo
-        val res = if (com.raikaai.app.core.container.containsBackgroundOp(command)) {
+        val auto = policy == com.raikaai.app.core.container.InstallPolicy.ALLOW || yolo || alwaysAllowed
+        // Explicit background request beats `&` sniffing (OpenCode-style).
+        val wantsBackground = listOf("background", "run_in_background", "detach").any { k ->
+            runCatching {
+                val v = args.get(k) ?: return@any false
+                when {
+                    v.isJsonPrimitive && v.asJsonPrimitive.isBoolean -> v.asBoolean
+                    v.isJsonPrimitive && v.asJsonPrimitive.isString -> v.asString.equals("true", ignoreCase = true)
+                    else -> false
+                }
+            }.getOrDefault(false)
+        }
+        val res = if (wantsBackground || com.raikaai.app.core.container.containsBackgroundOp(command)) {
             containerManager.startDaemon(command)
         } else {
             containerManager.run(command)
@@ -1778,7 +1807,7 @@ class ChatViewModel(
     ): List<String>? {
         val idx = messages.lastIndex
         val dispatched = dispatchContainerTool(
-            call.name, call.arguments, s.containerYolo, null,
+            call.name, call.arguments, s.containerYolo, null, s.containerAlwaysAllowJson,
             onStatus = { status ->
                 if (currentConversationId == targetChatId && idx >= 0 && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
                     messages[idx] = messages[idx].copy(content = status)
@@ -2056,10 +2085,12 @@ class ChatViewModel(
                     if (cmd.isBlank()) "Usage: /run <shell command>  (example: /run ls /workspace)" else {
                         val policy = com.raikaai.app.core.container.installPolicyFor(cmd)
                         if (policy == com.raikaai.app.core.container.InstallPolicy.DENY) {
-                            "⛔ Command blocked by policy (destructive / untrusted source)."
+                            "Blocked by policy (destructive / untrusted source)."
                         } else {
                             val yolo = settings.value.containerYolo
-                            val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !yolo) {
+                            val alwaysAllowed = com.raikaai.app.core.container.normalizeCommand(cmd) in
+                                com.raikaai.app.core.container.parseAlwaysAllow(settings.value.containerAlwaysAllowJson)
+                            val approved = if (policy == com.raikaai.app.core.container.InstallPolicy.ASK && !yolo && !alwaysAllowed) {
                                 requestContainerApproval(cmd)
                             } else true
                             if (!approved) "Cancelled." else containerManager.run(cmd).render()
@@ -2082,8 +2113,8 @@ class ChatViewModel(
                 trimmed.startsWith("/serve", ignoreCase = true) -> {
                     val arg = trimmed.drop("/serve".length).trim().toIntOrNull()
                     val url = containerManager.serve(arg ?: com.raikaai.app.core.container.DEFAULT_PREVIEW_PORT)
-                    if (url.startsWith("ERROR:")) "❌ ${url.removePrefix("ERROR:")}"
-                    else "🌐 Serving /workspace at:\n$url\nOpen it in the phone browser. Stop with /stop-serve."
+                    if (url.startsWith("ERROR:")) "Error: ${url.removePrefix("ERROR:")}"
+                    else "Serving /workspace at:\n$url\nOpen it in the phone browser. Stop with /stop-serve."
                 }
                 else -> {
                     val sub = trimmed.drop("/env".length).trim().lowercase()
@@ -2128,6 +2159,92 @@ class ChatViewModel(
             appendLocalExchange(trimmed, reply)
         }
         return true
+    }
+
+    /**
+     * Manages sandbox permissions without opening Settings:
+     * - `/permission` → status (YOLO + always-allow list + policy)
+     * - `/permission yolo on|off` → toggle YOLO mode
+     * - `/permission allow <command>` → always auto-approve it (ASK-policy)
+     * - `/permission forget <n|command>` → drop one entry
+     * - `/permission clear` → drop all entries
+     * DENY-policy (destructive / untrusted) stays blocked no matter what.
+     */
+    private fun tryHandlePermissionCommand(body: String): Boolean {
+        val trimmed = body.trim()
+        if (!trimmed.startsWith("/permission", ignoreCase = true)) return false
+        viewModelScope.launch {
+            val arg = trimmed.drop("/permission".length).trim()
+            val reply = when {
+                arg.startsWith("yolo", ignoreCase = true) -> {
+                    when (arg.drop("yolo".length).trim().lowercase()) {
+                        "on", "enable", "true", "1" -> {
+                            settingsRepo.setContainerYolo(true)
+                            "YOLO mode ON — sandbox commands auto-run (destructive ones stay blocked)."
+                        }
+                        "off", "disable", "false", "0" -> {
+                            settingsRepo.setContainerYolo(false)
+                            "YOLO mode OFF — back to asking approval."
+                        }
+                        else -> "YOLO mode is currently ${if (settings.value.containerYolo) "ON" else "OFF"}. Usage: /permission yolo on | off"
+                    }
+                }
+                arg.startsWith("allow ", ignoreCase = true) -> {
+                    val cmd = com.raikaai.app.core.container.normalizeCommand(arg.drop("allow ".length))
+                    if (cmd.isBlank()) {
+                        "Usage: /permission allow <command>"
+                    } else {
+                        val cur = com.raikaai.app.core.container.parseAlwaysAllow(settings.value.containerAlwaysAllowJson).toMutableSet()
+                        cur.add(cmd.take(500))
+                        settingsRepo.setContainerAlwaysAllowJson(com.raikaai.app.core.container.alwaysAllowToJson(cur))
+                        "Always allowed: `$cmd`\nIt will auto-run without approval from now on."
+                    }
+                }
+                arg.startsWith("forget ", ignoreCase = true) -> {
+                    val what = arg.drop("forget ".length).trim()
+                    val cur = com.raikaai.app.core.container.parseAlwaysAllow(settings.value.containerAlwaysAllowJson).toMutableList()
+                    val idx = what.toIntOrNull()?.minus(1)
+                    val removed = when {
+                        idx != null && idx in cur.indices -> cur.removeAt(idx)
+                        else -> {
+                            val norm = com.raikaai.app.core.container.normalizeCommand(what)
+                            if (cur.remove(norm)) norm else null
+                        }
+                    }
+                    if (removed == null) {
+                        "No such entry: `$what`. See /permission for the list."
+                    } else {
+                        settingsRepo.setContainerAlwaysAllowJson(com.raikaai.app.core.container.alwaysAllowToJson(cur.toSet()))
+                        "Forgot: `$removed`\nIt will ask approval again."
+                    }
+                }
+                arg.equals("clear", ignoreCase = true) -> {
+                    settingsRepo.setContainerAlwaysAllowJson("[]")
+                    "Always-allow list cleared. All non-trivial commands ask approval again (YOLO aside)."
+                }
+                arg.isBlank() -> permissionStatusText()
+                else -> "Usage: /permission [yolo on|off | allow <command> | forget <n|command> | clear]"
+            }
+            appendLocalExchange(trimmed, reply)
+        }
+        return true
+    }
+
+    private fun permissionStatusText(): String {
+        val s = settings.value
+        val list = com.raikaai.app.core.container.parseAlwaysAllow(s.containerAlwaysAllowJson).toList()
+        return buildString {
+            appendLine("Sandbox permissions")
+            appendLine("YOLO mode: ${if (s.containerYolo) "ON (auto-run all but destructive)" else "OFF (ask per command)"}")
+            if (list.isEmpty()) {
+                appendLine("Always allowed: (none)")
+            } else {
+                appendLine("Always allowed (${list.size}):")
+                list.forEachIndexed { i, cmd -> appendLine("${i + 1}. `$cmd`") }
+            }
+            append("Policy: destructive / untrusted commands are always blocked. ")
+            append("Manage: /permission allow <cmd> | /permission forget <n> | /permission clear | /permission yolo on|off")
+        }.trim()
     }
 
     /**
@@ -2281,17 +2398,20 @@ class ChatViewModel(
         val unfolded = unfoldedMessages().filter {
             it.role != ChatConstants.ROLE_COMPACTION && it.role != ChatConstants.ROLE_SYSTEM
         }
-        if (conv == null || unfolded.size < 2) {
+        // OpenCode-style: keep the freshest turns verbatim beside the summary
+        // so recent context is never lost to compression.
+        val verbatimTail = unfolded.takeLast(VERBATIM_TAIL_COUNT)
+        val foldable = unfolded.dropLast(verbatimTail.size)
+        if (conv == null || foldable.size < 2) {
             appendLocalExchange(
                 commandText,
-                "⚠️ Conversation is too short to compact (at least 2 messages required).",
+                "Conversation is too short to compact (at least 2 messages required).",
             )
             return
         }
 
         val s = effectiveSettings()
         val beforeTokens = effectiveContextTokens()
-        val foldable = unfolded
 
         isGenerating.value = true
         isCompressing.value = true
@@ -2367,8 +2487,19 @@ class ChatViewModel(
                         }
 
                     val generatedRaw = generateCompactedSummary(s, prompt, windowTokens)
-                    val generated = stripThinking(generatedRaw).trim()
-                    val merged = generated.ifBlank { prev.orEmpty() }
+                    var generated = stripThinking(generatedRaw).trim()
+                    if (!isValidCompactionSummary(generated)) {
+                        KLog.w("ChatVM", "Compaction off-template, retrying once without tools")
+                        val retryRaw = generateCompactedSummary(
+                            s,
+                            prompt + "\n\nThe previous response did not fill in the required summary template. " +
+                                "Do not call tools. Return ONLY the markdown text starting directly with \"## Objective\".",
+                            windowTokens,
+                        )
+                        val retry = stripThinking(retryRaw).trim()
+                        if (isValidCompactionSummary(retry)) generated = retry
+                    }
+                    val merged = if (isValidCompactionSummary(generated)) generated else prev.orEmpty()
 
                     conv.summary = merged.ifBlank { null }
                     val outTokens = estimateTokens(merged)
@@ -2384,7 +2515,9 @@ class ChatViewModel(
                     messages.add(compactionEntry)
                     registerActiveChild(compactionEntry)
 
-                    conv.summarizedUntilId = compactionEntry.id
+                    // Fold boundary ends at the last folded message: the fresh
+                    // verbatim tail plus everything after stays unfolded.
+                    conv.summarizedUntilId = foldable.last().id
                     compressionTick.value++
                     persist()
                     updateContextTokens()
@@ -2394,7 +2527,7 @@ class ChatViewModel(
                         errorMessage.value = "Compaction failed: ${t.message}"
                         appendLocalExchange(
                             commandText,
-                            "❌ Compaction failed: ${t.message ?: "Model inference error"}",
+                            "Compaction failed: ${t.message ?: "Model inference error"}",
                         )
                     }
                 } finally {
@@ -2430,6 +2563,7 @@ class ChatViewModel(
         if (pending.isEmpty() && currentAudioFile == null && tryHandleCompactCommand(body)) return
         if (pending.isEmpty() && currentAudioFile == null && tryHandleContainerCommand(body)) return
         if (pending.isEmpty() && currentAudioFile == null && tryHandleYoloCommand(body)) return
+        if (pending.isEmpty() && currentAudioFile == null && tryHandlePermissionCommand(body)) return
         // Set flag immediately to prevent double-send race condition
         isGenerating.value = true
         errorMessage.value = null
@@ -2899,7 +3033,7 @@ class ChatViewModel(
             rounds++
             KLog.d("ChatVM", "Remote container round $rounds/$MAX_CONTAINER_ROUNDS: ${call.name}")
             val dispatched = dispatchContainerTool(
-                call.name, call.arguments, s.containerYolo, ranThisTurn,
+                call.name, call.arguments, s.containerYolo, ranThisTurn, s.containerAlwaysAllowJson,
                 followUpOutCap = 3500, followUpErrCap = 600,
                 onStatus = { status ->
                     if (currentConversationId == targetChatId && messages[idx].role == ChatConstants.ROLE_ASSISTANT) {
@@ -3464,6 +3598,24 @@ class ChatViewModel(
         d?.complete(approved)
     }
 
+    /**
+     * Approves once AND remembers the normalized command, so future
+     * identical ASK-policy calls auto-run (OpenCode-style "always allow").
+     */
+    fun approveContainerAlways() {
+        val cmd = pendingContainerApproval.value?.command
+        if (cmd.isNullOrBlank()) {
+            respondContainerApproval(false)
+            return
+        }
+        launchSetting {
+            val cur = com.raikaai.app.core.container.parseAlwaysAllow(settings.value.containerAlwaysAllowJson).toMutableSet()
+            cur.add(com.raikaai.app.core.container.normalizeCommand(cmd))
+            settingsRepo.setContainerAlwaysAllowJson(com.raikaai.app.core.container.alwaysAllowToJson(cur))
+        }
+        respondContainerApproval(true)
+    }
+
     private fun denyContainerApproval() {
         val d = containerApproval
         containerApproval = null
@@ -3636,7 +3788,9 @@ class ChatViewModel(
             "even for long commands. Correct examples:\n" +
             "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"ls /workspace\"}}</tool_call>\n" +
             "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"unzip -l '/workspace/my file.zip'\"}}</tool_call>\n" +
-            "Prefer single quotes for paths with spaces (simpler and always valid)."
+            "Prefer single quotes for paths with spaces (simpler and always valid)." +
+            "To run a long-lived server call with an explicit boolean argument instead of `&`, e.g. " +
+            "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"python3 server.py --port 8080\", \"run_in_background\": true}}</tool_call>. " +
             "To install a missing program, use:\n" +
             "<tool_call>{\"name\": \"ensure_package\", \"arguments\": {\"command\": \"apk add --no-cache <pkg>\"}}</tool_call>\n" +
             "Rules: only write files under /workspace; keep commands short and non-interactive; " +
@@ -3863,7 +4017,7 @@ internal fun formatContainerRunBlock(
     timedOut: Boolean,
     autoApproved: Boolean,
 ): String {
-    val head = if (autoApproved) "🔧 `$command` · auto" else "🔧 `$command`"
+    val head = if (autoApproved) "`$command` [auto]" else "`$command`"
     return buildString {
         append(head)
         append("\n```\n")
