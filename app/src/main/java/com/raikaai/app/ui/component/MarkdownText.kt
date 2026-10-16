@@ -376,14 +376,19 @@ private fun formatToolCallBlock(body: String, isComplete: Boolean): String {
         toolName.isNotBlank() -> {
             "**Tool:** `$toolName`$statusTag"
         }
-        else -> {
+        cleanBody.startsWith("{") || cleanBody.startsWith("[") -> {
             if (isComplete) "" else "**Tool call** _(streaming...)_"
+        }
+        else -> {
+            val firstLine = cleanBody.lines().firstOrNull { it.isNotBlank() }?.trim().orEmpty()
+            if (firstLine.isNotBlank()) "**Action:** $firstLine" else if (isComplete) "" else "**Action** _(running...)_"
         }
     }
 }
 
 private fun formatToolCallsForDisplay(text: String): String {
     if (!text.contains("<tool_call", ignoreCase = true) &&
+        !text.contains("<action", ignoreCase = true) &&
         !text.contains("```tool_call", ignoreCase = true) &&
         !text.contains("```tool", ignoreCase = true)
     ) {
@@ -392,13 +397,15 @@ private fun formatToolCallsForDisplay(text: String): String {
 
     var result = text
 
-    val xmlPattern = Pattern.compile("<tool_call>([\\s\\S]*?)(?:<\\/tool_call>|$)", Pattern.CASE_INSENSITIVE)
+    // 1. Format <tool_call> and <action> XML blocks
+    val xmlPattern = Pattern.compile("<(tool_call|action)(?:\\s+[^>]*)?>([\\s\\S]*?)(?:<\\/\\1>|$)", Pattern.CASE_INSENSITIVE)
     val xmlMatcher = xmlPattern.matcher(result)
     val xmlReplacements = mutableListOf<Pair<String, String>>()
     while (xmlMatcher.find()) {
         val fullMatch = xmlMatcher.group(0) ?: continue
-        val body = xmlMatcher.group(1).orEmpty()
-        val isComplete = fullMatch.contains("</tool_call>", ignoreCase = true)
+        val tag = xmlMatcher.group(1).orEmpty()
+        val body = xmlMatcher.group(2).orEmpty()
+        val isComplete = fullMatch.contains("</$tag>", ignoreCase = true)
         val formatted = formatToolCallBlock(body, isComplete)
         xmlReplacements.add(fullMatch to formatted)
     }
@@ -406,6 +413,7 @@ private fun formatToolCallsForDisplay(text: String): String {
         result = result.replace(orig, "\n\n$repl\n\n")
     }
 
+    // 2. Format ```tool_call and ```tool markdown code fences
     val mdPattern = Pattern.compile("```(?:tool_call|tool)(?:\\s+([\\s\\S]*?))?(?:```|$)", Pattern.CASE_INSENSITIVE)
     val mdMatcher = mdPattern.matcher(result)
     val mdReplacements = mutableListOf<Pair<String, String>>()
@@ -420,6 +428,9 @@ private fun formatToolCallsForDisplay(text: String): String {
         result = result.replace(orig, "\n\n$repl\n\n")
     }
 
+    // Clean any leftover orphan closing tags
+    result = result.replace(Regex("</(?:tool_call|action)>", RegexOption.IGNORE_CASE), "")
+
     return result.trim()
 }
 
@@ -430,36 +441,72 @@ private data class ParsedThinking(
 )
 
 private fun extractThinking(raw: String, enableThinking: Boolean = true): ParsedThinking {
-    val thinkOpenTag = if (raw.contains("<thought>")) "<thought>" else if (raw.contains("<think>")) "<think>" else null
-    val thinkCloseTag = if (thinkOpenTag == "<thought>") "</thought>" else if (thinkOpenTag == "<think>") "</think>" else if (raw.contains("</think>")) "</think>" else if (raw.contains("</thought>")) "</thought>" else null
+    if (raw.isBlank()) return ParsedThinking(null, "", true)
 
-    if (thinkOpenTag == null && thinkCloseTag == null) {
+    val pattern = Pattern.compile("<(think|thought|thinking)(?:\\s+[^>]*)?>([\\s\\S]*?)(?:<\\/\\1>|$)", Pattern.CASE_INSENSITIVE)
+    val matcher = pattern.matcher(raw)
+
+    val thoughts = mutableListOf<String>()
+    var allComplete = true
+    val mainSb = StringBuilder()
+    var lastEnd = 0
+    var foundAny = false
+
+    while (matcher.find()) {
+        foundAny = true
+        val start = matcher.start()
+        val end = matcher.end()
+        val tag = matcher.group(1).orEmpty()
+        val thoughtContent = matcher.group(2).orEmpty().trim()
+        val fullMatch = matcher.group(0).orEmpty()
+        val isTagClosed = fullMatch.contains("</$tag>", ignoreCase = true)
+
+        if (!isTagClosed) {
+            allComplete = false
+        }
+
+        if (start > lastEnd) {
+            mainSb.append(raw.substring(lastEnd, start))
+        }
+
+        if (thoughtContent.isNotBlank()) {
+            thoughts.add(thoughtContent)
+        }
+
+        lastEnd = end
+    }
+
+    if (foundAny) {
+        if (lastEnd < raw.length) {
+            mainSb.append(raw.substring(lastEnd))
+        }
+    } else {
+        val strayCloseIdx = listOf("</think>", "</thought>", "</thinking>")
+            .map { raw.indexOf(it, ignoreCase = true) }
+            .filter { it >= 0 }
+            .minOrNull()
+
+        if (strayCloseIdx != null) {
+            val think = raw.substring(0, strayCloseIdx).trim()
+            val after = raw.substring(strayCloseIdx)
+                .replace(Regex("</(?:think|thought|thinking)>", RegexOption.IGNORE_CASE), "")
+                .trim()
+            val thought = if (enableThinking && think.isNotBlank()) think else null
+            return ParsedThinking(thought, after, true)
+        }
         return ParsedThinking(null, raw.trim(), true)
     }
 
-    if (thinkOpenTag == null && thinkCloseTag != null) {
-        val think = raw.substringBefore(thinkCloseTag).trim()
-        val main = raw.substringAfter(thinkCloseTag).replace("</think>", "").replace("</thought>", "").trim()
-        return ParsedThinking(if (enableThinking && think.isNotBlank()) think else null, main, true)
-    }
+    val strayCloseRegex = Regex("</(?:think|thought|thinking)>", RegexOption.IGNORE_CASE)
+    val cleanedMain = mainSb.toString().replace(strayCloseRegex, "").trim()
 
-    if (!enableThinking) {
-        return if (thinkCloseTag != null && raw.contains(thinkCloseTag)) {
-            val main = raw.substringAfter(thinkCloseTag).replace("</think>", "").replace("</thought>", "").trim()
-            ParsedThinking(null, main, true)
-        } else {
-            ParsedThinking(null, "", false)
-        }
-    }
-
-    return if (thinkCloseTag != null && raw.contains(thinkCloseTag)) {
-        val think = raw.substringAfter(thinkOpenTag ?: "").substringBefore(thinkCloseTag).trim()
-        val main = raw.substringAfter(thinkCloseTag).replace("</think>", "").replace("</thought>", "").trim()
-        ParsedThinking(think, main, true)
+    val combinedThoughts = if (enableThinking && thoughts.isNotEmpty()) {
+        thoughts.joinToString("\n\n")
     } else {
-        val think = raw.substringAfter(thinkOpenTag ?: "").trim()
-        ParsedThinking(think, "", false)
+        null
     }
+
+    return ParsedThinking(combinedThoughts, cleanedMain, allComplete)
 }
 
 @Composable

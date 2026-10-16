@@ -177,6 +177,17 @@ class ToolCallParserTest {
         assertEquals("def foo():\n    pass", parsed?.arguments?.get("old_string")?.asString)
         assertEquals("def foo():\n    return 42", parsed?.arguments?.get("new_string")?.asString)
     }
+
+    @Test
+    fun testActionTagToolCall() {
+        val text = """
+            <action>{"name": "execute_in_container", "arguments": {"command": "ls -la"}}</action>
+        """.trimIndent()
+        val parsed = ToolCallParser.parseGenericCall(text)
+        assertNotNull(parsed)
+        assertEquals("execute_in_container", parsed?.name)
+        assertEquals("ls -la", parsed?.arguments?.get("command")?.asString)
+    }
 }
 
 

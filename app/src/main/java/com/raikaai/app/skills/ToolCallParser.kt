@@ -38,9 +38,9 @@ object ToolCallParser {
     fun parse(text: String): ParsedToolCall? {
         if (text.isBlank()) return null
 
-        // 1. Check for XML tag: <tool_call>...</tool_call>
+        // 1. Check for XML tag: <tool_call>...</tool_call> or <action>...</action>
         val xmlPattern = Pattern.compile(
-            "<tool_call>([\\s\\S]*?)(?:<\\/tool_call>|$)",
+            "<(?:tool_call|action)(?:\\s+[^>]*)?>([\\s\\S]*?)(?:<\\/(?:tool_call|action)>|$)",
             Pattern.CASE_INSENSITIVE,
         )
         val xmlMatcher = xmlPattern.matcher(text)
@@ -198,8 +198,9 @@ object ToolCallParser {
     fun parseGenericCall(text: String): GenericToolCall? {
         if (text.isBlank()) return null
         val clean = text
-            .replace(Regex("<think>[\\s\\S]*?</think>", RegexOption.IGNORE_CASE), "")
-            .replace(Regex("<thought>[\\s\\S]*?</thought>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<think(?:\\s+[^>]*)?>[\\s\\S]*?</think>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<thought(?:\\s+[^>]*)?>[\\s\\S]*?</thought>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<thinking(?:\\s+[^>]*)?>[\\s\\S]*?</thinking>", RegexOption.IGNORE_CASE), "")
             .trim()
         // Thinking models sometimes emit the call INSIDE their thinking block.
         // Prefer calls outside thinking (a think-block call is often a
@@ -216,7 +217,7 @@ object ToolCallParser {
         val bodies = mutableListOf<Pair<String, String>>()
 
         val xmlMatcher = Pattern.compile(
-            "<tool_call>([\\s\\S]*?)(?:<\\/tool_call>|$)",
+            "<(?:tool_call|action)(?:\\s+[^>]*)?>([\\s\\S]*?)(?:<\\/(?:tool_call|action)>|$)",
             Pattern.CASE_INSENSITIVE,
         ).matcher(targetText)
         while (xmlMatcher.find()) {

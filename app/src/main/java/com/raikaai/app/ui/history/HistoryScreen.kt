@@ -87,8 +87,10 @@ private enum class HistorySortMode { TIME, NAME }
 
 private fun stripThinkingProcess(raw: String): String {
     val clean =
-        raw.replace(Regex("(?s)<think>.*?</think>"), "")
-            .replace(Regex("(?s)<think>.*"), "")
+        raw.replace(Regex("(?is)<(?:think|thought|thinking)(?:\\s+[^>]*)?>.*?</(?:think|thought|thinking)>"), "")
+            .replace(Regex("(?is)<(?:think|thought|thinking)(?:\\s+[^>]*)?>.*"), "")
+            .replace(Regex("(?is)<(?:tool_call|action)(?:\\s+[^>]*)?>.*?</(?:tool_call|action)>"), "")
+            .replace(Regex("(?is)<(?:tool_call|action)(?:\\s+[^>]*)?>.*"), "")
             .trim()
     return clean.ifBlank { raw.trim() }
 }

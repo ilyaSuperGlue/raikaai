@@ -16,8 +16,9 @@ import java.util.Locale
 class TtsHelper(private val context: Context) : TextToSpeech.OnInitListener {
     companion object {
         private val CODE_BLOCK_REGEX = Regex("```[\\s\\S]*?```")
-        private val THINK_CLOSED_REGEX = Regex("<think>[\\s\\S]*?</think>")
-        private val THINK_OPEN_REGEX = Regex("<think>[\\s\\S]*")
+        private val THINK_CLOSED_REGEX = Regex("<(?:think|thought|thinking)(?:\\s+[^>]*)?>[\\s\\S]*?</(?:think|thought|thinking)>", RegexOption.IGNORE_CASE)
+        private val THINK_OPEN_REGEX = Regex("<(?:think|thought|thinking)(?:\\s+[^>]*)?>[\\s\\S]*", RegexOption.IGNORE_CASE)
+        private val TOOL_CALL_REGEX = Regex("<(?:tool_call|action)(?:\\s+[^>]*)?>[\\s\\S]*?</(?:tool_call|action)>", RegexOption.IGNORE_CASE)
         private val INLINE_CODE_REGEX = Regex("`[^`]*`")
         private val MARKDOWN_CHARS_REGEX = Regex("[#*_~>\\[\\]]")
     }
@@ -89,6 +90,7 @@ class TtsHelper(private val context: Context) : TextToSpeech.OnInitListener {
                 .replace(CODE_BLOCK_REGEX, " Code block omitted. ")
                 .replace(THINK_CLOSED_REGEX, "")
                 .replace(THINK_OPEN_REGEX, "")
+                .replace(TOOL_CALL_REGEX, "")
                 .replace(INLINE_CODE_REGEX, "")
                 .replace(MARKDOWN_CHARS_REGEX, "")
                 .trim()

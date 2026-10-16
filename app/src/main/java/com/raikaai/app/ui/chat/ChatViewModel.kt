@@ -1007,8 +1007,8 @@ class ChatViewModel(
 
     private fun stripThinking(text: String): String =
         text
-            .replace(Regex("<think>[\\s\\S]*?</think>"), "")
-            .replace(Regex("<think>[\\s\\S]*"), "")
+            .replace(Regex("<(?:think|thought|thinking)(?:\\s+[^>]*)?>[\\s\\S]*?</(?:think|thought|thinking)>", RegexOption.IGNORE_CASE), "")
+            .replace(Regex("<(?:think|thought|thinking)(?:\\s+[^>]*)?>[\\s\\S]*", RegexOption.IGNORE_CASE), "")
             .trim()
 
     fun estimateTokens(text: String): Int {
