@@ -173,6 +173,55 @@ fun EnvironmentScreen(
                 return@Column
             }
 
+            // Live listener banner: any dev server started from chat or the
+            // terminal is discovered by port probe; open it in one tap.
+            val previewUrl by viewModel.containerPreviewUrl.collectAsState()
+            if (!previewUrl.isNullOrBlank()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp),
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        Icon(
+                            Icons.Default.Terminal,
+                            contentDescription = null,
+                            modifier = Modifier.size(14.dp),
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
+                        Text(
+                            text = previewUrl.orEmpty(),
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontFamily = FontFamily.Monospace,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f),
+                        )
+                        TextButton(onClick = { viewModel.refreshContainerPreview() }) { Text("Re-check") }
+                        TextButton(
+                            onClick = {
+                                previewUrl?.let { url ->
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(url)),
+                                        )
+                                    }.onFailure {
+                                        android.widget.Toast.makeText(
+                                            context, "No browser available", android.widget.Toast.LENGTH_SHORT,
+                                        ).show()
+                                    }
+                                }
+                            },
+                        ) { Text("Open", fontWeight = FontWeight.SemiBold) }
+                    }
+                }
+            }
+
             SecondaryTabRow(
                 selectedTabIndex = tab,
                 containerColor = MaterialTheme.colorScheme.background,

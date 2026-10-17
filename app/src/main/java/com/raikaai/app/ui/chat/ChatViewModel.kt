@@ -283,6 +283,16 @@ class ChatViewModel(
     val containerInstallState: StateFlow<com.raikaai.app.core.container.ContainerManager.InstallState>
         get() = containerManager.installState
     val containerServedPort: StateFlow<Int?> get() = containerManager.servedPort
+    /** Loopback URL of the running dev server/daemon, null when nothing listens. */
+    val containerPreviewUrl: StateFlow<String?> get() = containerManager.previewUrl
+
+    /** Parses a preview URL's port so the UI can probe/refresh on demand. */
+    fun refreshContainerPreview() {
+        viewModelScope.launch(Dispatchers.IO) {
+            val port = containerManager.probeListeningPort()
+            containerManager.markPreviewPort(port)
+        }
+    }
 
     // Chrome-style multiple Linux Terminal sessions (persistent in ViewModel)
     class TerminalSession(
@@ -2078,7 +2088,11 @@ class ChatViewModel(
             "apk", "pip", "cargo", "gradle", "download", "wget", "curl", "tar", "unzip"
         ).any { command.contains(it, ignoreCase = true) }
         val timeout = if (isHeavy) 120L else 30L
-        val res = if (wantsBackground || com.raikaai.app.core.container.containsBackgroundOp(command)) {
+        // Servers must be detached regardless of whether the model remembered
+        // the flag: a foreground run blocks until `timeout`, then force-kills
+        // the process tree, so the agent ends up reporting a dead server.
+        val serverLike = com.raikaai.app.core.container.looksLikeServerCommand(command)
+        val res = if (wantsBackground || com.raikaai.app.core.container.containsBackgroundOp(command) || serverLike) {
             containerManager.startDaemon(command)
         } else {
             containerManager.run(command, timeoutSec = timeout)
@@ -4218,15 +4232,16 @@ class ChatViewModel(
             "<tool_call>{\"name\": \"read_file\", \"arguments\": {\"path\": \"<file>\", \"offset\": 1, \"limit\": 400}}</tool_call>\n\n" +
             "4. Run shell commands, tests, or scripts:\n" +
             "<tool_call>{\"name\": \"execute_in_container\", \"arguments\": {\"command\": \"<command>\"}}</tool_call>\n" +
-            "Add \"run_in_background\": true for long-running servers. Prefer single quotes for paths with spaces.\n\n" +
+            "Long-running servers (npm run dev, vite, python -m http.server, php -S, node server.js) are detected and detached automatically, so you do NOT need \"run_in_background\" — but setting it is harmless. Prefer single quotes for paths with spaces.\n\n" +
             "5. Install missing packages:\n" +
             "<tool_call>{\"name\": \"ensure_package\", \"arguments\": {\"command\": \"apk add --no-cache <pkg>\"}}</tool_call>\n\n" +
             "CRITICAL RULES:\n" +
             "- Files live strictly in /workspace. Chat attachments are mirrored to /workspace/chat_uploads/.\n" +
             "- Do NOT repeat exploration commands or re-read files you already inspected in earlier turns. Move directly to editing or writing files.\n" +
             "- When writing code, write the complete file or make targeted edits with edit_file. Do not loop reading the same file.\n" +
-            "- NEVER claim a server or web app is running, built, or active (e.g. \"Status: Active HTTP 200 OK\") unless you actually executed `execute_in_container` with `run_in_background: true` to start it and verified it. If you only created/edited files, state that files are ready and instruct how to start it or start it yourself.\n" +
-            "- To run web servers in background: use execute_in_container with \"run_in_background\": true (e.g. `npm run dev -- --host 0.0.0.0`).\n" +
+            "- NEVER claim a server or web app is running, built, or active (e.g. \"Status: Active HTTP 200 OK\") unless the tool result shows a listening port. Your server result includes the real startup output and the detected URL. If the result says the command EXITED, it is NOT serving — fix the error and start it again; do not tell the user it works.\n" +
+            "- ALWAYS report the exact URL from \"Listening on http://127.0.0.1:<port>\". Never guess a port: Vite uses 5173 (5174 if busy), not 3000.\n" +
+            "- To make a server reachable from another device use `--host 0.0.0.0` (e.g. `npm run dev -- --host 0.0.0.0`).\n" +
             "- Manage servers with list_daemons and stop_daemon {\"id\"}.\n" +
             "- Act directly: emit tool calls instead of asking what to run. Do not narrate reasoning steps."
     }

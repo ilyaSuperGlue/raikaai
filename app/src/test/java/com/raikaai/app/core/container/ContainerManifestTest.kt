@@ -94,6 +94,41 @@ class ContainerManifestTest {
     }
 
     @Test
+    fun serverCommandDetection() {
+        // Real servers (any of these would be killed by a foreground run).
+        assertTrue(looksLikeServerCommand("npm run dev"))
+        assertTrue(looksLikeServerCommand("npm run dev -- --host 0.0.0.0"))
+        assertTrue(looksLikeServerCommand("cd /workspace/app && npm start"))
+        assertTrue(looksLikeServerCommand("vite --host"))
+        assertTrue(looksLikeServerCommand("npx vite"))
+        assertTrue(looksLikeServerCommand("python3 -m http.server 8000"))
+        assertTrue(looksLikeServerCommand("php -S 127.0.0.1:8000"))
+        assertTrue(looksLikeServerCommand("node server.js"))
+        assertTrue(looksLikeServerCommand("busybox httpd -f -p 127.0.0.1:8081 -h /workspace"))
+        assertTrue(looksLikeServerCommand("npm install && npm run dev"))
+
+        // Finite commands must NOT be detached (output would be lost).
+        assertEquals(false, looksLikeServerCommand("npm install"))
+        assertEquals(false, looksLikeServerCommand("npm run build"))
+        assertEquals(false, looksLikeServerCommand("vite build"))
+        assertEquals(false, looksLikeServerCommand("apk add httpd"))
+        assertEquals(false, looksLikeServerCommand("apk add --no-cache nodejs npm"))
+        assertEquals(false, looksLikeServerCommand("ls -la /workspace"))
+        assertEquals(false, looksLikeServerCommand("git clone https://example.com/x.git"))
+        assertEquals(false, looksLikeServerCommand("npm test"))
+    }
+
+    @Test
+    fun announcedPortParsing() {
+        assertEquals(5173, parseAnnouncedPort("  ➜  Local:   http://localhost:5173/"))
+        assertEquals(5173, parseAnnouncedPort("  ➜  Network: http://192.168.1.5:5173/"))
+        assertEquals(3000, parseAnnouncedPort("ready - started server on 0.0.0.0:3000"))
+        assertEquals(8081, parseAnnouncedPort("Listening on http://127.0.0.1:8081"))
+        assertEquals(null, parseAnnouncedPort("no port here"))
+        assertEquals(null, parseAnnouncedPort(""))
+    }
+
+    @Test
     fun dedupKeyIgnoresHeadTailWindows() {
         val a = dedupKeyOf("unzip -p 'f.zip' doc.md | head -n 45")
         val b = dedupKeyOf("unzip -p 'f.zip' doc.md | head -n 100")

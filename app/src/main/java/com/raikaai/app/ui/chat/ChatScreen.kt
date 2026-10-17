@@ -470,6 +470,60 @@ fun ChatScreen(
                         .navigationBarsPadding()
                         .padding(horizontal = 10.dp, vertical = 4.dp),
             ) {
+                // Live dev-server banner: the agent may start listeners in the
+                // sandbox, so surface the verified URL with a one-tap open
+                // instead of making the user guess the port.
+                val previewUrl by viewModel.containerPreviewUrl.collectAsState()
+                if (previewUrl != null) {
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 3.dp),
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Icon(
+                                Icons.Default.Link,
+                                contentDescription = null,
+                                modifier = Modifier.size(14.dp),
+                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            )
+                            Text(
+                                text = previewUrl.orEmpty(),
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f),
+                            )
+                            TextButton(onClick = { viewModel.refreshContainerPreview() }) {
+                                Icon(
+                                    Icons.Outlined.Refresh,
+                                    contentDescription = "Re-check port",
+                                    modifier = Modifier.size(15.dp),
+                                )
+                            }
+                            TextButton(
+                                onClick = {
+                                    val url = previewUrl ?: return@TextButton
+                                    runCatching {
+                                        context.startActivity(
+                                            Intent(Intent.ACTION_VIEW, Uri.parse(url))
+                                                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                                        )
+                                    }.onFailure {
+                                        Toast.makeText(context, "No browser available", Toast.LENGTH_SHORT).show()
+                                    }
+                                },
+                            ) {
+                                Text("Open", fontWeight = FontWeight.SemiBold)
+                            }
+                        }
+                    }
+                }
                 // Token Context indicator (Subtle status with dynamic progress line)
                 if (hasMessages || input.text.isNotBlank()) {
                     val totalContextTokens = viewModel.liveContextTokens.intValue

@@ -15,6 +15,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +47,15 @@ class ContainerManager private constructor(
     companion object {
         private const val TAG = "Container"
         private const val OUTPUT_CAP = 64 * 1024
+
+        /** How long [startDaemon] waits for a startup banner / early crash. */
+        private const val STARTUP_LOG_WINDOW_MS = 6_000L
+
+        /** Startup output kept for the agent before the rest is drained away. */
+        private const val MAX_STARTUP_LOG_CHARS = 4_000
+
+        /** Loopback connect timeout per candidate port when probing. */
+        private const val PROBE_TIMEOUT_MS = 300
         /**
          * Rootfs layout schema. Bump when the unpack format changes
          * (symlinks, permissions, …) so stale on-device rootfs is detected
@@ -147,12 +157,19 @@ fi
     /** Currently served localhost port, null = not serving. */
     val servedPort: StateFlow<Int?> = _servedPort.asStateFlow()
 
+    private val _previewUrl = MutableStateFlow<String?>(null)
+    /**
+     * Loopback URL of the most recently started dev server (daemon), discovered
+     * from its own banner or by probing. Null when nothing is listening.
+     */
+    val previewUrl: StateFlow<String?> = _previewUrl.asStateFlow()
+
     private var serveProcess: Process? = null
     private var serveJob: Job? = null
     private var installJob: Job? = null
     private val activeProcs = java.util.concurrent.ConcurrentHashMap.newKeySet<Process>()
     private var resolvLastRefresh = 0L
-    private val daemons = mutableMapOf<Int, Process>()
+    private val daemons = java.util.concurrent.ConcurrentHashMap<Int, Process>()
     private var daemonSeq = 0
     private val MAX_DAEMONS = 5
 
@@ -560,17 +577,27 @@ fi
 
     /**
      * Starts [command] as a detached daemon (for `&` background servers):
-     * returns at once while the process tree keeps running. Proot lives as
-     * long as any tracee, so fire-and-forget through [run] would hang until
-     * timeout and then kill the server — this is the correct primitive.
+     * returns once the process is up (or [STARTUP_LOG_WINDOW_MS] elapsed),
+     * while the process tree keeps running. Proot lives as long as any tracee,
+     * so fire-and-forget through [run] would hang until timeout and then kill
+     * the server — this is the correct primitive.
+     *
+     * The first [MAX_STARTUP_LOG_CHARS] of stdout/stderr are captured and
+     * returned so the agent can see the real banner (Vite prints its actual
+     * port there). The listening port is then taken from that banner, or
+     * probed, and surfaced as [previewUrl].
      */
     suspend fun startDaemon(command: String): RunResult {
         return runMutex.withLock {
             withContext(Dispatchers.IO) {
+                // Reap daemons whose process already exited so a crashed server
+                // never permanently consumes a slot.
+                daemons.entries.removeAll { !it.value.isAlive }
                 if (daemons.size >= MAX_DAEMONS) {
                     return@withContext RunResult(
                         "",
-                        "Too many background servers (${daemons.size}). Stop one first: stop_daemon tool or /killdaemon <id>.",
+                        "Too many background servers (${daemons.size}). " +
+                            "Stop one first: stop_daemon tool or /killdaemon <id>.",
                         -1,
                     )
                 }
@@ -584,33 +611,118 @@ fi
                     val proc = pb.start()
                     val id = ++daemonSeq
                     daemons[id] = proc
-                    // Drain so a chatty daemon never blocks on a full pipe; reap on exit.
-                    scope.launch {
-                        runCatching {
-                            val buf = ByteArray(8192)
-                            while (proc.inputStream.read(buf) >= 0) {}
-                        }
-                        runCatching {
-                            val buf = ByteArray(8192)
-                            while (proc.errorStream.read(buf) >= 0) {}
+
+                    val startupLog = StringBuilder()
+                    val logLock = Any()
+                    val appendLog: (String) -> Unit = { chunk ->
+                        synchronized(logLock) {
+                            if (startupLog.length < MAX_STARTUP_LOG_CHARS) {
+                                startupLog.append(chunk)
+                            }
                         }
                     }
+                    startLogDrains(proc, appendLog)
+
+                    // Reap on exit.
                     scope.launch {
                         try { proc.waitFor() } catch (_: Throwable) {}
                         daemons.remove(id)
+                        if (daemons.keys.none { it == id }) {
+                            // Last owner of the discovered port is gone.
+                            _previewUrl.value = null
+                        }
                     }
-                    RunResult(
-                        "Started in background as daemon #$id. It keeps running after this call returns. " +
-                            "Verify it with a follow-up command (e.g. wget -qO- http://127.0.0.1:PORT). " +
-                            "Stop it with the stop_daemon tool {\"id\": \"$id\"}.",
-                        "",
-                        0,
-                    )
+
+                    // Wait briefly for a banner that names the port, or for the
+                    // process to die (fast crash → we return its error output).
+                    val deadline = System.currentTimeMillis() + STARTUP_LOG_WINDOW_MS
+                    while (System.currentTimeMillis() < deadline) {
+                        val seen = synchronized(logLock) { startupLog.toString() }
+                        if (parseAnnouncedPort(seen) != null) break
+                        if (!proc.isAlive) break
+                        delay(150)
+                    }
+
+                    val log = synchronized(logLock) { startupLog.toString() }.trim()
+                    val announced = parseAnnouncedPort(log)
+                    val port = announced ?: probeListeningPort()
+                    if (port != null) {
+                        _previewUrl.value = "http://127.0.0.1:$port"
+                    }
+                    val portNote = when {
+                        !proc.isAlive ->
+                            "\nThe command EXITED immediately (exit=${runCatching { proc.exitValue() }.getOrDefault(-1)}). " +
+                                "It is NOT serving. Read the output above and fix the error, then start it again."
+                        port != null ->
+                            "\nListening on http://127.0.0.1:$port — open that URL to verify before telling the user it works."
+                        else ->
+                            "\nNo listening port detected yet. It may still be starting; re-check with " +
+                                "`wget -qO- http://127.0.0.1:<port>` or list_daemons."
+                    }
+                    val out = buildString {
+                        append("Started in background as daemon #$id.")
+                        append("\nIt keeps running after this call returns, independent of this tool call.")
+                        if (log.isNotBlank()) append("\n\nStartup output:\n").append(log)
+                        append(portNote)
+                        append("\nStop it with the stop_daemon tool {\"id\": \"$id\"}.")
+                    }
+                    RunResult(out, "", 0)
                 } catch (t: Throwable) {
                     RunResult("", "daemon start failed: ${t.message ?: t.javaClass.simpleName}", -1)
                 }
             }
         }
+    }
+
+    /**
+     * Drains stdout/stderr so a chatty daemon never blocks on a full pipe,
+     * feeding each chunk to [onChunk] for the startup banner capture.
+     */
+    private fun startLogDrains(proc: Process, onChunk: (String) -> Unit) {
+        scope.launch {
+            runCatching {
+                val reader = proc.inputStream.bufferedReader()
+                val buf = CharArray(2048)
+                while (true) {
+                    val n = reader.read(buf)
+                    if (n < 0) break
+                    onChunk(String(buf, 0, n))
+                }
+            }
+        }
+        scope.launch {
+            runCatching {
+                val reader = proc.errorStream.bufferedReader()
+                val buf = CharArray(2048)
+                while (true) {
+                    val n = reader.read(buf)
+                    if (n < 0) break
+                    onChunk(String(buf, 0, n))
+                }
+            }
+        }
+    }
+
+    /**
+     * Best-effort loopback connect scan. Runs in the app process, which shares
+     * the container's network namespace, so a hit means a browser can reach it.
+     */
+    suspend fun probeListeningPort(ports: List<Int> = COMMON_DEV_PORTS): Int? {
+        return withContext(Dispatchers.IO) {
+            ports.firstOrNull { p ->
+                runCatching {
+                    java.net.Socket().use { s ->
+                        s.connect(java.net.InetSocketAddress("127.0.0.1", p), PROBE_TIMEOUT_MS)
+                    }
+                    true
+                }.getOrDefault(false)
+            }
+        }
+    }
+
+    /** Publishes (or clears) the preview URL after an on-demand probe. */
+    fun markPreviewPort(port: Int?) {
+        _previewUrl.value = port?.let { "http://127.0.0.1:$it" }
     }
 
     /** Stops one daemon by id. Returns false when unknown. */
@@ -621,6 +733,7 @@ fi
                 try { proc.destroy() } catch (_: Throwable) {}
                 try { proc.waitFor(2, TimeUnit.SECONDS) } catch (_: Throwable) {}
                 try { proc.destroyForcibly() } catch (_: Throwable) {}
+                if (daemons.isEmpty()) _previewUrl.value = null
                 true
             }
         }
@@ -641,6 +754,7 @@ fi
             withContext(Dispatchers.IO) { daemons.keys.toList() }
         }
         ids.forEach { stopDaemon(it) }
+        _previewUrl.value = null
     }
 
     /**
@@ -691,9 +805,11 @@ fi
                     }
                     serveProcess = proc
                     _servedPort.value = port
+                    _previewUrl.value = "http://127.0.0.1:$port"
                     serveJob = scope.launch {
                         try { proc.waitFor() } catch (_: Throwable) {}
                         _servedPort.value = null
+                        _previewUrl.value = null
                     }
                     "http://127.0.0.1:$port"
                 } catch (t: Throwable) {

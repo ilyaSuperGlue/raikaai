@@ -177,6 +177,94 @@ internal fun containsBackgroundOp(command: String): Boolean {
 }
 
 /**
+ * Segment separators used to evaluate a shell command piecewise.
+ * `&&`/`||` are checked before single `|`/`;` so they are not double-split.
+ */
+private val COMMAND_SEGMENT_SPLIT = Regex("""(?:&&|\|\||;|\|)""")
+
+/**
+ * A single shell segment that only installs/updates packages. Such a segment
+ * must never be mistaken for a server (`apk add httpd` is not `httpd -f`).
+ * Anchored at the segment start so `npm install && npm run dev` skips only
+ * the first half.
+ */
+private val INSTALL_ONLY_SEGMENT = Regex(
+    """^\s*(?:apk|apt|apt-get|pacman|dnf|yum|zypper|brew|npm|yarn|pnpm|bun|pip|pip3|go|cargo|gem|composer)\s+""" +
+        """(?:add|install|update|upgrade|del|remove|ci|i|get|fetch|sync)\b""",
+    RegexOption.IGNORE_CASE,
+)
+
+/**
+ * Invocations that start a long-running listener. Deliberately narrow: a
+ * false positive turns a finite command into a daemon whose output the agent
+ * never sees, so build/test/install verbs are excluded on purpose.
+ */
+private val SERVER_HINT_PATTERNS = listOf(
+    // Package-manager dev/serve/start/preview scripts (never build/test/lint).
+    Regex("""\b(?:npm|yarn|pnpm|bun)\s+(?:run\s+)?(?:dev|develop|serve|start|preview)\b""", RegexOption.IGNORE_CASE),
+    // JS framework dev servers.
+    Regex("""\bnext\s+(?:dev|start)\b""", RegexOption.IGNORE_CASE),
+    Regex(
+        """\b(?:nuxt|astro|remix|gatsby|parcel|svelte-kit|vue-cli-service|ng)\s+(?:dev|develop|serve|start|preview)\b""",
+        RegexOption.IGNORE_CASE,
+    ),
+    // Vite: `vite`, `npx vite`, `vite --host` — but not `vite build`.
+    Regex("""\b(?:npx\s+|bunx\s+)?vite\b(?!\s+build)""", RegexOption.IGNORE_CASE),
+    // Python HTTP / WSGI / ASGI servers.
+    Regex("""\bpython3?\s+-m\s+(?:http\.server|simplehttpserver|flask|uvicorn)\b""", RegexOption.IGNORE_CASE),
+    Regex("""\b(?:uvicorn|gunicorn|hypercorn)\b""", RegexOption.IGNORE_CASE),
+    Regex("""\bmanage\.py\s+runserver\b""", RegexOption.IGNORE_CASE),
+    // PHP built-in server.
+    Regex("""\bphp\s+-S\b""", RegexOption.IGNORE_CASE),
+    // Ruby / static-site servers.
+    Regex("""\b(?:rails|jekyll|hugo)\s+(?:server|serve)\b""", RegexOption.IGNORE_CASE),
+    // Node server entrypoints (server/app/index/main/api/dev.js|ts).
+    Regex("""\bnode\b[^|;&]*?\b(?:server|serve|app|index|main|api|dev)\.(?:js|mjs|cjs|ts)\b""", RegexOption.IGNORE_CASE),
+    // Standalone static-server CLIs.
+    Regex("""\b(?:npx|bunx)\s+(?:http-server|serve)\b""", RegexOption.IGNORE_CASE),
+    Regex("""\bhttp-server\b""", RegexOption.IGNORE_CASE),
+    // busybox httpd actually being started (has -f/-p/-h), not `apk add httpd`.
+    Regex("""\bhttpd\b[^|;&]*\s-[fph]\b""", RegexOption.IGNORE_CASE),
+)
+
+/**
+ * True when [command] starts a long-running listener, judged per shell segment
+ * so `npm install && npm run dev` is recognised while `apk add httpd` is not.
+ *
+ * Such commands must run detached ([ContainerManager.startDaemon]): a
+ * foreground run blocks until its timeout and is then killed, which leaves the
+ * agent reporting a server that is already dead.
+ */
+internal fun looksLikeServerCommand(command: String): Boolean {
+    if (command.isBlank()) return false
+    return command.split(COMMAND_SEGMENT_SPLIT).any { raw ->
+        val seg = raw.trim()
+        seg.isNotEmpty() &&
+            !INSTALL_ONLY_SEGMENT.containsMatchIn(seg) &&
+            SERVER_HINT_PATTERNS.any { it.containsMatchIn(seg) }
+    }
+}
+
+/**
+ * Extracts the first `host:port` the process announced on stdout
+ * (Vite/Next/webpack banners). Returns null when nothing was printed.
+ */
+internal fun parseAnnouncedPort(output: String): Int? {
+    val m = ANNOUNCED_PORT.find(output) ?: return null
+    val port = m.groupValues[1].toIntOrNull() ?: return null
+    return port.takeIf { isValidServePort(it) || it in COMMON_DEV_PORTS }
+}
+
+private val ANNOUNCED_PORT =
+    Regex(
+        """(?:https?://)?(?:localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1?\]|\[::\]|\d{1,3}(?:\.\d{1,3}){3}):(\d{2,5})\b""",
+        RegexOption.IGNORE_CASE,
+    )
+
+/** Ports worth probing when a dev server prints nothing parseable. */
+internal val COMMON_DEV_PORTS = listOf(5173, 5174, 3000, 3001, 4173, 4200, 4321, 7860, 8000, 8081, 8888, 9000)
+
+/**
  * Joins newlines that split a path inside quotes (`"/workspace/\nkzkt.zip"`
  * → `"/workspace/kzkt.zip"`). Models hard-wrap long tool-call lines at
  * exactly such spots. Newlines OUTSIDE quotes are real command separators
