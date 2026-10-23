@@ -229,9 +229,16 @@ fun ChatScreen(
     onOpenDrawer: () -> Unit = {},
     onNavigateToCharacters: () -> Unit = {},
     onNavigateToModels: () -> Unit = {},
+    isRolePlay: Boolean = false
 ) {
+    LaunchedEffect(isRolePlay) {
+        viewModel.setRoleplayMode(isRolePlay)
+    }
     val settings by viewModel.settings.collectAsState()
     val activePersona by viewModel.activePersona.collectAsState()
+    LaunchedEffect(isRolePlay, activePersona.id) {
+        if (!isRolePlay) viewModel.clearRoleplayPersonaForNormalChat()
+    }
     val loadedModelPath by viewModel.loadedModelPath.collectAsState()
     val isGenerating by viewModel.isGenerating
     // B39: hoisted derived state — topBar/bottomBar read this, and reading
@@ -458,6 +465,7 @@ fun ChatScreen(
                 onOpenDrawer = onOpenDrawer,
                 onNavigateToModels = onNavigateToModels,
                 onNewChat = { viewModel.newChat() },
+                isRolePlay = isRolePlay
             )
         },
         bottomBar = {

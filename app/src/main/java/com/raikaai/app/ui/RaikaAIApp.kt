@@ -24,6 +24,7 @@ import androidx.compose.material.icons.outlined.Build
 import androidx.compose.material.icons.outlined.ChatBubbleOutline
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.Dns
+import androidx.compose.material.icons.outlined.EmojiEmotions
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Info
 import androidx.compose.material.icons.outlined.Memory
@@ -67,6 +68,7 @@ import com.raikaai.app.ui.chat.ChatViewModel
 import com.raikaai.app.ui.history.HistoryScreen
 import com.raikaai.app.ui.logs.LogsScreen
 import com.raikaai.app.ui.models.ModelsScreen
+import com.raikaai.app.ui.roleplay.RolePlayHomeScreen
 import com.raikaai.app.ui.sampler.SamplerScreen
 import com.raikaai.app.ui.settings.SettingsScreen
 import kotlinx.coroutines.launch
@@ -74,6 +76,7 @@ import kotlinx.coroutines.launch
 object NavRoute {
     const val CHAT = "chat"
     const val CHARACTERS = "characters"
+    const val ROLEPLAY = "roleplay"
     const val SKILLS = "skills"
     const val SAMPLER = "sampler"
     const val MODELS = "models"
@@ -107,7 +110,9 @@ fun RaikaAIApp(
     val navBackStackEntry by navController.currentBackStackEntryAsState()
     val currentRoute = navBackStackEntry?.destination?.route ?: NavRoute.CHAT
 
-    val conversations = viewModel.conversations.value
+    // The global drawer belongs to normal chat. Roleplay history is shown
+    // only inside the roleplay History tab.
+    val conversations = viewModel.normalConversations.value
 
     fun navigateTo(route: String) {
         scope.launch { drawerState.close() }
@@ -159,7 +164,7 @@ fun RaikaAIApp(
                     // New chat
                     OutlinedButton(
                         onClick = {
-                            viewModel.newChat()
+                            viewModel.newGeneralChat()
                             navigateTo(NavRoute.CHAT)
                         },
                         modifier = Modifier.fillMaxWidth().height(48.dp),
@@ -176,6 +181,7 @@ fun RaikaAIApp(
                     val mainItems =
                         listOf(
                             DrawerMenuItem(NavRoute.CHARACTERS, "Characters", Icons.Outlined.Psychology),
+                            DrawerMenuItem(NavRoute.ROLEPLAY, "Roleplay", Icons.Outlined.EmojiEmotions),
                             DrawerMenuItem(NavRoute.MODELS, "Models", Icons.Outlined.Memory),
                             DrawerMenuItem(NavRoute.SAMPLER, "Generation Parameters", Icons.Outlined.Tune),
                             DrawerMenuItem(NavRoute.HISTORY, "History", Icons.Outlined.History),
@@ -201,6 +207,7 @@ fun RaikaAIApp(
                                 label = conv.title.ifBlank { "New conversation" },
                                 selected = conv.id == viewModel.currentConversationId,
                                 onClick = {
+                                    viewModel.setRoleplayMode(false)
                                     viewModel.loadConversation(conv.id)
                                     navigateTo(NavRoute.CHAT)
                                 },
@@ -280,6 +287,14 @@ fun RaikaAIApp(
                         },
                     )
                 }
+
+                composable(NavRoute.ROLEPLAY) {
+                    RolePlayHomeScreen(
+                        viewModel = viewModel,
+                        onOpenDrawer = { scope.launch { drawerState.open() } }
+                    )
+                }
+
                 composable(NavRoute.SKILLS) {
                     com.raikaai.app.ui.skills.SkillsScreen(
                         viewModel = viewModel,

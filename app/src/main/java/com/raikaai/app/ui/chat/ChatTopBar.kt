@@ -1,5 +1,6 @@
 package com.raikaai.app.ui.chat
 
+import androidx.activity.compose.LocalOnBackPressedDispatcherOwner
 import com.raikaai.app.R
 
 import androidx.compose.foundation.clickable
@@ -11,6 +12,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -39,11 +41,17 @@ fun ChatTopBar(
     onOpenDrawer: () -> Unit,
     onNavigateToModels: () -> Unit,
     onNewChat: () -> Unit,
+    isRolePlay: Boolean = false
 ) {
+    val backDispatcher =
+        LocalOnBackPressedDispatcherOwner.current
+            ?.onBackPressedDispatcher
     Surface(
         color = MaterialTheme.colorScheme.surface,
         tonalElevation = 2.dp,
-        modifier = Modifier.fillMaxWidth().statusBarsPadding(),
+        modifier = Modifier
+            .fillMaxWidth()
+            .statusBarsPadding(),
     ) {
         TopAppBar(
             title = {
@@ -74,11 +82,21 @@ fun ChatTopBar(
             },
             navigationIcon = {
                 IconButton(
-                    onClick = onOpenDrawer,
+                    onClick = {
+                        if (isRolePlay) {
+                            backDispatcher?.onBackPressed()
+                        } else {
+                            onOpenDrawer()
+                        }
+                    },
                     modifier = Modifier.padding(start = 4.dp),
                 ) {
                     Icon(
-                        Icons.Default.Menu,
+                        imageVector = if (isRolePlay) {
+                            Icons.AutoMirrored.Filled.ArrowBack
+                        } else {
+                            Icons.Default.Menu
+                        },
                         contentDescription = stringResource(R.string.chat_menu),
                         tint = MaterialTheme.colorScheme.onSurface,
                     )
