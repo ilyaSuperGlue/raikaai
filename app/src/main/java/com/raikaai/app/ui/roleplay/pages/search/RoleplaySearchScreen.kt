@@ -41,8 +41,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import coil3.request.CachePolicy
 import coil3.request.ImageRequest
-import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import com.google.gson.JsonParser
 import com.raikaai.app.data.RolePlayConstants
 import com.raikaai.app.ui.roleplay.pages.home.RoleplayCharacter
 import com.raikaai.app.ui.roleplay.pages.home.RoleplayHomeViewModel
@@ -148,8 +147,22 @@ private suspend fun searchCharacters(query: String): List<RoleplayCharacter> = w
             Request.Builder().url(url).header("apikey", RolePlayConstants.PUBLIC_KEY).build(),
         ).execute().use { response ->
             if (!response.isSuccessful) error("HTTP ${response.code}")
-            val type = object : TypeToken<List<RoleplayCharacter>>() {}.type
-            Gson().fromJson<List<RoleplayCharacter>>(response.body?.string().orEmpty(), type)
+            JsonParser.parseString(response.body?.string().orEmpty()).asJsonArray.mapNotNull { value ->
+                val o = value.asJsonObject
+                val id = o.get("id")?.asInt ?: return@mapNotNull null
+                val name = o.get("name")?.asString?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                RoleplayCharacter(
+                    id = id,
+                    name = name,
+                    slug = o.get("slug")?.asString.orEmpty(),
+                    description = o.get("description")?.takeUnless { it.isJsonNull }?.asString,
+                    greeting = o.get("greeting")?.takeUnless { it.isJsonNull }?.asString,
+                    systemPrompt = o.get("system_prompt")?.takeUnless { it.isJsonNull }?.asString,
+                    avatarUrl = o.get("avatar_url")?.takeUnless { it.isJsonNull }?.asString,
+                    categoryId = o.get("category_id")?.asInt ?: 9999,
+                    view = o.get("view")?.asInt ?: 0,
+                )
+            }
         }
     }.getOrDefault(emptyList())
 }

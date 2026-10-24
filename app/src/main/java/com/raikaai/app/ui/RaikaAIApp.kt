@@ -95,6 +95,8 @@ data class DrawerMenuItem(
     val icon: ImageVector,
 )
 
+private data class SafeDrawerConversation(val id: String, val title: String)
+
 /**
  * Root Application Container with Swipeable Modal Navigation Drawer (Sidebar).
  * Replicating ChatterUI's modular menu organization, mode toggle, and design structure.
@@ -112,7 +114,15 @@ fun RaikaAIApp(
 
     // The global drawer belongs to normal chat. Roleplay history is shown
     // only inside the roleplay History tab.
-    val conversations = viewModel.normalConversations.value
+    // Persisted Gson data can contain JVM nulls in Kotlin non-null fields.
+    // Copy only validated values into a safe UI model before Compose renders it.
+    val conversations = viewModel.normalConversations.value.mapNotNull { conversation ->
+        runCatching {
+            val id = conversation.id.trim()
+            if (id.isBlank()) return@runCatching null
+            SafeDrawerConversation(id, conversation.title.trim().ifBlank { "New conversation" })
+        }.getOrNull()
+    }.distinctBy { it.id }
 
     fun navigateTo(route: String) {
         scope.launch { drawerState.close() }
@@ -204,7 +214,7 @@ fun RaikaAIApp(
                         items(conversations.take(10), key = { it.id }) { conv ->
                             DrawerRow(
                                 icon = Icons.Outlined.ChatBubbleOutline,
-                                label = conv.title.ifBlank { "New conversation" },
+                                label = conv.title,
                                 selected = conv.id == viewModel.currentConversationId,
                                 onClick = {
                                     viewModel.setRoleplayMode(false)

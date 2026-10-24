@@ -37,7 +37,7 @@ import com.raikaai.app.ui.chat.ChatViewModel
 import com.raikaai.app.data.RolePlayConstants
 import com.raikaai.app.ui.roleplay.pages.home.RoleplayCharacter
 import com.google.gson.Gson
-import com.google.gson.reflect.TypeToken
+import com.google.gson.JsonParser
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -209,8 +209,22 @@ private suspend fun publishCharacter(
                 .build(),
         ).execute().use { response ->
             if (!response.isSuccessful) error("HTTP ${response.code}")
-            val type = object : TypeToken<List<RoleplayCharacter>>() {}.type
-            Gson().fromJson<List<RoleplayCharacter>>(response.body?.string().orEmpty(), type).firstOrNull()
+            JsonParser.parseString(response.body?.string().orEmpty()).asJsonArray.firstOrNull()?.let { value ->
+                val o = value.asJsonObject
+                val id = o.get("id")?.asInt ?: return@let null
+                val createdName = o.get("name")?.asString?.takeIf { it.isNotBlank() } ?: return@let null
+                RoleplayCharacter(
+                    id = id,
+                    name = createdName,
+                    slug = o.get("slug")?.asString.orEmpty(),
+                    description = o.get("description")?.takeUnless { it.isJsonNull }?.asString,
+                    greeting = o.get("greeting")?.takeUnless { it.isJsonNull }?.asString,
+                    systemPrompt = o.get("system_prompt")?.takeUnless { it.isJsonNull }?.asString,
+                    avatarUrl = o.get("avatar_url")?.takeUnless { it.isJsonNull }?.asString,
+                    categoryId = o.get("category_id")?.asInt ?: 9999,
+                    view = o.get("view")?.asInt ?: 0,
+                )
+            }
         }
     }.getOrNull()
 }

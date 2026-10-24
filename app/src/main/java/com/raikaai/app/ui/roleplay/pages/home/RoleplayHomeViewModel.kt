@@ -4,6 +4,7 @@ import android.app.Application
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.google.gson.Gson
+import com.google.gson.JsonParser
 import com.google.gson.annotations.SerializedName
 import com.google.gson.reflect.TypeToken
 import kotlinx.coroutines.Dispatchers
@@ -19,14 +20,20 @@ import com.raikaai.app.data.RolePlayConstants
 
 data class RoleplayCategory(val id: Int, val name: String, val slug: String)
 data class RoleplayCharacter(
+    @SerializedName("id")
     val id: Int,
+    @SerializedName("name")
     val name: String,
+    @SerializedName("slug")
     val slug: String,
+    @SerializedName("description")
     val description: String?,
+    @SerializedName("greeting")
     val greeting: String?,
     @SerializedName("system_prompt") val systemPrompt: String?,
     @SerializedName("avatar_url") val avatarUrl: String?,
     @SerializedName("category_id") val categoryId: Int,
+    @SerializedName("view")
     val view: Int = 0,
 )
 
@@ -55,7 +62,30 @@ class RoleplayHomeViewModel(application: Application) : AndroidViewModel(applica
     private val offsets = mutableMapOf<Int, Int>()
     private val state = MutableStateFlow(RoleplayHomeState())
     val uiState: StateFlow<RoleplayHomeState> = state
-    private val cachePreferences = application.getSharedPreferences("roleplay_home_cache", 0)
+    // v2 avoids restoring entries written by the old Gson model, which could
+    // contain JVM nulls in Kotlin non-null fields after a release update.
+    private val cachePreferences = application.getSharedPreferences("roleplay_home_cache_v2", 0)
+
+    // Gson can bypass Kotlin constructors and inject null into non-null fields.
+    // Normalize API rows before exposing them to Compose.
+    private fun parseCharacters(json: String): List<RoleplayCharacter> = runCatching {
+        JsonParser.parseString(json).asJsonArray.mapNotNull { value ->
+            val o = value.asJsonObject
+            val id = o.get("id")?.asInt ?: return@mapNotNull null
+            val name = o.get("name")?.asString?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+            RoleplayCharacter(
+                id = id,
+                name = name,
+                slug = o.get("slug")?.asString.orEmpty(),
+                description = o.get("description")?.takeUnless { it.isJsonNull }?.asString,
+                greeting = o.get("greeting")?.takeUnless { it.isJsonNull }?.asString,
+                systemPrompt = o.get("system_prompt")?.takeUnless { it.isJsonNull }?.asString,
+                avatarUrl = o.get("avatar_url")?.takeUnless { it.isJsonNull }?.asString,
+                categoryId = o.get("category_id")?.asInt ?: 9999,
+                view = o.get("view")?.asInt ?: 0,
+            )
+        }
+    }.getOrDefault(emptyList())
 
     init {
         restoreCache()
@@ -96,8 +126,7 @@ class RoleplayHomeViewModel(application: Application) : AndroidViewModel(applica
     private fun loadTrending() = viewModelScope.launch {
         runCatching {
             val json = get("characters?select=id,name,slug,description,greeting,system_prompt,avatar_url,category_id,view&order=view.desc&limit=4")
-            val type = object : TypeToken<List<RoleplayCharacter>>() {}.type
-            gson.fromJson<List<RoleplayCharacter>>(json, type)
+            parseCharacters(json)
         }.onSuccess {
             state.value = state.value.copy(trending = it)
             persistCache()
@@ -156,20 +185,24 @@ class RoleplayHomeViewModel(application: Application) : AndroidViewModel(applica
     }
 
     private fun loadCategories() = viewModelScope.launch {
-        runCatching {
+            runCatching {
             get("categories?select=id,name,slug&order=id.asc").let {
-                val type = object : TypeToken<List<RoleplayCategory>>() {}.type
-                gson.fromJson<List<RoleplayCategory>>(it, type)
+                JsonParser.parseString(it).asJsonArray.mapNotNull { value ->
+                    val o = value.asJsonObject
+                    val id = o.get("id")?.asInt ?: return@mapNotNull null
+                    val name = o.get("name")?.asString?.takeIf { it.isNotBlank() } ?: return@mapNotNull null
+                    RoleplayCategory(id, name, o.get("slug")?.asString.orEmpty())
+                }
             }
         }.onSuccess {
             state.value = state.value.copy(
-                categories = listOf(
+                categories = (listOf(
                     RoleplayCategory(
                         9999,
                         "Discover",
                         "discover"
                     )
-                ) + it
+                ) + it).distinctBy { category -> category.id }
             )
             persistCache()
         }
@@ -190,8 +223,7 @@ class RoleplayHomeViewModel(application: Application) : AndroidViewModel(applica
                 val filter = if (categoryId == 9999) "" else "&category_id=eq.$categoryId"
                 val json =
             get("characters?select=id,name,slug,description,greeting,system_prompt,avatar_url,category_id,view&order=name.asc&limit=50&offset=$offset$filter")
-                val type = object : TypeToken<List<RoleplayCharacter>>() {}.type
-                val result = gson.fromJson<List<RoleplayCharacter>>(json, type)
+                val result = parseCharacters(json)
                 if (categoryId == 9999) result.shuffled() else result
             }.onSuccess { result ->
                 val list =
